@@ -1,26 +1,6 @@
-import type { AppKitNetwork, Chain } from "@reown/appkit/networks";
+import type { AppKitNetwork } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-
-export const lcaiTestnet: Chain = {
-  id: 504,
-  name: "LCAI Testnet",
-  nativeCurrency: {
-    name: "LCAI Testnet",
-    symbol: "LCAI",
-    decimals: 18,
-  },
-  rpcUrls: {
-    default: {
-      http: ["https://light-testnet-rpc.lightchain.ai"],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: "LCAI Testnet Explorer",
-      url: "https://testnet.lightscan.app",
-    },
-  },
-};
+import { lcaiTestnet } from "@/config";
 
 // Get projectId from https://dashboard.reown.com
 export const projectId =

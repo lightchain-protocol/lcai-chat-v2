@@ -9,15 +9,10 @@ export const ConnectWalletButton = ({ className }: { className?: string }) => {
 
   return (
     <Button
-      className={cn(
-        "px-8 py-6 text-lg",
-        className,
-        address
-          ? "bg-gray-200 text-gray-800 hover:opacity-90"
-          : "bg-linear-to-r from-[#7064E9] to-[#DD00AC] text-white hover:opacity-90"
-      )}
+      className={cn("px-8 py-6 text-lg", className)}
       onClick={() => open()}
       type="button"
+      variant={address ? "outline" : "gradient"}
     >
       {address
         ? `${address.slice(0, 6)}...${address.slice(-4)}`

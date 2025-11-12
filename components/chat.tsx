@@ -7,16 +7,6 @@ import { useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Vote } from "@/lib/db/schema";
@@ -24,10 +14,12 @@ import { ChatSDKError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import useAppStore from "@/store";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
+import SubscriptionDialog from "./subscription-dialog";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -55,10 +47,11 @@ export function Chat({
 
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
+  const { isSubscriptionDialogOpen, setIsSubscriptionDialogOpen } =
+    useAppStore();
 
   const [input, setInput] = useState<string>("");
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
-  const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
 
@@ -187,7 +180,12 @@ export function Chat({
         </div>
       </div>
 
-      <AlertDialog
+      <SubscriptionDialog
+        onOpenChange={setIsSubscriptionDialogOpen}
+        open={isSubscriptionDialogOpen}
+      />
+
+      {/* <AlertDialog
         onOpenChange={setShowCreditCardAlert}
         open={showCreditCardAlert}
       >
@@ -210,7 +208,7 @@ export function Chat({
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog> */}
     </>
   );
 }

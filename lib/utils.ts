@@ -104,3 +104,13 @@ export function getTextFromMessage(message: ChatMessage): string {
     .map((part) => part.text)
     .join('');
 }
+
+  export function formatDate(timestamp: number | undefined) {
+    if (!timestamp) return "N/A";
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };

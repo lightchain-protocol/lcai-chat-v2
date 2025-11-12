@@ -6,7 +6,7 @@ import {
   type SIWEVerifyMessageArgs,
 } from "@reown/appkit-siwe";
 import { getCsrfToken, getSession, signIn, signOut } from "next-auth/react";
-import { lcaiTestnet } from "../wagmi";
+import { lcaiTestnet } from "@/config";
 
 export const siweConfig = createSIWEConfig({
   getMessageParams: async () => ({

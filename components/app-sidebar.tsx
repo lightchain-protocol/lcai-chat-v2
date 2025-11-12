@@ -23,6 +23,8 @@ import {
   SidebarMenu,
   useSidebar,
 } from "@/components/ui/sidebar";
+import useSubscription from "@/hooks/use-subscription";
+import { formatDate } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +42,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const { setOpenMobile } = useSidebar();
   const { mutate } = useSWRConfig();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const { hasActiveSubscription, activeSubscription } = useSubscription();
 
   const handleDeleteAll = () => {
     const deletePromise = fetch("/api/history", {
@@ -134,7 +137,36 @@ export function AppSidebar({ user }: { user: User | undefined }) {
         <SidebarContent>
           <SidebarHistory user={user} />
         </SidebarContent>
-        <SidebarFooter>{user && <SidebarUserNav user={user} />}</SidebarFooter>
+        <SidebarFooter>
+          {user &&
+            !hasActiveSubscription.isLoading &&
+            hasActiveSubscription.data && (
+              <button
+                className="group relative flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/50 px-2 py-2 transition-colors hover:bg-zinc-900/50"
+                type="button"
+              >
+                <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
+                <div className="flex items-center gap-3">
+                  <div className="h-4 w-0.5 rounded-full bg-primary" />
+                  <div className="flex items-center divide-x">
+                    <div className="pr-2 font-semibold text-sm text-white">
+                      Tier {activeSubscription.data?.tier || "Pro"}
+                    </div>
+                    <div className="pl-2 text-left">
+                      <div className="text-xs text-zinc-400">
+                        Subscription expires
+                      </div>
+                      <div className="font-medium text-sm text-zinc-300">
+                        {formatDate(activeSubscription.data?.expiryTimestamp)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* <ChevronRightIcon className="size-5 text-zinc-400 transition-transform group-hover:translate-x-0.5" /> */}
+              </button>
+            )}
+          {user && <SidebarUserNav user={user} />}
+        </SidebarFooter>
       </Sidebar>
 
       <AlertDialog
