@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
+import useSubscription from "@/hooks/use-subscription";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -82,6 +83,7 @@ function PureMultimodalInput({
   usage?: AppUsage;
 }) {
   const session = useSession();
+  const { hasActiveSubscription } = useSubscription();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
 
@@ -107,6 +109,11 @@ function PureMultimodalInput({
     "input",
     ""
   );
+
+  const canUseChat = useMemo(() => {
+    if (session.status !== "authenticated") return false;
+    return hasActiveSubscription.data ?? false;
+  }, [session.status, hasActiveSubscription.data]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -239,7 +246,7 @@ function PureMultimodalInput({
       {messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 &&
-        session.status === "authenticated" && (
+        canUseChat && (
           <SuggestedActions
             chatId={chatId}
             selectedVisibilityType={selectedVisibilityType}
@@ -306,7 +313,7 @@ function PureMultimodalInput({
             className="grow resize-none border-0! border-none! bg-transparent p-2 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
-            disabled={session.status !== "authenticated"}
+            disabled={!canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
