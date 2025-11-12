@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "next-auth";
@@ -70,9 +71,24 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   setOpenMobile(false);
                 }}
               >
-                <span className="cursor-pointer rounded-md px-2 font-semibold text-lg hover:bg-muted">
-                  Chatbot
-                </span>
+                <Image
+                  alt="LCAI Logo"
+                  className="hidden max-w-[150px] dark:block"
+                  height={150}
+                  priority={true}
+                  src={"/images/logo/logo.svg"}
+                  unoptimized={false}
+                  width={150}
+                />
+                <Image
+                  alt="LCAI Logo Dark"
+                  className="max-w-[150px] dark:hidden"
+                  height={150}
+                  priority={true}
+                  src={"/images/logo/logo-dark.svg"}
+                  unoptimized={false}
+                  width={150}
+                />
               </Link>
               <div className="flex flex-row gap-1">
                 {user && (
