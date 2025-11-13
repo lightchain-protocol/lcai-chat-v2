@@ -34,7 +34,7 @@ export const Greeting = () => {
         </span>
       </motion.h1>
 
-      {isConnected && status !== "authenticated" ? (
+      {!isConnected || status !== "authenticated" ? (
         <motion.div
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-col items-center gap-3"

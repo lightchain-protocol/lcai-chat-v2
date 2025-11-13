@@ -3,6 +3,7 @@ import {
   createUIMessageStream,
   JsonToSseTransformStream,
   smoothStream,
+  stepCountIs,
   streamText,
 } from "ai";
 import { unstable_cache as cache } from "next/cache";
@@ -15,6 +16,8 @@ import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import type { ChatModel } from "@/lib/ai/models";
 import { systemPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
+import { getWeather } from "@/lib/ai/tools/get-weather";
+import { webSearch } from "@/lib/ai/tools/web-search";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -146,9 +149,12 @@ export async function POST(request: Request) {
       execute: ({ writer: dataStream }) => {
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt(),
+          system: systemPrompt({}),
           messages: convertToModelMessages(uiMessages),
           experimental_transform: smoothStream({ chunking: "word" }),
+          stopWhen: stepCountIs(5),
+          // activeTools: ["getWeather", "webSearch"],
+          tools: { getWeather, webSearch },
           maxOutputTokens,
           stopSequences: ["<|im_end|>"],
           experimental_telemetry: {

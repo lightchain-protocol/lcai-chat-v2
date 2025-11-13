@@ -32,7 +32,10 @@
         "noMagicNumbers": "off",
 
         /* Needs more work to fix */
-        "noNestedTernary": "off"
+        "noNestedTernary": "off",
+
+        /* Allowing block statements */
+        "useBlockStatements": "off"
       },
       "nursery": {
         /* Too many false positives */

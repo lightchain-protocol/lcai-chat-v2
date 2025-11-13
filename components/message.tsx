@@ -2,20 +2,16 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { motion } from "framer-motion";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
+import { useIsClient } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
+import { Shimmer } from "./ai-elements/shimmer";
+import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
 import { Response } from "./elements/response";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "./elements/tool";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
@@ -43,12 +39,51 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
+  const isClient = useIsClient();
 
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
 
+  // Collect all search results from webSearch tool calls
+  const searchResults = useMemo(() => {
+    const results: CitationSource[] = [];
+
+    for (const part of message.parts) {
+      if (
+        part.type === "tool-webSearch" &&
+        part.state === "output-available" &&
+        part.output.success &&
+        part.output.results
+      ) {
+        results.push(...part.output.results);
+      }
+    }
+
+    return results;
+  }, [message.parts]);
+
+  // Replace citation patterns with inline citation components
+  const replaceCitations = (text: string): string => {
+    if (!searchResults.length) return text;
+
+    return text.replace(/(\[\d+\])+|\[\s*\d+(?:\s*,\s*\d+)*\s*\]/g, (match) => {
+      const nums = match.match(/\d+/g)?.map(Number) || [];
+      const sources = nums
+        .map((n) => searchResults.find((r) => r.position === n))
+        .filter((s) => s);
+
+      return sources.length
+        ? `<citation-response sources="${JSON.stringify(sources).replaceAll('"', "&quot;")}" />`
+        : match;
+    });
+  };
+
   useDataStream();
+
+  if (!isClient) {
+    return null;
+  }
 
   return (
     <motion.div
@@ -136,7 +171,25 @@ const PurePreviewMessage = ({
                           : undefined
                       }
                     >
-                      <Response>{sanitizeText(part.text)}</Response>
+                      {message.role === "assistant" &&
+                      searchResults.length > 0 ? (
+                        <Response
+                          components={{
+                            // @ts-expect-error
+                            "citation-response": (props: {
+                              sources: string;
+                            }) => (
+                              <CitationResponse
+                                sources={JSON.parse(props.sources)}
+                              />
+                            ),
+                          }}
+                        >
+                          {replaceCitations(sanitizeText(part.text))}
+                        </Response>
+                      ) : (
+                        <Response>{sanitizeText(part.text)}</Response>
+                      )}
                     </MessageContent>
                   </div>
                 );
@@ -166,23 +219,58 @@ const PurePreviewMessage = ({
             if (type === "tool-getWeather") {
               const { toolCallId, state } = part;
 
-              return (
-                <Tool defaultOpen={true} key={toolCallId}>
-                  <ToolHeader state={state} type="tool-getWeather" />
-                  <ToolContent>
-                    {state === "input-available" && (
-                      <ToolInput input={part.input} />
-                    )}
-                    {state === "output-available" && (
-                      <ToolOutput
-                        errorText={undefined}
-                        output={<Weather weatherAtLocation={part.output} />}
-                      />
-                    )}
-                  </ToolContent>
-                </Tool>
-              );
+              if (state === "input-available" || state === "input-streaming") {
+                return (
+                  <Shimmer as="p" duration={2} key={toolCallId}>
+                    Checking the weather...
+                  </Shimmer>
+                );
+              }
+
+              if (state === "output-available") {
+                return (
+                  <Weather key={toolCallId} weatherAtLocation={part.output} />
+                );
+              }
             }
+
+            if (type === "tool-webSearch") {
+              const { toolCallId, state } = part;
+              if (state === "input-available" || state === "input-streaming") {
+                return (
+                  <Shimmer as="p" duration={2} key={toolCallId}>
+                    Searching the web...
+                  </Shimmer>
+                );
+              }
+            }
+
+            // if (type === "tool-webSearch") {
+            //   const { toolCallId, state } = part;
+
+            //   return (
+            //     <Tool defaultOpen={false} key={toolCallId}>
+            //       <ToolHeader state={state} type="tool-webSearch" />
+            //       <ToolContent>
+            //         {state === "input-available" && (
+            //           <ToolInput input={part.input} />
+            //         )}
+            //         {state === "output-available" && (
+            //           <ToolOutput
+            //             errorText={
+            //               part.output.success ? undefined : part.output.message
+            //             }
+            //             output={
+            //               part.output.success ? (
+            //                 <WebSearchSources searchResults={part.output} />
+            //               ) : null
+            //             }
+            //           />
+            //         )}
+            //       </ToolContent>
+            //     </Tool>
+            //   );
+            // }
 
             return null;
           })}
@@ -245,7 +333,9 @@ export const ThinkingMessage = () => {
         </div>
 
         <div className="flex w-full flex-col gap-2 md:gap-4">
-          <div className="p-0 text-muted-foreground text-sm">Thinking...</div>
+          <Shimmer as="p" duration={2}>
+            Thinking...
+          </Shimmer>
         </div>
       </div>
     </motion.div>

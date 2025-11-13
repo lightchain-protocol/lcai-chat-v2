@@ -331,6 +331,14 @@ function PureMultimodalInput({
               selectedModelId={selectedModelId}
               status={status}
             /> */}
+            {/* <PromptInputButton
+              className="flex h-8 items-center gap-2 rounded-lg border-0 px-2"
+              onClick={() => setUseWebSearch(!useWebSearch)}
+              variant={useWebSearch ? "default" : "ghost"}
+            >
+              <GlobeIcon size={14} />
+              <span>Search</span>
+            </PromptInputButton> */}
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
