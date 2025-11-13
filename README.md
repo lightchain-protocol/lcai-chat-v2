@@ -114,8 +114,6 @@ pnpm db:pull          # Pull schema from database
 pnpm db:check         # Check migration files
 pnpm db:reset         # Reset migrations
 
-# Testing
-pnpm test             # Run Playwright tests
 ```
 
 ## 🌐 Deploying to Vercel
@@ -232,17 +230,16 @@ The project follows strict code quality rules via the Ultracite preset:
 - No TypeScript enums or namespaces
 - Consistent code style
 
-## 🧪 Testing
+## 📚 Documentation
 
-Run E2E and API tests with Playwright:
+### 📖 Complete Documentation Suite
 
-```bash
-pnpm test
-```
+We've prepared comprehensive documentation to help you understand and work with this application:
 
-Tests are located in the `tests/` directory (if present) and use the Playwright test runner.
+- **[🏗️ APP_FLOW.md](./docs/APP_FLOW.md)** - Detailed architecture, flows, and system design
+- **[👁️ VISUAL_FLOW_DIAGRAM.md](./docs/VISUAL_FLOW_DIAGRAM.md)** - Visual diagrams and flowcharts
 
-## 📚 Learn More
+### External Resources
 
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Vercel AI SDK](https://sdk.vercel.ai/docs)
@@ -253,7 +250,7 @@ Tests are located in the `tests/` directory (if present) and use the Playwright 
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please follow the code quality guidelines and ensure all tests pass before submitting a PR.
+Contributions are welcome! Please follow the code quality guidelines before submitting a PR.
 
 ## 📄 License
 
