@@ -16,8 +16,6 @@ import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import type { ChatModel } from "@/lib/ai/models";
 import { systemPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
-import { getWeather } from "@/lib/ai/tools/get-weather";
-import { webSearch } from "@/lib/ai/tools/web-search";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -153,8 +151,7 @@ export async function POST(request: Request) {
           messages: convertToModelMessages(uiMessages),
           experimental_transform: smoothStream({ chunking: "word" }),
           stopWhen: stepCountIs(5),
-          // activeTools: ["getWeather", "webSearch"],
-          tools: { getWeather, webSearch },
+          // tools: { getWeather, webSearch },
           maxOutputTokens,
           stopSequences: ["<|im_end|>"],
           experimental_telemetry: {

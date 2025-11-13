@@ -155,10 +155,10 @@ const SubscriptionDialog = (props: DialogProps) => {
                       </h4>
                       <div className="flex items-baseline justify-center gap-1">
                         <span className="font-bold text-4xl text-white">
-                          $
                           {billingPeriod === "monthly"
                             ? tier.monthlyPrice
-                            : tier.yearlyPrice}
+                            : tier.yearlyPrice}{" "}
+                          <span className="text-sm">LCAI</span>
                         </span>
                         <span className="text-sm text-zinc-400">
                           /{billingPeriod === "monthly" ? "month" : "year"}
