@@ -18,7 +18,8 @@ declare module "next-auth" {
   // biome-ignore lint/nursery/useConsistentTypeDefinitions: "Required"
   interface User {
     id?: string;
-    email?: string | null;
+    username?: string | null;
+    walletAddress?: `0x${string}` | null;
     type: UserType;
   }
 }
@@ -27,6 +28,8 @@ declare module "next-auth/jwt" {
   interface JWT extends DefaultJWT {
     id: string;
     type: UserType;
+    walletAddress?: `0x${string}` | null;
+    username?: string | null;
   }
 }
 
@@ -80,8 +83,8 @@ export const {
           if (existingUser) {
             return {
               id: existingUser.id,
-              name: existingUser.username || existingUser.wallet_address,
-              email: existingUser.wallet_address,
+              username: existingUser.username,
+              walletAddress: existingUser.wallet_address as `0x${string}`,
               type: "regular",
             };
           }
@@ -91,8 +94,8 @@ export const {
 
           return {
             id: newUser.id,
-            name: newUser.username || newUser.wallet_address,
-            email: newUser.wallet_address,
+            username: newUser.username,
+            walletAddress: newUser.wallet_address as `0x${string}`,
             type: "regular",
           };
         } catch (error) {
@@ -106,6 +109,8 @@ export const {
     jwt({ token, user }) {
       if (user) {
         token.id = user.id as string;
+        token.walletAddress = user.walletAddress as `0x${string}`;
+        token.username = user.username as string;
         token.type = user.type;
       }
 
@@ -114,6 +119,8 @@ export const {
     session({ session, token }) {
       if (session.user) {
         session.user.id = token.id;
+        session.user.walletAddress = token.walletAddress;
+        session.user.username = token.username;
         session.user.type = token.type;
       }
 

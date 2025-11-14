@@ -23,8 +23,8 @@ export function SidebarUserNav({ user }: { user: User }) {
   const { status } = useSession();
   const { disconnectAsync } = useDisconnect();
 
-  const formattedEmail = user.email
-    ? `${user.email.slice(0, 6)}...${user.email.slice(-4)}`
+  const formattedUsername = user.username
+    ? `${user.username.slice(0, 6)}...${user.username.slice(-4)}`
     : "Guest";
 
   const handleSignOut = async () => {
@@ -76,14 +76,14 @@ export function SidebarUserNav({ user }: { user: User }) {
                 data-testid="user-nav-button"
               >
                 <Image
-                  alt={formattedEmail ?? "User Avatar"}
+                  alt={formattedUsername ?? "User Avatar"}
                   className="rounded-full"
                   height={24}
-                  src={`https://avatar.vercel.sh/${user.email}`}
+                  src={`https://avatar.vercel.sh/${user.username}`}
                   width={24}
                 />
-                <span className="truncate" data-testid="user-email">
-                  {formattedEmail}
+                <span className="truncate" data-testid="user-username">
+                  {formattedUsername}
                 </span>
                 <ChevronUp className="ml-auto" />
               </SidebarMenuButton>

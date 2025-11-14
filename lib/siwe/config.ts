@@ -30,12 +30,13 @@ export const siweConfig = createSIWEConfig({
 
   getSession: async () => {
     const session = await getSession();
-    if (!session?.user?.email) {
+    console.log("session in siwe config", session);
+    if (!session?.user?.id) {
       return null;
     }
 
     return {
-      address: session.user.email as `0x${string}`,
+      address: session.user.walletAddress,
       chainId: lcaiTestnet.id,
     } as SIWESession;
   },
