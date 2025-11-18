@@ -1,5 +1,6 @@
 "use client";
 
+import { UploadIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -8,7 +9,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
-import { PlusIcon, TrashIcon } from "@/components/icons";
+import { MoreHorizontalIcon, PlusIcon, TrashIcon } from "@/components/icons";
+import { ImportChatDialog } from "@/components/import-chat-dialog";
 import {
   getChatHistoryPaginationKey,
   SidebarHistory,
@@ -35,6 +37,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function AppSidebar({ user }: { user: User | undefined }) {
@@ -42,6 +50,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const { setOpenMobile } = useSidebar();
   const { mutate } = useSWRConfig();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const { hasActiveSubscription, activeSubscription } = useSubscription();
 
   const handleDeleteAll = () => {
@@ -95,41 +104,55 @@ export function AppSidebar({ user }: { user: User | undefined }) {
               </Link>
               <div className="flex flex-row gap-1">
                 {user && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        className="h-8 p-1 md:h-fit md:p-2"
-                        onClick={() => setShowDeleteAllDialog(true)}
-                        type="button"
-                        variant="ghost"
-                      >
-                        <TrashIcon />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent align="end" className="hidden md:block">
-                      Delete All Chats
-                    </TooltipContent>
-                  </Tooltip>
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          className="h-8 p-1 md:h-fit md:p-2"
+                          onClick={() => {
+                            setOpenMobile(false);
+                            router.push("/");
+                            router.refresh();
+                          }}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <PlusIcon />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent align="end" className="hidden md:block">
+                        New Chat
+                      </TooltipContent>
+                    </Tooltip>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          className="h-8 p-1 md:h-fit md:p-2"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <MoreHorizontalIcon />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="flex items-center gap-2"
+                          onSelect={() => setShowImportDialog(true)}
+                        >
+                          <UploadIcon className="size-4" />
+                          Import Chat
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="flex items-center gap-2 text-red-600 focus:text-red-700"
+                          onSelect={() => setShowDeleteAllDialog(true)}
+                        >
+                          <TrashIcon />
+                          Delete All Chats
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </>
                 )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      className="h-8 p-1 md:h-fit md:p-2"
-                      onClick={() => {
-                        setOpenMobile(false);
-                        router.push("/");
-                        router.refresh();
-                      }}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <PlusIcon />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent align="end" className="hidden md:block">
-                    New Chat
-                  </TooltipContent>
-                </Tooltip>
               </div>
             </div>
           </SidebarMenu>
@@ -189,6 +212,11 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ImportChatDialog
+        onOpenChange={setShowImportDialog}
+        open={showImportDialog}
+      />
     </>
   );
 }

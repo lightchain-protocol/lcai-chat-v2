@@ -1,15 +1,18 @@
 "use client";
 
-import { MoonIcon, SunIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { DownloadIcon, MoonIcon, SunIcon } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { memo } from "react";
+import { toast } from "sonner";
 import { useIsClient, useWindowSize } from "usehooks-ts";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
+
+const FILENAME_REGEX = /filename="(.+)"/;
 
 function PureChatHeader({
   chatId,
@@ -20,6 +23,7 @@ function PureChatHeader({
   selectedVisibilityType: VisibilityType;
   isReadonly: boolean;
 }) {
+  const params = useParams<{ id: string }>();
   const router = useRouter();
   const { open } = useSidebar();
 
@@ -52,6 +56,37 @@ function PureChatHeader({
     });
   };
 
+  const handleExportChat = async () => {
+    try {
+      const response = await fetch(`/api/chat/${chatId}/export`);
+
+      if (!response.ok) {
+        throw new Error("Failed to export chat");
+      }
+
+      // Get the filename from Content-Disposition header
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filenameMatch = contentDisposition?.match(FILENAME_REGEX);
+      const filename = filenameMatch?.[1] || `chat-${chatId}.json`;
+
+      // Download the file
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success("Chat exported successfully!");
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("Failed to export chat");
+    }
+  };
+
   return (
     <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-1.5 md:px-2">
       <SidebarToggle />
@@ -78,13 +113,25 @@ function PureChatHeader({
         />
       )}
 
+      {params.id && (
+        <Button
+          className="order-3 h-8 px-2 md:h-fit md:px-2"
+          onClick={handleExportChat}
+          title="Export chat"
+          type="button"
+          variant="outline"
+        >
+          <span className="hidden md:inline">Export Chat</span>
+          <DownloadIcon />
+        </Button>
+      )}
       <Button
-        className="order-3 h-8 px-2 md:ml-auto md:h-fit md:px-2"
+        className="order-4 h-8 px-2 md:ml-auto md:h-fit md:px-2"
         onClick={toggleTheme}
         type="button"
         variant="outline"
       >
-        <span className="md:sr-only">
+        <span className="sr-only">
           {isClient
             ? `Toggle ${resolvedTheme === "dark" ? "light" : "dark"} mode`
             : "Toggle theme"}
