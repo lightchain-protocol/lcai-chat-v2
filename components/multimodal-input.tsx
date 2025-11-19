@@ -21,7 +21,9 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
+import type { SubscriptionTierType } from "@/config/subscription";
 import useSubscription from "@/hooks/use-subscription";
+import { useUsageWarnings } from "@/hooks/use-usage-warnings";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -45,6 +47,7 @@ import {
   StopIcon,
 } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
+import SubscriptionDialog from "./subscription-dialog";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import type { VisibilityType } from "./visibility-selector";
@@ -83,9 +86,28 @@ function PureMultimodalInput({
   usage?: AppUsage;
 }) {
   const session = useSession();
-  const { hasActiveSubscription } = useSubscription();
+  const subscription = useSubscription();
+  const { hasActiveSubscription } = subscription;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
+  const [showSubscriptionDialog, setShowSubscriptionDialog] = useState(false);
+
+  // Map blockchain tier names to our tier names
+  const getSubscriptionTierType = (): SubscriptionTierType => {
+    const tier = subscription.activeSubscription.data?.tier;
+    if (tier === "Pro") return "pro";
+    if (tier === "Enterprise") return "enterprise";
+    return "basic";
+  };
+
+  const subscriptionTier = getSubscriptionTierType();
+
+  // Enable usage warnings
+  useUsageWarnings({
+    usage,
+    subscriptionTier,
+    onUpgradeClick: () => setShowSubscriptionDialog(true),
+  });
 
   const adjustHeight = useCallback(() => {
     if (textareaRef.current) {
@@ -211,8 +233,9 @@ function PureMultimodalInput({
   const contextProps = useMemo(
     () => ({
       usage,
+      subscriptionTier,
     }),
-    [usage]
+    [usage, subscriptionTier]
   );
 
   const handleFileChange = useCallback(
@@ -358,6 +381,12 @@ function PureMultimodalInput({
           )}
         </PromptInputToolbar>
       </PromptInput>
+
+      {/* Subscription dialog for upgrades */}
+      <SubscriptionDialog
+        onOpenChange={setShowSubscriptionDialog}
+        open={showSubscriptionDialog}
+      />
     </div>
   );
 }

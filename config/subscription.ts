@@ -1,4 +1,4 @@
-export type PricingTier = {
+export type SubscriptionTier = {
   id: number;
   name: string;
   monthlyPrice: number;
@@ -7,7 +7,7 @@ export type PricingTier = {
   popular?: boolean;
 };
 
-export const tierDetails: PricingTier[] = [
+export const tierDetails: SubscriptionTier[] = [
   {
     id: 0,
     name: "Basic",
@@ -46,3 +46,11 @@ export const tierDetails: PricingTier[] = [
     ],
   },
 ];
+
+export const tokenLimits = {
+  basic: 100_000, // 100K tokens
+  pro: 1_000_000, // 1M tokens (unlimited in practice)
+  enterprise: 10_000_000, // 10M tokens (unlimited in practice)
+} as const;
+
+export type SubscriptionTierType = keyof typeof tokenLimits;

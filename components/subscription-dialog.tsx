@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { type PricingTier, tierDetails } from "@/config/subscription";
+import { type SubscriptionTier, tierDetails } from "@/config/subscription";
 import useSubscription from "@/hooks/use-subscription";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +41,7 @@ const SubscriptionDialog = (props: DialogProps) => {
   });
 
   const subscribeMutation = useMutation({
-    mutationFn: (tier: PricingTier) =>
+    mutationFn: (tier: SubscriptionTier) =>
       subscription.subscribe(
         tier.id,
         billingPeriod === "yearly",
@@ -61,7 +61,7 @@ const SubscriptionDialog = (props: DialogProps) => {
     },
   });
 
-  const handleSubscribe = (tier: PricingTier) => {
+  const handleSubscribe = (tier: SubscriptionTier) => {
     subscribeMutation.mutate(tier);
   };
 

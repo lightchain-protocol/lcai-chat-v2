@@ -21,6 +21,7 @@ import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import SubscriptionDialog from "./subscription-dialog";
 import { toast } from "./toast";
+import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
 
 export function Chat({
@@ -144,6 +145,12 @@ export function Chat({
           chatId={id}
           isReadonly={isReadonly}
           selectedVisibilityType={initialVisibilityType}
+        />
+
+        <UsageWarningBanner
+          className="mx-6 mt-4"
+          subscriptionTier="basic"
+          totalTokens={usage?.totalTokens ?? 0}
         />
 
         <Messages
