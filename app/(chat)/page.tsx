@@ -3,6 +3,7 @@ import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { generateUUID } from "@/lib/utils";
+import { auth } from "../(auth)/auth";
 
 export default async function Page() {
   // Allow page to render for unauthenticated users
@@ -11,6 +12,10 @@ export default async function Page() {
 
   const cookieStore = await cookies();
   const modelIdFromCookie = cookieStore.get("chat-model");
+
+  const session = await auth();
+
+  const isReadonly = !session?.user;
 
   if (!modelIdFromCookie) {
     return (
@@ -21,7 +26,7 @@ export default async function Page() {
           initialChatModel={DEFAULT_CHAT_MODEL}
           initialMessages={[]}
           initialVisibilityType="private"
-          isReadonly={false}
+          isReadonly={isReadonly}
           key={id}
         />
         <DataStreamHandler />
@@ -37,7 +42,7 @@ export default async function Page() {
         initialChatModel={modelIdFromCookie.value}
         initialMessages={[]}
         initialVisibilityType="private"
-        isReadonly={false}
+        isReadonly={isReadonly}
         key={id}
       />
       <DataStreamHandler />
