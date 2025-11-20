@@ -34,7 +34,7 @@ import {
 
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
-const db = drizzle(client);
+export const db = drizzle(client);
 
 export async function getUserByWallet(walletAddress: string): Promise<User[]> {
   try {
@@ -73,11 +73,13 @@ export async function saveChat({
   userId,
   title,
   visibility,
+  systemPrompt,
 }: {
   id: string;
   userId: string;
   title: string;
   visibility: VisibilityType;
+  systemPrompt?: string | null;
 }) {
   try {
     return await db.insert(chat).values({
@@ -86,6 +88,7 @@ export async function saveChat({
       userId,
       title,
       visibility,
+      systemPrompt: systemPrompt || null,
     });
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to save chat");
@@ -396,6 +399,24 @@ export async function updateChatLastContextById({
       .where(eq(chat.id, chatId));
   } catch (error) {
     console.warn("Failed to update lastContext for chat", chatId, error);
+    return;
+  }
+}
+
+export async function updateChatSystemPromptById({
+  chatId,
+  systemPrompt,
+}: {
+  chatId: string;
+  systemPrompt: string | null;
+}) {
+  try {
+    return await db
+      .update(chat)
+      .set({ systemPrompt })
+      .where(eq(chat.id, chatId));
+  } catch (error) {
+    console.warn("Failed to update systemPrompt for chat", chatId, error);
     return;
   }
 }

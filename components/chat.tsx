@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
+import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Vote } from "@/lib/db/schema";
@@ -32,6 +33,7 @@ export function Chat({
   isReadonly,
   autoResume,
   initialLastContext,
+  initialSystemPrompt,
 }: {
   id: string;
   initialMessages: ChatMessage[];
@@ -40,6 +42,7 @@ export function Chat({
   isReadonly: boolean;
   autoResume: boolean;
   initialLastContext?: AppUsage;
+  initialSystemPrompt?: string | null;
 }) {
   const { visibilityType } = useChatVisibility({
     chatId: id,
@@ -56,9 +59,37 @@ export function Chat({
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
 
+  const [systemPromptId, setSystemPromptId] = useState<string>("default");
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(
+    initialSystemPrompt || null
+  );
+  const systemPromptRef = useRef(systemPrompt);
+
+  // Fetch prompt templates to match initial prompt
+  const { data: promptTemplates } = useSWR<PromptTemplate[]>(
+    "/api/prompts",
+    fetcher
+  );
+
+  // Match initial system prompt to a template ID
+  useEffect(() => {
+    if (initialSystemPrompt && promptTemplates) {
+      const matchedTemplate = promptTemplates.find(
+        (template) => template.prompt === initialSystemPrompt
+      );
+      if (matchedTemplate) {
+        setSystemPromptId(matchedTemplate.id);
+      }
+    }
+  }, [initialSystemPrompt, promptTemplates]);
+
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  useEffect(() => {
+    systemPromptRef.current = systemPrompt;
+  }, [systemPrompt]);
 
   const {
     messages,
@@ -83,6 +114,7 @@ export function Chat({
             message: request.messages.at(-1),
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
+            systemPrompt: systemPromptRef.current,
             ...request.body,
           },
         };
@@ -144,7 +176,12 @@ export function Chat({
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onSystemPromptChange={(promptId, prompt) => {
+            setSystemPromptId(promptId);
+            setSystemPrompt(prompt);
+          }}
           selectedVisibilityType={initialVisibilityType}
+          systemPromptId={systemPromptId}
         />
 
         <UsageWarningBanner

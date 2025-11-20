@@ -32,6 +32,7 @@ export const chat = pgTable("Chat", {
     .notNull()
     .default("private"),
   lastContext: jsonb("lastContext").$type<AppUsage | null>(),
+  systemPrompt: text("systemPrompt"),
 });
 
 export type Chat = InferSelectModel<typeof chat>;
@@ -86,3 +87,16 @@ export const stream = pgTable(
 );
 
 export type Stream = InferSelectModel<typeof stream>;
+
+export const promptTemplate = pgTable("PromptTemplate", {
+  id: uuid("id").primaryKey().notNull().defaultRandom(),
+  userId: uuid("userId")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  prompt: text("prompt").notNull(),
+  isDefault: boolean("isDefault").notNull().default(false),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+});
+
+export type PromptTemplate = InferSelectModel<typeof promptTemplate>;

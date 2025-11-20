@@ -42,12 +42,16 @@ About the origin of user's request:
 
 export const systemPrompt = ({
   requestHints,
+  customSystemPrompt,
 }: {
   requestHints?: RequestHints;
+  customSystemPrompt?: string | null;
 }) => {
   let prompt = regularPrompt;
 
   if (requestHints) prompt += `\n\n${getRequestPromptFromHints(requestHints)}`;
+
+  if (customSystemPrompt) prompt += `\n\n${customSystemPrompt}`;
 
   return `${prompt}\n\n${webSearchPrompt}\n\n${webSearchUseCases}`;
 };

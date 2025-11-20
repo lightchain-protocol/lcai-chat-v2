@@ -26,6 +26,7 @@ import {
   saveChat,
   saveMessages,
   updateChatLastContextById,
+  updateChatSystemPromptById,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
@@ -71,11 +72,13 @@ export async function POST(request: Request) {
       message,
       selectedChatModel,
       selectedVisibilityType,
+      systemPrompt: customSystemPrompt,
     }: {
       id: string;
       message: ChatMessage;
       selectedChatModel: ChatModel["id"];
       selectedVisibilityType: VisibilityType;
+      systemPrompt?: string | null;
     } = requestBody;
 
     const session = await auth();
@@ -101,6 +104,17 @@ export async function POST(request: Request) {
       if (chat.userId !== session.user.id) {
         return new ChatSDKError("forbidden:chat").toResponse();
       }
+
+      // Update system prompt if it has changed
+      if (
+        customSystemPrompt !== undefined &&
+        customSystemPrompt !== chat.systemPrompt
+      ) {
+        await updateChatSystemPromptById({
+          chatId: id,
+          systemPrompt: customSystemPrompt,
+        });
+      }
     } else {
       // TODO: Uncomment this when find lightweight model for title generation
       // const title = await generateTitleFromUserMessage({
@@ -117,6 +131,7 @@ export async function POST(request: Request) {
         userId: session.user.id,
         title,
         visibility: selectedVisibilityType,
+        systemPrompt: customSystemPrompt,
       });
     }
 
@@ -147,7 +162,7 @@ export async function POST(request: Request) {
       execute: ({ writer: dataStream }) => {
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt({}),
+          system: systemPrompt({ customSystemPrompt }),
           messages: convertToModelMessages(uiMessages),
           experimental_transform: smoothStream({ chunking: "word" }),
           stopWhen: stepCountIs(5),

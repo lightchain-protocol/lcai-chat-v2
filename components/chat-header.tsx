@@ -1,13 +1,22 @@
 "use client";
 
-import { DownloadIcon, MoonIcon, SunIcon } from "lucide-react";
+import { DownloadIcon, MoonIcon, Settings2, SunIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { memo } from "react";
+import { memo, useState } from "react";
 import { toast } from "sonner";
 import { useIsClient, useWindowSize } from "usehooks-ts";
 import { SidebarToggle } from "@/components/sidebar-toggle";
+import { SystemPromptEditor } from "@/components/system-prompt-editor";
+import { SystemPromptSelector } from "@/components/system-prompt-selector";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
@@ -18,10 +27,14 @@ function PureChatHeader({
   chatId,
   selectedVisibilityType,
   isReadonly,
+  systemPromptId,
+  onSystemPromptChange,
 }: {
   chatId: string;
   selectedVisibilityType: VisibilityType;
   isReadonly: boolean;
+  systemPromptId?: string;
+  onSystemPromptChange?: (promptId: string, prompt: string) => void;
 }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -31,6 +44,9 @@ function PureChatHeader({
 
   const { setTheme, resolvedTheme } = useTheme();
   const isClient = useIsClient();
+
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+  const [editorDialogOpen, setEditorDialogOpen] = useState(false);
 
   const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
     const prefersReducedMotion = window.matchMedia(
@@ -125,8 +141,22 @@ function PureChatHeader({
           <DownloadIcon />
         </Button>
       )}
+
+      {!isReadonly && onSystemPromptChange && (
+        <Button
+          className="order-4 h-8 px-2 md:h-fit md:px-2"
+          onClick={() => setPromptDialogOpen(true)}
+          title="System prompt settings"
+          type="button"
+          variant="outline"
+        >
+          <span className="hidden md:inline">System Prompt</span>
+          <Settings2 />
+        </Button>
+      )}
+
       <Button
-        className="order-4 h-8 px-2 md:ml-auto md:h-fit md:px-2"
+        className="order-5 h-8 px-2 md:ml-auto md:h-fit md:px-2"
         onClick={toggleTheme}
         type="button"
         variant="outline"
@@ -138,6 +168,39 @@ function PureChatHeader({
         </span>
         {isClient && resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
       </Button>
+
+      <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>System Prompt Settings</DialogTitle>
+            <DialogDescription>
+              Choose a personality or create a custom prompt for the AI.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <SystemPromptSelector
+              onChange={(promptId, prompt) => {
+                onSystemPromptChange?.(promptId, prompt);
+                setPromptDialogOpen(false);
+                toast.success("System prompt updated");
+              }}
+              onCreateNew={() => {
+                setPromptDialogOpen(false);
+                setEditorDialogOpen(true);
+              }}
+              value={systemPromptId}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <SystemPromptEditor
+        onOpenChange={setEditorDialogOpen}
+        onSave={() => {
+          // Refresh will happen in the selector component
+        }}
+        open={editorDialogOpen}
+      />
     </header>
   );
 }
@@ -146,6 +209,7 @@ export const ChatHeader = memo(PureChatHeader, (prevProps, nextProps) => {
   return (
     prevProps.chatId === nextProps.chatId &&
     prevProps.selectedVisibilityType === nextProps.selectedVisibilityType &&
-    prevProps.isReadonly === nextProps.isReadonly
+    prevProps.isReadonly === nextProps.isReadonly &&
+    prevProps.systemPromptId === nextProps.systemPromptId
   );
 });
