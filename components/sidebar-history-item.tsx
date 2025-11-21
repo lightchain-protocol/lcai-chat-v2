@@ -290,5 +290,15 @@ export const ChatItem = memo(PureChatItem, (prevProps, nextProps) => {
   if (prevProps.chat.title !== nextProps.chat.title) {
     return false;
   }
+  // Check for backup status changes
+  if (prevProps.chat.ipfsCid !== nextProps.chat.ipfsCid) {
+    return false;
+  }
+  if (prevProps.chat.backupEncrypted !== nextProps.chat.backupEncrypted) {
+    return false;
+  }
+  if (prevProps.chat.backedUpAt !== nextProps.chat.backedUpAt) {
+    return false;
+  }
   return true;
 });

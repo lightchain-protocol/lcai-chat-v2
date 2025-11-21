@@ -11,7 +11,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { memo, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 import { useIsClient, useWindowSize } from "usehooks-ts";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { SystemPromptEditor } from "@/components/system-prompt-editor";
@@ -127,21 +127,31 @@ function PureChatHeader({
     }
   };
 
-  const handleBackup = async () => {
+  const handleBackup = () => {
     try {
-      const response = await fetch(`/api/chat/${chatId}/backup`, {
+      const responsePromise = fetch(`/api/chat/${chatId}/backup`, {
         method: "POST",
       });
 
-      const data = await response.json();
+      toast.promise(responsePromise, {
+        loading: "Backing up chat...",
+        success: async (response) => {
+          const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to backup chat");
-      }
+          if (!response.ok) {
+            throw new Error(data.message || "Failed to backup chat");
+          }
 
-      toast.success(`Chat backed up! CID: ${data.cid.slice(0, 12)}...`);
-      // Revalidate backup status
-      mutateBackupStatus();
+          // Revalidate backup status in header
+          mutateBackupStatus();
+
+          // Refresh the first page of sidebar history to show backup icon
+          await globalMutate("/api/history?limit=20");
+
+          return `Chat backed up! CID: ${data.cid.slice(0, 12)}...`;
+        },
+        error: "Failed to backup chat",
+      });
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to backup chat"
