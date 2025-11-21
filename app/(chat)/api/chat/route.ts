@@ -27,6 +27,7 @@ import {
   saveMessages,
   updateChatLastContextById,
   updateChatSystemPromptById,
+  updateChatTitleById,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
@@ -280,4 +281,46 @@ export async function DELETE(request: Request) {
   const deletedChat = await deleteChatById({ id });
 
   return Response.json(deletedChat, { status: 200 });
+}
+
+export async function PATCH(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    return new ChatSDKError("bad_request:api").toResponse();
+  }
+
+  const session = await auth();
+
+  if (!session?.user) {
+    return new ChatSDKError("unauthorized:chat").toResponse();
+  }
+
+  const chat = await getChatById({ id });
+
+  if (!chat) {
+    return new ChatSDKError("not_found:chat").toResponse();
+  }
+
+  if (chat.userId !== session.user.id) {
+    return new ChatSDKError("forbidden:chat").toResponse();
+  }
+
+  try {
+    const { title } = await request.json();
+
+    if (!title || typeof title !== "string" || title.trim().length === 0) {
+      return new ChatSDKError("bad_request:api").toResponse();
+    }
+
+    await updateChatTitleById({ id, title: title.trim() });
+
+    return Response.json(
+      { success: true, title: title.trim() },
+      { status: 200 }
+    );
+  } catch (_error) {
+    return new ChatSDKError("bad_request:api").toResponse();
+  }
 }
