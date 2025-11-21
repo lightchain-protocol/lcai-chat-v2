@@ -15,6 +15,13 @@
       "when": 1763642189968,
       "tag": "0001_known_gamora",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1763698794629,
+      "tag": "0002_gigantic_wendell_rand",
+      "breakpoints": true
     }
   ]
 }
