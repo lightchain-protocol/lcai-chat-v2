@@ -1,9 +1,7 @@
 import "server-only";
 
-import lighthouse from "@lighthouse-web3/sdk";
-
 /**
- * Upload data to IPFS via Lighthouse Storage SDK
+ * Upload data to IPFS via Lighthouse Storage API
  */
 export async function uploadToIPFS(
   data: string,
@@ -16,13 +14,44 @@ export async function uploadToIPFS(
   }
 
   try {
-    // Upload text/JSON to Lighthouse using SDK
-    const response = await lighthouse.uploadText(data, apiKey, filename);
+    // Create a Buffer from the string data for Node.js environment
+    const buffer = Buffer.from(data, "utf-8");
 
-    const cid = response.data?.Hash;
+    // Create a Blob from the buffer
+    const blob = new Blob([buffer], { type: "application/json" });
+
+    // Create FormData and append the file with explicit filename
+    const formData = new FormData();
+    formData.append("file", blob, filename);
+
+    // Upload to Lighthouse API
+    const response = await fetch(
+      "https://upload.lighthouse.storage/api/v0/add",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Lighthouse API error (${response.status}): ${errorText}`
+      );
+    }
+
+    const result = await response.json();
+
+    // Lighthouse API returns { Name, Hash, Size } directly
+    const cid = result.Hash;
 
     if (!cid) {
-      throw new Error("Failed to upload to IPFS: No CID returned");
+      throw new Error(
+        `Failed to upload to IPFS: No CID returned. Response: ${JSON.stringify(result)}`
+      );
     }
 
     return cid;
