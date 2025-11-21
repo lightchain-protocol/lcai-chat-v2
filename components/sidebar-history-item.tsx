@@ -278,7 +278,6 @@ const PureChatItem = ({
             </Button>
           </DialogFooter>
         </DialogContent>
-        );
       </Dialog>
     </>
   );
