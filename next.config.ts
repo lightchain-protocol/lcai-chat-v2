@@ -10,7 +10,8 @@ const nextConfig: NextConfig = {
       "lokijs",
       "encoding",
       "blst",
-      "snarkjs"
+      "snarkjs",
+      "bls-eth-wasm"
     );
     return config;
   },
