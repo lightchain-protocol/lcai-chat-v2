@@ -1,10 +1,17 @@
 "use client";
 
-import { DownloadIcon, MoonIcon, Settings2, SunIcon } from "lucide-react";
+import {
+  CloudUploadIcon,
+  DownloadIcon,
+  MoonIcon,
+  Settings2,
+  SunIcon,
+} from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { memo, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { useIsClient, useWindowSize } from "usehooks-ts";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { SystemPromptEditor } from "@/components/system-prompt-editor";
@@ -17,6 +24,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
@@ -47,6 +60,17 @@ function PureChatHeader({
 
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const [editorDialogOpen, setEditorDialogOpen] = useState(false);
+
+  // Fetch backup status using SWR
+  const { data: backupStatus, mutate: mutateBackupStatus } = useSWR<{
+    backedUp: boolean;
+    cid: string | null;
+    encrypted: boolean;
+  }>(chatId ? `/api/chat/${chatId}/backup` : null, async (url: string) => {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return response.json();
+  });
 
   const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
     const prefersReducedMotion = window.matchMedia(
@@ -103,6 +127,28 @@ function PureChatHeader({
     }
   };
 
+  const handleBackup = async () => {
+    try {
+      const response = await fetch(`/api/chat/${chatId}/backup`, {
+        method: "POST",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to backup chat");
+      }
+
+      toast.success(`Chat backed up! CID: ${data.cid.slice(0, 12)}...`);
+      // Revalidate backup status
+      mutateBackupStatus();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to backup chat"
+      );
+    }
+  };
+
   return (
     <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-1.5 md:px-2">
       <SidebarToggle />
@@ -130,16 +176,32 @@ function PureChatHeader({
       )}
 
       {params.id && (
-        <Button
-          className="order-3 h-8 px-2 md:h-fit md:px-2"
-          onClick={handleExportChat}
-          title="Export chat"
-          type="button"
-          variant="outline"
-        >
-          <span className="hidden md:inline">Export Chat</span>
-          <DownloadIcon />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              className="order-3 h-8 px-2 md:h-fit md:px-2"
+              title="Export, backup, and import options"
+              type="button"
+              variant="outline"
+            >
+              <span className="hidden md:inline">Export & Backup</span>
+              <DownloadIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleExportChat}>
+              <DownloadIcon className="mr-2 size-4" />
+              Export as JSON
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleBackup}>
+              <CloudUploadIcon className="mr-2 size-4" />
+              Backup to IPFS
+              {backupStatus?.backedUp && (
+                <span className="ml-auto text-muted-foreground text-xs">✓</span>
+              )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       {!isReadonly && onSystemPromptChange && (

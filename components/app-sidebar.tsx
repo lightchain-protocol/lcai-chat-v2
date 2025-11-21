@@ -1,6 +1,6 @@
 "use client";
 
-import { UploadIcon } from "lucide-react";
+import { CloudDownloadIcon, UploadIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,6 +11,7 @@ import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { MoreHorizontalIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { ImportChatDialog } from "@/components/import-chat-dialog";
+import { RestoreFromIPFSDialog } from "@/components/restore-from-ipfs-dialog";
 import {
   getChatHistoryPaginationKey,
   SidebarHistory,
@@ -51,6 +52,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const { mutate } = useSWRConfig();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showRestoreDialog, setShowRestoreDialog] = useState(false);
   const { hasActiveSubscription, activeSubscription } = useSubscription();
 
   const handleDeleteAll = () => {
@@ -140,7 +142,14 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                           onSelect={() => setShowImportDialog(true)}
                         >
                           <UploadIcon className="size-4" />
-                          Import Chat
+                          Import from JSON
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="flex items-center gap-2"
+                          onSelect={() => setShowRestoreDialog(true)}
+                        >
+                          <CloudDownloadIcon className="size-4" />
+                          Restore from IPFS
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="flex items-center gap-2 text-red-600 focus:text-red-700"
@@ -216,6 +225,11 @@ export function AppSidebar({ user }: { user: User | undefined }) {
       <ImportChatDialog
         onOpenChange={setShowImportDialog}
         open={showImportDialog}
+      />
+
+      <RestoreFromIPFSDialog
+        onOpenChange={setShowRestoreDialog}
+        open={showRestoreDialog}
       />
     </>
   );

@@ -33,6 +33,9 @@ export const chat = pgTable("Chat", {
     .default("private"),
   lastContext: jsonb("lastContext").$type<AppUsage | null>(),
   systemPrompt: text("systemPrompt"),
+  ipfsCid: text("ipfsCid"),
+  backedUpAt: timestamp("backedUpAt"),
+  backupEncrypted: boolean("backupEncrypted").default(false),
 });
 
 export type Chat = InferSelectModel<typeof chat>;

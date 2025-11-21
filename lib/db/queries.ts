@@ -491,3 +491,56 @@ export async function getStreamIdsByChatId({ chatId }: { chatId: string }) {
     );
   }
 }
+
+/**
+ * Update chat with IPFS backup information
+ */
+export async function updateChatBackup({
+  chatId,
+  ipfsCid,
+  encrypted,
+}: {
+  chatId: string;
+  ipfsCid: string;
+  encrypted: boolean;
+}) {
+  try {
+    return await db
+      .update(chat)
+      .set({
+        ipfsCid,
+        backedUpAt: new Date(),
+        backupEncrypted: encrypted,
+      })
+      .where(eq(chat.id, chatId));
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update chat backup"
+    );
+  }
+}
+
+/**
+ * Get chat backup status
+ */
+export async function getChatBackupStatus({ id }: { id: string }) {
+  try {
+    const [result] = await db
+      .select({
+        ipfsCid: chat.ipfsCid,
+        backedUpAt: chat.backedUpAt,
+        backupEncrypted: chat.backupEncrypted,
+      })
+      .from(chat)
+      .where(eq(chat.id, id))
+      .limit(1);
+
+    return result || null;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to get backup status"
+    );
+  }
+}

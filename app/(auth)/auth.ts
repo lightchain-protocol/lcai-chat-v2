@@ -12,6 +12,8 @@ declare module "next-auth" {
     user: {
       id: string;
       type: UserType;
+      walletAddress?: `0x${string}` | null;
+      username?: string | null;
     } & DefaultSession["user"];
   }
 

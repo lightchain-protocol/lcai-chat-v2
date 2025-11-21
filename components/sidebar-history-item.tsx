@@ -1,5 +1,9 @@
+import { format } from "date-fns";
+import { CloudIcon, CopyIcon, ShieldCheckIcon } from "lucide-react";
 import Link from "next/link";
 import { memo } from "react";
+import { toast } from "sonner";
+import { useCopyToClipboard } from "usehooks-ts";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Chat } from "@/lib/db/schema";
 import {
@@ -25,6 +29,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "./ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 const PureChatItem = ({
   chat,
@@ -37,6 +42,7 @@ const PureChatItem = ({
   onDelete: (chatId: string) => void;
   setOpenMobile: (open: boolean) => void;
 }) => {
+  const [, copyToClipboard] = useCopyToClipboard();
   const { visibilityType, setVisibilityType } = useChatVisibility({
     chatId: chat.id,
     initialVisibilityType: chat.visibility,
@@ -45,8 +51,70 @@ const PureChatItem = ({
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={isActive}>
-        <Link href={`/chat/${chat.id}`} onClick={() => setOpenMobile(false)}>
-          <span>{chat.title}</span>
+        <Link
+          className="flex items-center gap-2"
+          href={`/chat/${chat.id}`}
+          onClick={() => setOpenMobile(false)}
+        >
+          <span className="flex-1 truncate">{chat.title}</span>
+          {chat.ipfsCid && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1">
+                  <CloudIcon className="size-3.5 text-blue-500" />
+                  {chat.backupEncrypted && (
+                    <ShieldCheckIcon className="size-3 text-green-500" />
+                  )}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-sm" side="right">
+                <div className="space-y-2 text-xs">
+                  <div className="font-semibold">IPFS Backup</div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium text-muted-foreground">
+                        CID:
+                      </div>
+                      <button
+                        className="flex select-none items-center gap-2 hover:text-muted-foreground"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          await copyToClipboard(chat.ipfsCid || "");
+                          toast.success("CID copied to clipboard!");
+                        }}
+                        type="button"
+                      >
+                        <span className="flex-1 font-mono text-xs">
+                          {chat.ipfsCid?.slice(0, 6)}...
+                        </span>
+
+                        <CopyIcon className="size-3" />
+                      </button>
+                    </div>
+                    <div>
+                      <span className="font-medium text-muted-foreground">
+                        Date:
+                      </span>{" "}
+                      {chat.backedUpAt
+                        ? format(new Date(chat.backedUpAt), "MMM d, yyyy")
+                        : "N/A"}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="font-medium text-muted-foreground">
+                        Status:
+                      </span>
+                      {chat.backupEncrypted ? (
+                        <span className="text-green-500">🔒 Encrypted</span>
+                      ) : (
+                        <span className="text-yellow-500">🌐 Public</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </Link>
       </SidebarMenuButton>
 
