@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app/(chat)/api/chat/[id]/backup/route.ts": {
+      "includeFiles": "node_modules/bls-eth-wasm/**"
+    }
+  }
+}
