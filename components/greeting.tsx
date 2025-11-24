@@ -23,12 +23,12 @@ export const Greeting = () => {
     >
       <motion.h1
         animate={{ opacity: 1, y: 0 }}
-        className="mx-auto mb-4 max-w-[600px] text-center font-medium text-[40px] text-white leading-[1.05] tracking-[-1.4px] md:text-[50px] lg:text-[60px] xl:text-[70px]"
+        className="mx-auto mb-4 max-w-[600px] text-center font-medium text-[40px] text-content-dark leading-[1.05] tracking-[-1.4px] md:text-[50px] lg:text-[60px] xl:text-[70px]"
         exit={{ opacity: 0, y: 10 }}
         initial={{ opacity: 0, y: 10 }}
         transition={{ delay: 0.2, duration: 0.5 }}
       >
-        Start talking with <span className="text-zinc-400">Lightchain</span>{" "}
+        Start talking with <span className="text-content-light">Lightchain</span>{" "}
         <span className="bg-linear-to-r from-[#DD00AC] to-[#7064E9] bg-clip-text text-transparent">
           AI Chat
         </span>
@@ -74,32 +74,32 @@ export const Greeting = () => {
               initial={{ opacity: 0, y: 10 }}
               transition={{ delay: 0.6, duration: 0.5 }}
             >
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-6">
+              <div className="rounded-xl bg-surface-m-soft p-6">
                 <div className="mb-4 flex items-start gap-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-[#7064E9]/30 bg-linear-to-b from-[#7064E9]/20 to-[#5B4FCC]/10">
                     <Crown className="size-4 text-[#7064E9]" />
                   </div>
                   <div className="flex-1">
-                    <h3 className="mb-1 font-semibold text-lg text-white">
+                    <h3 className="mb-1 font-semibold text-lg text-content-default">
                       No Active Subscription
                     </h3>
-                    <p className="text-sm text-zinc-400 leading-relaxed">
+                    <p className="text-sm text-content-light leading-relaxed">
                       Subscribe to a plan to unlock unlimited conversations with
                       AI models, priority support, and advanced features.
                     </p>
                   </div>
                 </div>
                 <div className="mb-4 space-y-2 pl-[52px]">
-                  <div className="flex items-center gap-2 text-sm text-zinc-400">
-                    <span className="size-1.5 rounded-full bg-zinc-500" />
+                  <div className="flex items-center gap-2 text-sm text-content-light">
+                    <span className="size-1.5 rounded-full bg-content-default" />
                     <span>Choose from Basic, Pro, or Enterprise plans</span>
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-400">
-                    <span className="size-1.5 rounded-full bg-zinc-500" />
+                  <div className="flex items-center gap-2 text-sm text-content-light">
+                    <span className="size-1.5 rounded-full bg-content-default" />
                     <span>Flexible monthly or yearly billing</span>
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-400">
-                    <span className="size-1.5 rounded-full bg-zinc-500" />
+                  <div className="flex items-center gap-2 text-sm text-content-light">
+                    <span className="size-1.5 rounded-full bg-content-default" />
                     <span>Cancel anytime, no commitments</span>
                   </div>
                 </div>

@@ -2,7 +2,6 @@
 
 import { CloudDownloadIcon, UploadIcon } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "next-auth";
 import { useState } from "react";
@@ -17,7 +16,6 @@ import {
   SidebarHistory,
 } from "@/components/sidebar-history";
 import { SidebarUserNav } from "@/components/sidebar-user-nav";
-import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -44,7 +42,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { Button } from "./ui/button";
+import Link from "next/link";
 
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
@@ -77,14 +76,8 @@ export function AppSidebar({ user }: { user: User | undefined }) {
       <Sidebar className="group-data-[side=left]:border-r-0">
         <SidebarHeader>
           <SidebarMenu>
-            <div className="flex flex-row items-center justify-between">
-              <Link
-                className="flex flex-row items-center gap-3"
-                href="/"
-                onClick={() => {
-                  setOpenMobile(false);
-                }}
-              >
+            <div className="flex items-center justify-between gap-2 relative py-3">
+              <Link href="/" className={`flex items-center gap-3`}>
                 <Image
                   alt="LCAI Logo"
                   className="hidden max-w-[150px] dark:block"
@@ -104,66 +97,55 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   width={150}
                 />
               </Link>
-              <div className="flex flex-row gap-1">
-                {user && (
-                  <>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          className="h-8 p-1 md:h-fit md:p-2"
-                          onClick={() => {
-                            setOpenMobile(false);
-                            router.push("/");
-                            router.refresh();
-                          }}
-                          type="button"
-                          variant="ghost"
-                        >
-                          <PlusIcon />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent align="end" className="hidden md:block">
-                        New Chat
-                      </TooltipContent>
-                    </Tooltip>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          className="h-8 p-1 md:h-fit md:p-2"
-                          type="button"
-                          variant="ghost"
-                        >
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          className="flex items-center gap-2"
-                          onSelect={() => setShowImportDialog(true)}
-                        >
-                          <UploadIcon className="size-4" />
-                          Import from JSON
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="flex items-center gap-2"
-                          onSelect={() => setShowRestoreDialog(true)}
-                        >
-                          <CloudDownloadIcon className="size-4" />
-                          Restore from IPFS
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="flex items-center gap-2 text-red-600 focus:text-red-700"
-                          onSelect={() => setShowDeleteAllDialog(true)}
-                        >
-                          <TrashIcon />
-                          Delete All Chats
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </>
-                )}
-              </div>
             </div>
+
+            {user && (
+              <div className="flex gap-2.5">
+              <Button className="w-full" size="sm" type="button"
+                onClick={() => {
+                  setOpenMobile(false);
+                  router.push("/");
+                  router.refresh();
+                }}><PlusIcon size={20} /> New Chat
+              </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      className="p-1 md:p-2"
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                    >
+                      <MoreHorizontalIcon />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      className="flex items-center gap-2"
+                      onSelect={() => setShowImportDialog(true)}
+                    >
+                      <UploadIcon className="size-4" />
+                      Import from JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="flex items-center gap-2"
+                      onSelect={() => setShowRestoreDialog(true)}
+                    >
+                      <CloudDownloadIcon className="size-4" />
+                      Restore from IPFS
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="flex items-center gap-2 text-red-600 focus:text-red-700"
+                      onSelect={() => setShowDeleteAllDialog(true)}
+                    >
+                      <TrashIcon />
+                      Delete All Chats
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>

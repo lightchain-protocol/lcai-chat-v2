@@ -60,7 +60,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Restore Chat from IPFS</DialogTitle>
           <DialogDescription>

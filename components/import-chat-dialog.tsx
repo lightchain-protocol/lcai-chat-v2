@@ -94,7 +94,7 @@ export function ImportChatDialog(props: DialogProps) {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Import Chat</DialogTitle>
           <DialogDescription>

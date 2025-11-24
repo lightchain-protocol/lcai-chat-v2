@@ -106,7 +106,7 @@ const PureChatItem = ({
             href={`/chat/${chat.id}`}
             onClick={() => setOpenMobile(false)}
           >
-            <span className="flex-1 truncate">{chat.title}</span>
+            <span className="flex-1 truncate capitalize">{chat.title}</span>
             {chat.ipfsCid && (
               <Tooltip>
                 <TooltipTrigger asChild>

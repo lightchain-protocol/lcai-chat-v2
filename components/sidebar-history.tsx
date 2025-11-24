@@ -180,9 +180,9 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
   if (isLoading) {
     return (
       <SidebarGroup>
-        <div className="px-2 py-1 text-sidebar-foreground/50 text-xs">
+        <h6 className="px-2 py-1 text-content-default text-xs">
           Today
-        </div>
+        </h6>
         <SidebarGroupContent>
           <div className="flex flex-col">
             {[44, 32, 28, 64, 52].map((item) => (
@@ -235,9 +235,9 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
                   <div className="flex flex-col gap-6">
                     {groupedChats.today.length > 0 && (
                       <div>
-                        <div className="px-2 py-1 text-sidebar-foreground/50 text-xs">
+                        <h6 className="px-2 py-1 text-content-default text-xs">
                           Today
-                        </div>
+                        </h6>
                         {groupedChats.today.map((chat) => (
                           <ChatItem
                             chat={chat}
@@ -256,9 +256,9 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
                     {groupedChats.yesterday.length > 0 && (
                       <div>
-                        <div className="px-2 py-1 text-sidebar-foreground/50 text-xs">
+                        <h6 className="px-2 py-1 text-content-default text-xs">
                           Yesterday
-                        </div>
+                        </h6>
                         {groupedChats.yesterday.map((chat) => (
                           <ChatItem
                             chat={chat}
@@ -277,9 +277,9 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
                     {groupedChats.lastWeek.length > 0 && (
                       <div>
-                        <div className="px-2 py-1 text-sidebar-foreground/50 text-xs">
+                        <h6 className="px-2 py-1 text-content-default text-xs">
                           Last 7 days
-                        </div>
+                        </h6>
                         {groupedChats.lastWeek.map((chat) => (
                           <ChatItem
                             chat={chat}
@@ -298,9 +298,9 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
                     {groupedChats.lastMonth.length > 0 && (
                       <div>
-                        <div className="px-2 py-1 text-sidebar-foreground/50 text-xs">
+                        <h6 className="px-2 py-1 text-content-default text-xs">
                           Last 30 days
-                        </div>
+                        </h6>
                         {groupedChats.lastMonth.map((chat) => (
                           <ChatItem
                             chat={chat}
@@ -319,9 +319,9 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
 
                     {groupedChats.older.length > 0 && (
                       <div>
-                        <div className="px-2 py-1 text-sidebar-foreground/50 text-xs">
+                        <h6 className="px-2 py-1 text-content-default text-xs">
                           Older than last month
-                        </div>
+                        </h6>
                         {groupedChats.older.map((chat) => (
                           <ChatItem
                             chat={chat}

@@ -12,14 +12,15 @@
 
 /* define design tokens (light mode) */
 :root {
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(240 10% 3.9%);
-  --card: hsl(0 0% 100%);
-  --card-foreground: hsl(240 10% 3.9%);
-  --popover: hsl(0 0% 100%);
+  --background: #ffffff;
+  --primary: #6767e9;
+  --primary-600: #5a4fd8;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
   --popover-foreground: hsl(240 10% 3.9%);
-  --primary: hsl(240 75% 66%);
-  --primary-foreground: hsl(0 0% 98%);
+  --primary-foreground: #fafafa;
   --secondary: hsl(240 4.8% 95.9%);
   --secondary-foreground: hsl(240 5.9% 10%);
   --muted: hsl(240 4.8% 95.9%);
@@ -47,17 +48,29 @@
   /* border radius unit */
   --radius: 0.5rem;
   --sidebar: hsl(0 0% 98%);
+
+  --surface-m-soft: rgba(36, 38, 51, 0.039);
+  --surface-m-light: #f1f1f1;
+
+  /* content color */
+  --content-dark: #020203;
+  --content-light: #7E7F94;
+  --content-primary: #0F0F14;
+  --content-placeholder: #656678;
+  --content-default: #373842;
+
+  /* border color */
+  --border-default: rgba(2, 2, 3, 0.04);
 }
 
 /* define design tokens (dark mode) */
 .dark {
-  --background: hsl(240 10% 3.9%);
+  --background: #070710;
   --foreground: hsl(0 0% 98%);
   --card: hsl(240 10% 3.9%);
   --card-foreground: hsl(0 0% 98%);
   --popover: hsl(240 10% 3.9%);
   --popover-foreground: hsl(0 0% 98%);
-  --primary: hsl(240 75% 66%);
   --primary-foreground: hsl(0 0% 98%);
   --secondary: hsl(240 3.7% 15.9%);
   --secondary-foreground: hsl(0 0% 98%);
@@ -84,6 +97,19 @@
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
   --sidebar: hsl(240 5.9% 10%);
+
+  --surface-m-soft: rgba(34, 35, 42, 0.17);
+  --surface-m-light: #1f1f1f;
+
+  /* content color */
+  --content-dark: #ffffff;
+  --content-light: #4E4E5C;
+  --content-primary: #CCCEEF;
+  --content-placeholder: rgba(154,156,207,0.80);
+  --content-default: #9798B6;
+
+  /* border color */
+  --border-default: rgba(115, 118, 170, 0.20);
 }
 
 /* define theme */
@@ -107,6 +133,7 @@
   --color-popover-foreground: var(--popover-foreground);
 
   --color-primary: var(--primary);
+  --color-primary-600: var(--primary-600);
   --color-primary-foreground: var(--primary-foreground);
 
   --color-secondary: var(--secondary);
@@ -139,6 +166,20 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-surface-m-soft: var(--surface-m-soft);
+  --color-surface-m-light: var(--surface-m-light);
+
+  /* content color */
+  --color-content-dark: var(--content-dark);
+  --color-content-light: var(--content-light);
+  --color-content-primary: var(--content-primary);
+  --color-content-placeholder: var(--content-placeholder);
+  --color-content-default: var(--content-default);
+
+
+  /* border color */
+  --color-bdr-default: var(--border-default);
 }
 
 /*
