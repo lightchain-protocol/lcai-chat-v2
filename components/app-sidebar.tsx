@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudDownloadIcon, UploadIcon } from "lucide-react";
+import { CloudDownloadIcon, SearchIcon, UploadIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,6 +9,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { ChatSearch } from "@/components/chat-search";
 import { MoreHorizontalIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { ImportChatDialog } from "@/components/import-chat-dialog";
 import { RestoreFromIPFSDialog } from "@/components/restore-from-ipfs-dialog";
@@ -53,6 +54,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
+  const [showSearchDialog, setShowSearchDialog] = useState(false);
   const { hasActiveSubscription, activeSubscription } = useSubscription();
 
   const handleDeleteAll = () => {
@@ -107,6 +109,21 @@ export function AppSidebar({ user }: { user: User | undefined }) {
               <div className="flex flex-row gap-1">
                 {user && (
                   <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          className="h-8 p-1 md:h-fit md:p-2"
+                          onClick={() => setShowSearchDialog(true)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <SearchIcon className="size-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent align="end" className="hidden md:block">
+                        Search Messages
+                      </TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -230,6 +247,11 @@ export function AppSidebar({ user }: { user: User | undefined }) {
       <RestoreFromIPFSDialog
         onOpenChange={setShowRestoreDialog}
         open={showRestoreDialog}
+      />
+
+      <ChatSearch
+        onOpenChange={setShowSearchDialog}
+        open={showSearchDialog}
       />
     </>
   );
