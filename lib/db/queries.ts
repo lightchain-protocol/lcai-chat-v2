@@ -11,6 +11,7 @@ import {
   inArray,
   lt,
   type SQL,
+  sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -542,5 +543,88 @@ export async function getChatBackupStatus({ id }: { id: string }) {
       "bad_request:database",
       "Failed to get backup status"
     );
+  }
+}
+
+export type SearchResult = {
+  messageId: string;
+  chatId: string;
+  chatTitle: string;
+  messageRole: string;
+  messageParts: any;
+  messageCreatedAt: Date;
+  rank: number;
+  highlight: string;
+};
+
+/**
+ * Search messages using PostgreSQL full-text search
+ */
+export async function searchMessages({
+  userId,
+  query,
+  limit = 20,
+}: {
+  userId: string;
+  query: string;
+  limit?: number;
+}): Promise<SearchResult[]> {
+  try {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+
+    // Sanitize query for tsquery - replace special chars and add prefix matching
+    const sanitizedQuery = query
+      .trim()
+      // biome-ignore lint/performance/useTopLevelRegex: test
+      .split(/\s+/)
+      .filter((word) => word.length > 0)
+      .map((word) => `${word.replace(/[^a-zA-Z0-9]/g, "")}:*`)
+      .join(" & ");
+
+    if (!sanitizedQuery) {
+      return [];
+    }
+
+    // Perform full-text search with ranking and highlighting
+    const results = await db
+      .select({
+        messageId: message.id,
+        chatId: chat.id,
+        chatTitle: chat.title,
+        messageRole: message.role,
+        messageParts: message.parts,
+        messageCreatedAt: message.createdAt,
+        rank: sql<number>`ts_rank("Message"."search_vector", to_tsquery('english', ${sanitizedQuery}))`,
+        highlight: sql<string>`ts_headline('english',
+          (
+            SELECT string_agg(part->>'text', ' ')
+            FROM json_array_elements("Message"."parts"::json) AS part
+            WHERE part->>'type' = 'text'
+          ),
+          to_tsquery('english', ${sanitizedQuery}),
+          'MaxWords=20, MinWords=10, ShortWord=3, HighlightAll=FALSE, MaxFragments=1'
+        )`,
+      })
+      .from(message)
+      .innerJoin(chat, eq(message.chatId, chat.id))
+      .where(
+        and(
+          eq(chat.userId, userId),
+          sql`"Message"."search_vector" @@ to_tsquery('english', ${sanitizedQuery})`
+        )
+      )
+      .orderBy(
+        desc(
+          sql`ts_rank("Message"."search_vector", to_tsquery('english', ${sanitizedQuery}))`
+        )
+      )
+      .limit(limit);
+
+    return results;
+  } catch (_error) {
+    console.error("Search error:", _error);
+    throw new ChatSDKError("bad_request:database", "Failed to search messages");
   }
 }

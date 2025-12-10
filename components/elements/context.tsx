@@ -155,7 +155,7 @@ export const Context = ({
         <button
           className={cn(
             "inline-flex select-none items-center gap-1 rounded-md text-sm",
-            "cursor-pointer bg-background text-foreground",
+            "cursor-pointer text-foreground",
             className
           )}
           type="button"

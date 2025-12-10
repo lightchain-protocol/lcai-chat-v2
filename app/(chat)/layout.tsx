@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { DataStreamProvider } from "@/components/data-stream-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "../(auth)/auth";
+import Header from "@/components/Header/Header";
 
 export const experimental_ppr = true;
 
@@ -22,6 +23,7 @@ export default async function Layout({
         strategy="beforeInteractive"
       />
       <DataStreamProvider>
+        <Header />
         <SidebarProvider defaultOpen={!isCollapsed}>
           <AppSidebar user={session?.user} />
           <SidebarInset>{children}</SidebarInset>

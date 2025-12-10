@@ -1,7 +1,7 @@
 "use client";
 
 import type { DialogProps } from "@radix-ui/react-dialog";
-import { Loader2Icon, UploadIcon } from "lucide-react";
+import { Info, Loader2Icon, UploadIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import Image from "next/image";
 
 export function ImportChatDialog(props: DialogProps) {
   const [isUploading, setIsUploading] = useState(false);
@@ -94,7 +95,7 @@ export function ImportChatDialog(props: DialogProps) {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-xl rounded-lg sm:rounded-3xl">
         <DialogHeader>
           <DialogTitle>Import Chat</DialogTitle>
           <DialogDescription>
@@ -103,9 +104,10 @@ export function ImportChatDialog(props: DialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 py-4">
-          <div className="flex flex-col items-center gap-4 rounded-lg border-2 border-muted-foreground/25 border-dashed p-8">
-            <UploadIcon className="size-12 text-muted-foreground" />
+        <div className="flex flex-col gap-4 mt-4">
+          <div className="flex flex-col items-center gap-4 rounded-lg border-2 border-bdr-soft border-dashed p-8 bg-surface-base-subtle">
+            <Image className="dark:hidden" src="/images/icons/upload-file-light.png" width={162} height={135} alt="Upload Icon"></Image>
+            <Image className="hidden dark:block" src="/images/icons/upload-file-dark.png" width={162} height={135} alt="Upload Icon"></Image>
             <div className="text-center">
               <p className="mb-1 font-medium text-sm">
                 Click to upload or drag and drop
@@ -118,15 +120,16 @@ export function ImportChatDialog(props: DialogProps) {
               disabled={isUploading}
               onClick={handleUploadClick}
               variant="outline"
+              className="rounded-[10px]"
             >
               {isUploading ? (
                 <>
-                  <Loader2Icon className="mr-2 size-4 animate-spin" />
+                  <Loader2Icon className="size-4 animate-spin" />
                   Importing...
                 </>
               ) : (
                 <>
-                  <UploadIcon className="mr-2 size-4" />
+                  <UploadIcon className="size-4" />
                   Select File
                 </>
               )}
@@ -142,9 +145,9 @@ export function ImportChatDialog(props: DialogProps) {
             type="file"
           />
 
-          <div className="rounded-lg bg-muted p-3">
-            <p className="font-medium text-xs">Note:</p>
-            <ul className="mt-1 list-inside list-disc space-y-1 text-muted-foreground text-xs">
+          <div className="bg-surface-base-light p-3 rounded-xl border border-bdr-soft">
+            <h6 className="font-medium text-base flex items-center gap-1.5 text-content-strong"><Info size={16} /> Note:</h6>
+            <ul className="mt-1 list-inside list-disc space-y-1 text-content-medium text-sm">
               <li>Imported chats will be marked as private</li>
               <li>A new chat ID will be assigned</li>
               <li>The chat title will include "(Imported)"</li>

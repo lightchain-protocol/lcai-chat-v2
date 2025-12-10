@@ -62,7 +62,7 @@ export function SystemPromptSelector({
         <SelectTrigger className="w-full">
           <SelectValue placeholder="Select a prompt..." />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="!max-h-75 overflow-y-auto">
           {presetTemplates.length > 0 && (
             <SelectGroup>
               <SelectLabel>Presets</SelectLabel>
@@ -109,6 +109,7 @@ export function SystemPromptSelector({
           size="icon"
           title="Create custom prompt"
           variant="outline"
+          className="px-4"
         >
           <Plus className="h-4 w-4" />
         </Button>

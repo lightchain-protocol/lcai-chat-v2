@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudDownloadIcon, UploadIcon } from "lucide-react";
+import { CloudDownloadIcon, MessageSquarePlus, UploadIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { User } from "next-auth";
@@ -8,7 +8,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
-import { MoreHorizontalIcon, PlusIcon, TrashIcon } from "@/components/icons";
+import { ChatSearch } from "@/components/chat-search";
+import { MoreHorizontalIcon, TrashIcon } from "@/components/icons";
 import { ImportChatDialog } from "@/components/import-chat-dialog";
 import { RestoreFromIPFSDialog } from "@/components/restore-from-ipfs-dialog";
 import {
@@ -19,7 +20,6 @@ import { SidebarUserNav } from "@/components/sidebar-user-nav";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
   SidebarMenu,
   useSidebar,
@@ -43,7 +43,6 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Button } from "./ui/button";
-import Link from "next/link";
 
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
@@ -76,45 +75,40 @@ export function AppSidebar({ user }: { user: User | undefined }) {
       <Sidebar className="group-data-[side=left]:border-r-0">
         <SidebarHeader>
           <SidebarMenu>
-            <div className="flex items-center justify-between gap-2 relative py-3">
-              <Link href="/" className={`flex items-center gap-3`}>
+            <div className="flex items-center justify-between gap-3 relative p-4 border-b border-bdr-light">
+              <div className="flex items-center gap-2.5">
                 <Image
-                  alt="LCAI Logo"
-                  className="hidden max-w-[150px] dark:block"
-                  height={150}
-                  priority={true}
-                  src={"/images/logo/logo.svg"}
-                  unoptimized={false}
-                  width={150}
-                />
-                <Image
-                  alt="LCAI Logo Dark"
-                  className="max-w-[150px] dark:hidden"
-                  height={150}
-                  priority={true}
-                  src={"/images/logo/logo-dark.svg"}
-                  unoptimized={false}
-                  width={150}
-                />
-              </Link>
-            </div>
+                alt="LCAI Logon Icon"
+                className="size-9"
+                priority={true}
+                src={"/images/logo/logo-only.svg"}
+                width={36}
+                height={36}
+              />
+              <div className="flex flex-col gap-0.5"><span className="text-sm text-content-primary font-semibold whitespace-nowrap">Lightchain AI</span><span class="text-xs -tracking-[0.12px] text-content-placeholder whitespace-nowrap">Decentralized AI Chat</span></div>
+              </div>
 
-            {user && (
-              <div className="flex gap-2.5">
-              <Button className="w-full" size="sm" type="button"
-                onClick={() => {
-                  setOpenMobile(false);
-                  router.push("/");
-                  router.refresh();
-                }}><PlusIcon size={20} /> New Chat
-              </Button>
+              <div className="flex flex-row gap-1">
+                <Button
+                  className={`h-8 p-1 md:h-fit md:p-2 ${user ? "text-content-default" : "text-content-extraLight"}`}
+                  onClick={() => {
+                    setOpenMobile(false);
+                    router.push("/");
+                    router.refresh();
+                  }}
+                  type="button"
+                  variant="ghost"
+                  disabled={!user}
+                >
+                  <MessageSquarePlus size={20} />
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      className="p-1 md:p-2"
+                      className={`h-8 p-1 md:h-fit md:p-2 ${user ? "text-content-default" : "text-content-extraLight"}`}
                       type="button"
-                      variant="outline"
-                      size="sm"
+                      variant="ghost"
+                      disabled={!user}
                     >
                       <MoreHorizontalIcon />
                     </Button>
@@ -144,43 +138,44 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-            )}
-
+            </div>
+            <ChatSearch />  
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
           <SidebarHistory user={user} />
         </SidebarContent>
-        <SidebarFooter>
+
+        {user && <div className="flex flex-col gap-2 px-4 py-6 border-t border-bdr-light">
           {user &&
-            !hasActiveSubscription.isLoading &&
-            hasActiveSubscription.data && (
-              <button
-                className="group relative flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/50 px-2 py-2 transition-colors hover:bg-zinc-900/50"
-                type="button"
-              >
-                <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
-                <div className="flex items-center gap-3">
-                  <div className="h-4 w-0.5 rounded-full bg-primary" />
-                  <div className="flex items-center divide-x">
-                    <div className="pr-2 font-semibold text-sm text-white">
-                      Tier {activeSubscription.data?.tier || "Pro"}
+          !hasActiveSubscription.isLoading &&
+          hasActiveSubscription.data && (
+            <button
+              className="group relative flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/50 px-2 py-2 transition-colors hover:bg-zinc-900/50"
+              type="button"
+            >
+              <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
+              <div className="flex items-center gap-3">
+                <div className="h-4 w-0.5 rounded-full bg-primary" />
+                <div className="flex items-center divide-x">
+                  <div className="pr-2 font-semibold text-sm text-white">
+                    Tier {activeSubscription.data?.tier || "Pro"}
+                  </div>
+                  <div className="pl-2 text-left">
+                    <div className="text-xs text-zinc-400">
+                      Subscription expires
                     </div>
-                    <div className="pl-2 text-left">
-                      <div className="text-xs text-zinc-400">
-                        Subscription expires
-                      </div>
-                      <div className="font-medium text-sm text-zinc-300">
-                        {formatDate(activeSubscription.data?.expiryTimestamp)}
-                      </div>
+                    <div className="font-medium text-sm text-zinc-300">
+                      {formatDate(activeSubscription.data?.expiryTimestamp)}
                     </div>
                   </div>
                 </div>
-                {/* <ChevronRightIcon className="size-5 text-zinc-400 transition-transform group-hover:translate-x-0.5" /> */}
-              </button>
-            )}
-          {user && <SidebarUserNav user={user} />}
-        </SidebarFooter>
+              </div>
+            </button>
+          )}
+        {user && <SidebarUserNav user={user} />}
+        </div>}
+          
       </Sidebar>
 
       <AlertDialog

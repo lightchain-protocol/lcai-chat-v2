@@ -3,16 +3,13 @@
 import {
   CloudUploadIcon,
   DownloadIcon,
-  MoonIcon,
   Settings2,
-  SunIcon,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
-import { useIsClient, useWindowSize } from "usehooks-ts";
+import { useWindowSize } from "usehooks-ts";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { SystemPromptEditor } from "@/components/system-prompt-editor";
 import { SystemPromptSelector } from "@/components/system-prompt-selector";
@@ -55,9 +52,6 @@ function PureChatHeader({
 
   const { width: windowWidth } = useWindowSize();
 
-  const { setTheme, resolvedTheme } = useTheme();
-  const isClient = useIsClient();
-
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const [editorDialogOpen, setEditorDialogOpen] = useState(false);
 
@@ -71,30 +65,6 @@ function PureChatHeader({
     if (!response.ok) return null;
     return response.json();
   });
-
-  const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
-    const prefersReducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
-
-    const currentTheme = resolvedTheme || "light";
-    const newMode = currentTheme === "light" ? "dark" : "light";
-
-    if (!document.startViewTransition || prefersReducedMotion) {
-      setTheme(newMode);
-      return;
-    }
-
-    const { clientX: x, clientY: y } = event;
-    const root = document.documentElement;
-
-    root.style.setProperty("--x", `${x}px`);
-    root.style.setProperty("--y", `${y}px`);
-
-    document.startViewTransition(() => {
-      setTheme(newMode);
-    });
-  };
 
   const handleExportChat = async () => {
     try {
@@ -165,7 +135,7 @@ function PureChatHeader({
 
       {(!open || windowWidth < 768) && (
         <Button
-          className="order-2 ml-auto h-8 px-2 md:order-1 md:ml-0 md:h-fit md:px-2"
+          className="order-2 ml-auto h-8 px-2 md:order-1 md:ml-0 md:h-fit md:px-2 bg-surface-base-faint text-content-default"
           onClick={() => {
             router.push("/");
             router.refresh();
@@ -189,7 +159,7 @@ function PureChatHeader({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              className="order-3 h-8 px-2 md:h-fit md:px-2"
+              className="order-3 h-8 px-2 md:h-fit md:px-2 bg-surface-base-faint text-content-default"
               title="Export, backup, and import options"
               type="button"
               variant="outline"
@@ -216,7 +186,7 @@ function PureChatHeader({
 
       {!isReadonly && onSystemPromptChange && (
         <Button
-          className="order-4 h-8 px-2 md:h-fit md:px-2"
+          className="order-4 h-8 px-2 md:h-fit md:px-2 bg-surface-base-faint text-content-default"
           onClick={() => setPromptDialogOpen(true)}
           title="System prompt settings"
           type="button"
@@ -226,20 +196,6 @@ function PureChatHeader({
           <Settings2 />
         </Button>
       )}
-
-      <Button
-        className="order-5 h-8 px-2 md:ml-auto md:h-fit md:px-2"
-        onClick={toggleTheme}
-        type="button"
-        variant="outline"
-      >
-        <span className="sr-only">
-          {isClient
-            ? `Toggle ${resolvedTheme === "dark" ? "light" : "dark"} mode`
-            : "Toggle theme"}
-        </span>
-        {isClient && resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
-      </Button>
 
       <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
         <DialogContent>

@@ -260,7 +260,7 @@ const PureChatItem = ({
             placeholder="Enter chat title"
             value={newTitle}
           />
-          <DialogFooter>
+          <DialogFooter className="flex gap-3">
             <Button
               disabled={isRenaming}
               onClick={() => setShowRenameDialog(false)}
