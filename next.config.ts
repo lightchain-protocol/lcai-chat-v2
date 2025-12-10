@@ -4,6 +4,13 @@ const nextConfig: NextConfig = {
   experimental: {
     ppr: true,
   },
+  serverExternalPackages: [
+    "pino-pretty",
+    "lokijs",
+    "encoding",
+    "blst",
+    "snarkjs",
+  ],
   webpack(config) {
     config.externals.push(
       "pino-pretty",
@@ -15,6 +22,7 @@ const nextConfig: NextConfig = {
 
     return config;
   },
+  turbopack: {},
   images: {
     remotePatterns: [
       {
