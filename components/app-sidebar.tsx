@@ -36,13 +36,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./ui/alert-dialog";
+import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Button } from "./ui/button";
 
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
@@ -75,22 +75,30 @@ export function AppSidebar({ user }: { user: User | undefined }) {
       <Sidebar className="group-data-[side=left]:border-r-0">
         <SidebarHeader>
           <SidebarMenu>
-            <div className="flex items-center justify-between gap-3 relative p-4 border-b border-bdr-light">
+            <div className="relative flex items-center justify-between gap-3 border-bdr-light border-b p-4">
               <div className="flex items-center gap-2.5">
                 <Image
-                alt="LCAI Logon Icon"
-                className="size-9"
-                priority={true}
-                src={"/images/logo/logo-only.svg"}
-                width={36}
-                height={36}
-              />
-              <div className="flex flex-col gap-0.5"><span className="text-sm text-content-primary font-semibold whitespace-nowrap">Lightchain AI</span><span class="text-xs -tracking-[0.12px] text-content-placeholder whitespace-nowrap">Decentralized AI Chat</span></div>
+                  alt="LCAI Logon Icon"
+                  className="size-9"
+                  height={36}
+                  priority={true}
+                  src={"/images/logo/logo-only.svg"}
+                  width={36}
+                />
+                <div className="flex flex-col gap-0.5">
+                  <span className="whitespace-nowrap font-semibold text-content-primary text-sm">
+                    Lightchain AI
+                  </span>
+                  <span className="-tracking-[0.12px] whitespace-nowrap text-content-placeholder text-xs">
+                    Decentralized AI Chat
+                  </span>
+                </div>
               </div>
 
               <div className="flex flex-row gap-1">
                 <Button
                   className={`h-8 p-1 md:h-fit md:p-2 ${user ? "text-content-default" : "text-content-extraLight"}`}
+                  disabled={!user}
                   onClick={() => {
                     setOpenMobile(false);
                     router.push("/");
@@ -98,7 +106,6 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   }}
                   type="button"
                   variant="ghost"
-                  disabled={!user}
                 >
                   <MessageSquarePlus size={20} />
                 </Button>
@@ -106,9 +113,9 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   <DropdownMenuTrigger asChild>
                     <Button
                       className={`h-8 p-1 md:h-fit md:p-2 ${user ? "text-content-default" : "text-content-extraLight"}`}
+                      disabled={!user}
                       type="button"
                       variant="ghost"
-                      disabled={!user}
                     >
                       <MoreHorizontalIcon />
                     </Button>
@@ -139,43 +146,44 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 </DropdownMenu>
               </div>
             </div>
-            <ChatSearch />  
+            <ChatSearch />
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
           <SidebarHistory user={user} />
         </SidebarContent>
 
-        {user && <div className="flex flex-col gap-2 px-4 py-6 border-t border-bdr-light">
-          {user &&
-          !hasActiveSubscription.isLoading &&
-          hasActiveSubscription.data && (
-            <button
-              className="group relative flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/50 px-2 py-2 transition-colors hover:bg-zinc-900/50"
-              type="button"
-            >
-              <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
-              <div className="flex items-center gap-3">
-                <div className="h-4 w-0.5 rounded-full bg-primary" />
-                <div className="flex items-center divide-x">
-                  <div className="pr-2 font-semibold text-sm text-white">
-                    Tier {activeSubscription.data?.tier || "Pro"}
-                  </div>
-                  <div className="pl-2 text-left">
-                    <div className="text-xs text-zinc-400">
-                      Subscription expires
+        {user && (
+          <div className="flex flex-col gap-2 border-bdr-light border-t px-4 py-6">
+            {user &&
+              !hasActiveSubscription.isLoading &&
+              hasActiveSubscription.data && (
+                <button
+                  className="group relative flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/50 px-2 py-2 transition-colors hover:bg-zinc-900/50"
+                  type="button"
+                >
+                  <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
+                  <div className="flex items-center gap-3">
+                    <div className="h-4 w-0.5 rounded-full bg-primary" />
+                    <div className="flex items-center divide-x">
+                      <div className="pr-2 font-semibold text-sm text-white">
+                        Tier {activeSubscription.data?.tier || "Pro"}
+                      </div>
+                      <div className="pl-2 text-left">
+                        <div className="text-xs text-zinc-400">
+                          Subscription expires
+                        </div>
+                        <div className="font-medium text-sm text-zinc-300">
+                          {formatDate(activeSubscription.data?.expiryTimestamp)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="font-medium text-sm text-zinc-300">
-                      {formatDate(activeSubscription.data?.expiryTimestamp)}
-                    </div>
                   </div>
-                </div>
-              </div>
-            </button>
-          )}
-        {user && <SidebarUserNav user={user} />}
-        </div>}
-          
+                </button>
+              )}
+            {user && <SidebarUserNav user={user} />}
+          </div>
+        )}
       </Sidebar>
 
       <AlertDialog
