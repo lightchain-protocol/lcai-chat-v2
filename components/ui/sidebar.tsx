@@ -139,7 +139,7 @@ const SidebarProvider = React.forwardRef<
         <TooltipProvider delayDuration={0}>
           <div
             className={cn(
-              "group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar",
+              "group/sidebar-wrapper flex min-h-[calc(100svh-58px)] md:min-h-[calc(100svh-80px)] w-full has-[[data-variant=inset]]:bg-sidebar",
               className
             )}
             ref={ref}
@@ -243,7 +243,7 @@ const Sidebar = React.forwardRef<
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-[var(--sidebar-width)] transition-[left,right,width] duration-200 ease-linear md:flex",
+            "fixed top-16 md:top-20 h-[calc(100svh-58px)] md:h-[calc(100svh-80px)] inset-y-0 z-10 hidden w-[var(--sidebar-width)] transition-[left,right,width] duration-200 ease-linear md:flex",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -256,7 +256,7 @@ const Sidebar = React.forwardRef<
           {...props}
         >
           <div
-            className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
+            className="border-r border-bdr-light bg-surface-base-subtle flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
             data-sidebar="sidebar"
           >
             {children}
@@ -365,7 +365,7 @@ const SidebarHeader = React.forwardRef<
 >(({ className, ...props }, ref) => {
   return (
     <div
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex flex-col gap-2", className)}
       data-sidebar="header"
       ref={ref}
       {...props}
@@ -380,7 +380,7 @@ const SidebarFooter = React.forwardRef<
 >(({ className, ...props }, ref) => {
   return (
     <div
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex flex-col gap-2 px-4 py-6 border-t border-bdr-light", className)}
       data-sidebar="footer"
       ref={ref}
       {...props}
@@ -495,39 +495,38 @@ const SidebarGroupContent = React.forwardRef<
 SidebarGroupContent.displayName = "SidebarGroupContent";
 
 const SidebarMenu = React.forwardRef<
-  HTMLUListElement,
-  React.ComponentProps<"ul">
+  HTMLElement,
+  React.ComponentProps<"div">
 >(({ className, ...props }, ref) => (
-  <ul
-    className={cn("flex w-full min-w-0 flex-col gap-1", className)}
+  <div
+    className={cn("", className)}
     data-sidebar="menu"
-    ref={ref}
     {...props}
   />
 ));
 SidebarMenu.displayName = "SidebarMenu";
 
 const SidebarMenuItem = React.forwardRef<
-  HTMLLIElement,
-  React.ComponentProps<"li">
+  HTMLDivElement,
+  React.ComponentProps<"div">
 >(({ className, ...props }, ref) => (
-  <li
+  <div
+    ref={ref}
     className={cn("group/menu-item relative", className)}
     data-sidebar="menu-item"
-    ref={ref}
     {...props}
   />
 ));
 SidebarMenuItem.displayName = "SidebarMenuItem";
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+  "peer/menu-button group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 text-content-strong flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-[width,height,padding] hover:bg-surface-base-subtle focus-visible:ring-2 transition-all duration-350 active:bg-surface-base-subtle disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-surface-base-subtle data-[state=open]:hover:bg-surface-base-subtle [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        default: "hover:bg-accent",
         outline:
-          "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
+          "bg-surface-base-subtle hover:bg-sidebar-accent hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
       },
       size: {
         default: "h-8 text-sm",

@@ -287,7 +287,7 @@ function PureMultimodalInput({
       />
 
       <PromptInput
-        className="rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
+        className="border border-bdr-light p-3 transition-all duration-200"
         onSubmit={(event) => {
           event.preventDefault();
           if (status !== "ready") {
@@ -476,7 +476,7 @@ function PureModelSelectorCompact({
       value={selectedModel?.name}
     >
       <Trigger
-        className="flex h-8 items-center gap-2 rounded-lg border-0 bg-background px-2 text-foreground shadow-none transition-colors hover:bg-accent focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+        className="flex h-8 items-center gap-2 rounded-lg border-0 px-2 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0"
         type="button"
       >
         <CpuIcon size={16} />
@@ -485,14 +485,14 @@ function PureModelSelectorCompact({
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
-      <PromptInputModelSelectContent className="min-w-[260px] p-0">
+      <PromptInputModelSelectContent className="max-w-[300px] p-0">
         <div className="flex flex-col gap-px">
           {chatModels.map((model) => (
             <SelectItem key={model.id} value={model.name}>
-              <div className="truncate font-medium text-xs">{model.name}</div>
-              <div className="mt-px truncate text-[10px] text-muted-foreground leading-tight">
+              <h6 className="truncate font-medium text-xs mb-0.5">{model.name}</h6>
+              <p className="mt-px text-[10px] text-muted-foreground leading-tight">
                 {model.description}
-              </div>
+              </p>
             </SelectItem>
           ))}
         </div>

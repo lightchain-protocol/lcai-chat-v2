@@ -6,22 +6,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { SearchResult } from "@/lib/db/queries";
 import { cn } from "@/lib/utils";
 
-type ChatSearchProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-};
-
-export function ChatSearch({ open, onOpenChange }: ChatSearchProps) {
+export function ChatSearch() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -71,13 +60,12 @@ export function ChatSearch({ open, onOpenChange }: ChatSearchProps) {
 
   const handleResultClick = useCallback(
     (chatId: string, messageId: string) => {
-      onOpenChange(false);
       router.push(`/chat/${chatId}#${messageId}`);
       // Reset search state
       setQuery("");
       setResults([]);
     },
-    [onOpenChange, router]
+    [router]
   );
 
   const handleClear = useCallback(() => {
@@ -86,20 +74,15 @@ export function ChatSearch({ open, onOpenChange }: ChatSearchProps) {
   }, []);
 
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0">
-        <DialogHeader className="px-6 pt-6 pb-4">
-          <DialogTitle>Search Messages</DialogTitle>
-        </DialogHeader>
-
-        <div className="px-6 pb-4">
+    <div className="p-4">
+      <div>
           <div className="relative">
-            <Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+            <Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-content-soft" />
             <Input
               autoFocus
-              className="pr-10 pl-10"
+              className="pr-4 pl-8"
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search your messages..."
+              placeholder="Search Chats"
               type="text"
               value={query}
             />
@@ -117,25 +100,17 @@ export function ChatSearch({ open, onOpenChange }: ChatSearchProps) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
+        <div className="flex-1 overflow-y-auto">
           {isSearching && (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center py-2">
               <div className="text-muted-foreground text-sm">Searching...</div>
             </div>
           )}
 
           {!isSearching && query && results.length === 0 && (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center py-2">
               <div className="text-muted-foreground text-sm">
                 No results found for &quot;{query}&quot;
-              </div>
-            </div>
-          )}
-
-          {!isSearching && !query && (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-muted-foreground text-sm">
-                Type to search your messages
               </div>
             </div>
           )}
@@ -190,7 +165,6 @@ export function ChatSearch({ open, onOpenChange }: ChatSearchProps) {
             </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronUp } from "lucide-react";
+import { ChevronsUpDown, ChevronUp } from "lucide-react";
 import Image from "next/image";
 import type { User } from "next-auth";
 import { signOut, useSession } from "next-auth/react";
@@ -55,11 +55,11 @@ export function SidebarUserNav({ user }: { user: User }) {
 
   return (
     <SidebarMenu>
-      <SidebarMenuItem>
+      <div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             {status === "loading" ? (
-              <SidebarMenuButton className="h-10 justify-between bg-background data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
+              <SidebarMenuButton className="h-10 justify-between data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
                 <div className="flex flex-row gap-2">
                   <div className="size-6 animate-pulse rounded-full bg-zinc-500/30" />
                   <span className="animate-pulse rounded-md bg-zinc-500/30 text-transparent">
@@ -72,7 +72,7 @@ export function SidebarUserNav({ user }: { user: User }) {
               </SidebarMenuButton>
             ) : (
               <SidebarMenuButton
-                className="h-10 bg-background data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                className="h-10 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 data-testid="user-nav-button"
               >
                 <Image
@@ -85,7 +85,7 @@ export function SidebarUserNav({ user }: { user: User }) {
                 <span className="truncate" data-testid="user-username">
                   {formattedUsername}
                 </span>
-                <ChevronUp className="ml-auto" />
+                <ChevronsUpDown className="ml-auto" />
               </SidebarMenuButton>
             )}
           </DropdownMenuTrigger>
@@ -106,7 +106,7 @@ export function SidebarUserNav({ user }: { user: User }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </SidebarMenuItem>
+      </div>
     </SidebarMenu>
   );
 }

@@ -69,7 +69,7 @@ export function VisibilitySelector({
         )}
       >
         <Button
-          className="hidden h-8 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 md:flex md:h-fit md:px-2"
+          className="hidden h-8 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 md:flex md:h-fit md:px-2 bg-surface-base-faint text-content-default"
           data-testid="visibility-selector"
           variant="outline"
         >

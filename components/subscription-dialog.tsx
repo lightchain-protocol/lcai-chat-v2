@@ -67,7 +67,7 @@ const SubscriptionDialog = (props: DialogProps) => {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-0 sm:max-w-4xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-3xl bg-background p-0 sm:max-w-4xl">
         {/* Gradient decorations */}
         <div className="-top-20 -left-20 absolute z-[-1] size-64 rounded-full bg-[#7064E9] opacity-20 blur-3xl" />
         <div className="-bottom-20 -right-20 absolute z-[-1] size-64 rounded-full bg-[#DD00AC] opacity-20 blur-3xl" />
@@ -75,7 +75,7 @@ const SubscriptionDialog = (props: DialogProps) => {
         <div className="relative p-8">
           <DialogHeader className="mb-8">
             <DialogTitle asChild>
-              <h3 className="text-center font-semibold text-2xl text-white">
+              <h3 className="text-center font-semibold text-3xl text-content-dark">
                 Choose Your Plan
               </h3>
             </DialogTitle>
@@ -83,14 +83,14 @@ const SubscriptionDialog = (props: DialogProps) => {
 
           {/* Billing Period Toggle */}
           <div className="mb-8 flex justify-center">
-            <div className="inline-flex items-center gap-1 rounded-xl bg-zinc-900 p-1">
+            <div className="inline-flex items-center gap-1 rounded-xl bg-surface-m-light p-1">
               {billingPeriods.map((period) => (
                 <button
                   className={cn(
                     "rounded-lg px-6 py-2 font-medium text-sm transition-all",
                     billingPeriod === period.value
-                      ? "bg-zinc-800 text-white"
-                      : "text-zinc-400 hover:text-white",
+                      ? "bg-background"
+                      : "text-content-default hover:bg-background",
                     subscribeMutation.isPending || tiers.isLoading
                       ? "cursor-not-allowed opacity-50"
                       : ""
@@ -135,8 +135,8 @@ const SubscriptionDialog = (props: DialogProps) => {
                   className={cn(
                     "relative flex flex-col rounded-2xl p-6",
                     tier.popular
-                      ? "border-2 border-[#7064E9] bg-zinc-900"
-                      : "border border-zinc-800 bg-zinc-900/50"
+                      ? "border-2 border-primary"
+                      : "border border-bdr-default"
                   )}
                   key={tier.name}
                 >
@@ -150,22 +150,22 @@ const SubscriptionDialog = (props: DialogProps) => {
                     )}
 
                     <div className="mb-6 text-center">
-                      <h4 className="mb-3 font-semibold text-white text-xl">
+                      <h4 className="mb-3 font-semibold text-content-primary text-xl">
                         {tier.name}
                       </h4>
                       <div className="flex items-baseline justify-center gap-1">
-                        <span className="font-bold text-4xl text-white">
+                        <span className="font-bold text-4xl text-content-primary">
                           {billingPeriod === "monthly"
                             ? tier.monthlyPrice
                             : tier.yearlyPrice}{" "}
                           <span className="text-sm">LCAI</span>
                         </span>
-                        <span className="text-sm text-zinc-400">
+                        <span className="text-sm text-content-light">
                           /{billingPeriod === "monthly" ? "month" : "year"}
                         </span>
                       </div>
                       {billingPeriod === "yearly" && (
-                        <p className="mt-2 text-xs text-zinc-500">
+                        <p className="mt-2 text-xs text-content-light">
                           Save $
                           {(tier.monthlyPrice * 12 - tier.yearlyPrice).toFixed(
                             2
@@ -178,10 +178,10 @@ const SubscriptionDialog = (props: DialogProps) => {
                     <ul className="mb-6 space-y-3">
                       {tier.features.map((feature) => (
                         <li
-                          className="flex items-start gap-2 text-sm text-zinc-300"
+                          className="flex items-start gap-2 text-sm text-content-light"
                           key={feature}
                         >
-                          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-[#7064E9]">
+                          <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-primary">
                             <CheckIcon className="size-3 text-white" />
                           </span>
                           <span>{feature}</span>
@@ -215,7 +215,7 @@ const SubscriptionDialog = (props: DialogProps) => {
           {/* Cancel Button */}
           <div className="flex justify-center">
             <Button
-              className="min-w-[200px] border-zinc-800"
+              className="min-w-[200px]"
               disabled={subscribeMutation.isPending}
               onClick={() => props.onOpenChange?.(false)}
               variant="outline"

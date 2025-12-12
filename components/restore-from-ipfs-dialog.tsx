@@ -1,7 +1,7 @@
 "use client";
 
 import type { DialogProps } from "@radix-ui/react-dialog";
-import { Loader2Icon } from "lucide-react";
+import { Info, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -60,14 +60,14 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg rounded-lg sm:rounded-3xl">
         <DialogHeader>
           <DialogTitle>Restore Chat from IPFS</DialogTitle>
           <DialogDescription>
             Enter the IPFS CID (Content Identifier) to restore a chat backup.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 mt-3">
           <div className="space-y-2">
             <Label htmlFor="cid">IPFS CID</Label>
             <Input
@@ -78,9 +78,9 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
               value={cid}
             />
           </div>
-          <div className="rounded-lg bg-muted p-3">
-            <p className="font-medium text-xs">Note:</p>
-            <ul className="mt-1 list-inside list-disc space-y-1 text-muted-foreground text-xs">
+          <div className="bg-surface-base-light p-3 rounded-xl border border-bdr-soft">
+            <h6 className="font-medium text-base flex items-center gap-1.5 text-content-strong"><Info size={16} /> Note:</h6>
+            <ul className="mt-1 list-inside list-disc space-y-1 text-content-medium text-sm">
               <li>Restored chats will be marked as private</li>
               <li>A new chat ID will be assigned</li>
               <li>The chat title will include "(Restored from IPFS)"</li>
@@ -88,7 +88,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
             </ul>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex gap-2">
           <Button
             disabled={isRestoring}
             onClick={() => props.onOpenChange?.(false)}
@@ -100,7 +100,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
           <Button disabled={isRestoring} onClick={handleRestore} type="button">
             {isRestoring ? (
               <>
-                <Loader2Icon className="mr-2 size-4 animate-spin" />
+                <Loader2Icon className="size-4 animate-spin" />
                 Restoring...
               </>
             ) : (
