@@ -2,7 +2,9 @@
 
 import {
   CloudUploadIcon,
+  Download,
   DownloadIcon,
+  Loader,
   Settings2,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
@@ -30,6 +32,9 @@ import {
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
+import AlertSuccess from "./ui/toast/AlertSuccess";
+import AlertError from "./ui/toast/AlertError";
+import AlertInfo from "./ui/toast/AlertInfo";
 
 const FILENAME_REGEX = /filename="(.+)"/;
 
@@ -90,10 +95,14 @@ function PureChatHeader({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success("Chat exported successfully!");
+      toast.custom(() => (
+        <AlertSuccess title='Chat exported successfully!' />
+        ));
     } catch (error) {
       console.error("Export error:", error);
-      toast.error("Failed to export chat");
+      toast.custom(() => (
+        <AlertError title='Failed to export chat' />
+        ));
     }
   };
 
@@ -104,8 +113,14 @@ function PureChatHeader({
       });
 
       toast.promise(responsePromise, {
-        loading: "Backing up chat...",
-        success: async (response) => {
+         loading: (
+              <AlertInfo
+                title="Backing up chat..."
+                icon={<Loader className="size-5 animate-spin text-white" />}
+              />
+            ),
+
+            success: async (response) => {
           const data = await response.json();
 
           if (!response.ok) {
@@ -118,19 +133,32 @@ function PureChatHeader({
           // Refresh the first page of sidebar history to show backup icon
           await globalMutate("/api/history?limit=20");
 
-          return `Chat backed up! CID: ${data.cid.slice(0, 12)}...`;
+          return <AlertInfo
+                title={`Chat backed up! CID: ${data.cid.slice(0, 12)}...`}
+              /> ;
         },
-        error: "Failed to backup chat",
+        error: (
+          <AlertError
+            title="Failed to backup chat"
+          />
+        ),
+    
+        style: {
+          background: "transparent",
+          padding: 0,
+          border: "none",
+          boxShadow: "none",
+        },
       });
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to backup chat"
-      );
+      toast.custom(() => (
+        <AlertError title={error instanceof Error ? error?.message : "Failed to backup chat"} />
+        ));
     }
   };
 
   return (
-    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-1.5 md:px-2">
+    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-3 md:py-4.5 md:px-2">
       <SidebarToggle />
 
       {(!open || windowWidth < 768) && (
@@ -159,13 +187,13 @@ function PureChatHeader({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              className="order-3 h-8 px-2 md:h-fit md:px-2 bg-surface-base-faint text-content-default"
+              className="order-3 h-9 px-2 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight data-[state=open]:bg-surface-base-extraLight"
               title="Export, backup, and import options"
               type="button"
               variant="outline"
             >
-              <span className="hidden md:inline">Export & Backup</span>
-              <DownloadIcon />
+              <span className="hidden md:inline text-sm leading-0">Export & Backup</span>
+              <Download className="size-4.5!" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -186,19 +214,19 @@ function PureChatHeader({
 
       {!isReadonly && onSystemPromptChange && (
         <Button
-          className="order-4 h-8 px-2 md:h-fit md:px-2 bg-surface-base-faint text-content-default"
+          className="order-4 h-9 px-2 md:h-fit md:px-2 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight"
           onClick={() => setPromptDialogOpen(true)}
           title="System prompt settings"
           type="button"
           variant="outline"
         >
-          <span className="hidden md:inline">System Prompt</span>
-          <Settings2 />
+          <span className="hidden md:inline text-sm leading-0">System Prompt</span>
+          <Settings2 className="size-4.5!" />
         </Button>
       )}
 
       <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:rounded-3xl">
           <DialogHeader>
             <DialogTitle>System Prompt Settings</DialogTitle>
             <DialogDescription>
@@ -218,6 +246,7 @@ function PureChatHeader({
               }}
               value={systemPromptId}
             />
+            <p className="text-sm mt-3 text-content-default">Pick a preset to customize the assistant’s behavior.</p>
           </div>
         </DialogContent>
       </Dialog>

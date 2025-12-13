@@ -16,7 +16,7 @@ interface PopupMobileMenuProps {
 }
 
 const socialLinks = [
-    { href: 'https://linktr.ee/lightchainai', label: 'Linktr', icon: <Network size={20} /> },
+    { href: 'https://linktr.ee/lightchainai', label: 'Linktr', icon: <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M4 10h16"></path><path d="M6.5 4.5l11 11"></path><path d="M6.5 15.5l11 -11"></path><path d="M12 10v-8"></path><path d="M12 15v7"></path></svg> },
     { href: 'https://x.com/LightchainAI', label: 'X / Twitter', icon: <Twitter size={20} /> },
     { href: 'https://www.instagram.com/light.chain.ai/', label: 'Instagram', icon: <Instagram size={20} /> },
     { href: 'https://discord.com/invite/lightchain', label: 'Discord', icon: <svg

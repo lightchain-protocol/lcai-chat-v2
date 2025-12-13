@@ -28,6 +28,9 @@ import { fetcher } from "@/lib/utils";
 import { LoaderIcon } from "./icons";
 import { ChatItem } from "./sidebar-history-item";
 import Image from "next/image";
+import AlertInfo from "./ui/toast/AlertInfo";
+import { Loader } from "lucide-react";
+import AlertError from "./ui/toast/AlertError";
 
 type GroupedChats = {
   today: Chat[];
@@ -143,7 +146,10 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
     });
 
     toast.promise(deletePromise, {
-      loading: "Deleting chat...",
+      loading:<AlertInfo
+        title="Deleting chat..."
+        icon={<Loader className="size-5 animate-spin text-white" />}
+      />,
       success: () => {
         mutate((chatHistories) => {
           if (chatHistories) {
@@ -154,9 +160,17 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
           }
         });
 
-        return "Chat deleted successfully";
+        return <AlertInfo title="Chat deleted successfully" />;
       },
-      error: "Failed to delete chat",
+      error: <AlertError title="Failed to delete chat" />,
+
+      style: {
+        background: "transparent",
+        padding: 0,
+        border: "none",
+        boxShadow: "none",
+      },
+
     });
 
     setShowDeleteDialog(false);
@@ -368,7 +382,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
       </SidebarGroup>
 
       <AlertDialog onOpenChange={setShowDeleteDialog} open={showDeleteDialog}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:rounded-3xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>

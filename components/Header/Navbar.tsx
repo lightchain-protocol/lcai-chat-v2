@@ -58,14 +58,14 @@ export default function Navbar() {
 
               <div
                 className={clsx(
-                  "lightchain-megamenu absolute top-full z-40 opacity-0 invisible transition-opacity duration-300 ease-in-out bg-background",
+                  "lightchain-megamenu absolute top-[100%-10px] z-40 opacity-0 invisible transition-opacity duration-300 ease-in-out bg-background",
                   align,
                   open === idx && "visible opacity-100"
                 )}
               >
                 <div
                   className={clsx(
-                    "wrapper mt-0 overflow-hidden rounded-b-2xl border border-br-light-soft border-t-0 bg-surface-x-soft-hex shadow-[0_20px_20px_8px_rgba(0,0,0,0.09)]",
+                    "wrapper mt-0 overflow-hidden rounded-b-2xl border border-br-light-soft border-t-0 bg-surface-x-soft-hex shadow-[0_8px_24px_-6px_rgba(12,12,13,0.08),_0_4px_4px_-4px_rgba(12,12,13,0.05)]",
                     width,
                     "max-w-[95vw] xl:max-w-none"
                   )}

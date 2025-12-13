@@ -18,18 +18,18 @@ export const Greeting = () => {
 
   return (
     <div
-      className="mx-auto mt-4 flex size-full max-w-3xl flex-col items-center justify-center px-4 md:mt-16 md:px-8"
+      className="mx-auto mt-4 flex size-full max-w-3xl flex-col items-center justify-center px-4 md:px-8"
       key="overview"
     >
       <motion.h1
         animate={{ opacity: 1, y: 0 }}
-        className="mx-auto max-w-[600px] text-center font-medium text-[40px] text-content-dark leading-[1.05] tracking-[-1.4px] md:text-[50px] lg:text-[60px] xl:text-[70px]"
+        className="mx-auto max-w-[600px] text-center font-medium text-[40px] text-content-dark leading-[1.05] tracking-[-1.4px] md:text-[50px] lg:text-[55px] xl:text-[60px]"
         exit={{ opacity: 0, y: 10 }}
         initial={{ opacity: 0, y: 10 }}
         transition={{ delay: 0.2, duration: 0.5 }}
       >
         Start talking with <span className="text-content-light">Lightchain</span>{" "}
-        <span className="bg-linear-to-r from-[#DD00AC] to-[#7064E9] bg-gradient-primary bg-clip-text text-transparent">
+        <span className="bg-gradient-primary bg-clip-text text-transparent">
           AI Chat
         </span>
       </motion.h1>
@@ -70,13 +70,13 @@ export const Greeting = () => {
           ) : hasActiveSubscription.data ? null : (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
-              className="mx-auto w-full max-w-167 rounded-3xl p-0.5 bg-linear-to-r from-[#664BFD] to-[#EEA180] mt-10"
+              className="mx-auto w-full max-w-170 rounded-3xl p-1 bg-linear-to-r from-[#664BFD] to-[#EEA180] mt-10"
               exit={{ opacity: 0, y: 10 }}
               initial={{ opacity: 0, y: 10 }}
               transition={{ delay: 0.6, duration: 0.5 }}
             >
               <div className="p-5 bg-background rounded-[22px]">
-                <div className="flex flex-col gap-4 lg:grid grid-cols-2 lg:items-end">
+                <div className="flex flex-col gap-y-4 lg:grid grid-cols-2 lg:items-end">
                   <div className="space-y-5 lg:border-r border-surface-base-extraLight sm:pr-6">
                     <div className="flex size-11 items-center justify-center rounded-full bg-surface-base-brand-strong">
                       <Crown className="siz-6 text-white" />
@@ -94,15 +94,23 @@ export const Greeting = () => {
                   <div className="space-y-2 lg:pl-6">
                     <div className="flex items-baseline gap-2 text-sm text-content-medium">
                       <Check size={16} className="translate-0.5" />
-                      <span>Choose from Basic, Pro, or Enterprise plans</span>
+                      <span>Pause subscription anytime</span>
                     </div>
                     <div className="flex items-baseline gap-2 text-sm text-content-medium">
                       <Check size={16} className="translate-0.5" />
-                      <span>Flexible monthly or yearly billing</span>
+                      <span>Cancel anytime</span>
                     </div>
                     <div className="flex items-baseline gap-2 text-sm text-content-medium">
                       <Check size={16} className="translate-0.5" />
-                      <span>Cancel anytime, no commitments</span>
+                      <span>Choose from Basic, Pro, or <br /> Enterprise plans</span>
+                    </div>
+                    <div className="flex items-baseline gap-2 text-sm text-content-medium">
+                      <Check size={16} className="translate-0.5" />
+                      <span>Save chat history</span>
+                    </div>
+                    <div className="flex items-baseline gap-2 text-sm text-content-medium">
+                      <Check size={16} className="translate-0.5" />
+                      <span>Flexible monthly / yearly billing</span>
                     </div>
                   </div>
                 </div>

@@ -108,15 +108,15 @@ export default function Header() {
               >
                 <Image
                   src="/images/logo/logo-dark.svg"
-                  width={160}
-                  height={32}
+                  width={200}
+                  height={39}
                   alt="Lightchain"
                   className="dark:hidden"
                 />
                 <Image
                   src="/images/logo/logo.svg"
-                  width={160}
-                  height={32}
+                  width={200}
+                  height={39}
                   alt="Lightchain"
                   className="hidden dark:block"
                 />

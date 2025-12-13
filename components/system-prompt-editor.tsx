@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import AlertError from "./ui/toast/AlertError";
 
 type SystemPromptEditorProps = {
   open: boolean;
@@ -32,7 +33,9 @@ export function SystemPromptEditor({
 
   const handleSave = async () => {
     if (!name.trim() || !prompt.trim()) {
-      toast.error("Please fill in all fields");
+      toast.custom(() => (
+        <AlertError title='Please fill in all fields' />
+        ));
       return;
     }
 
@@ -58,9 +61,9 @@ export function SystemPromptEditor({
       onSave();
     } catch (error) {
       console.error("Error saving prompt:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to save prompt"
-      );
+      toast.custom(() => (
+        <AlertError title={error instanceof Error ? error.message : "Failed to save prompt"} />
+      ));
     } finally {
       setLoading(false);
     }

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import AlertError from "./ui/toast/AlertError";
 
 export function RestoreFromIPFSDialog(props: DialogProps) {
   const [cid, setCid] = useState("");
@@ -24,7 +25,9 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
 
   const handleRestore = async () => {
     if (!cid.trim()) {
-      toast.error("Please enter a valid CID");
+      toast.custom(() => (
+        <AlertError title="Please enter a valid CID" />
+      ));
       return;
     }
 
@@ -50,9 +53,9 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
       router.push(`/chat/${data.chatId}`);
       router.refresh();
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to restore chat"
-      );
+      toast.custom(() => (
+        <AlertError title={error instanceof Error ? error.message : "Failed to restore chat"} />
+        ));
     } finally {
       setIsRestoring(false);
     }

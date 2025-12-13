@@ -16,6 +16,7 @@ import {
 import { type SubscriptionTier, tierDetails } from "@/config/subscription";
 import useSubscription from "@/hooks/use-subscription";
 import { cn } from "@/lib/utils";
+import AlertError from "./ui/toast/AlertError";
 
 const billingPeriods = [
   { value: "monthly", label: "Monthly" },
@@ -52,12 +53,12 @@ const SubscriptionDialog = (props: DialogProps) => {
       toast.success("Subscription successful");
     },
     onError: (error: any) => {
-      toast.error(
-        error.walk?.()?.shortMessage ||
+      toast.custom(() => (
+        <AlertError title={error.walk?.()?.shortMessage ||
           error.walk?.()?.message ||
           error.message ||
-          "Subscription failed"
-      );
+          "Subscription failed"} />
+      ));
     },
   });
 

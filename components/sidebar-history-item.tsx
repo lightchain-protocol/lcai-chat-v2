@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import { CloudIcon, CopyIcon, ShieldCheckIcon } from "lucide-react";
+import { CloudIcon, CopyIcon, ExternalLink, Globe, Loader, Lock, Pencil, ShieldCheckIcon, Trash } from "lucide-react";
 import Link from "next/link";
 import { memo, useState } from "react";
 import { toast } from "sonner";
@@ -8,12 +8,7 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Chat } from "@/lib/db/schema";
 import {
   CheckCircleFillIcon,
-  GlobeIcon,
-  LockIcon,
   MoreHorizontalIcon,
-  PencilEditIcon,
-  ShareIcon,
-  TrashIcon,
 } from "./icons";
 import { Button } from "./ui/button";
 import {
@@ -41,6 +36,8 @@ import {
   SidebarMenuItem,
 } from "./ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import AlertError from "./ui/toast/AlertError";
+import AlertInfo from "./ui/toast/AlertInfo";
 
 const PureChatItem = ({
   chat,
@@ -67,7 +64,9 @@ const PureChatItem = ({
 
   const handleRename = () => {
     if (!newTitle.trim()) {
-      toast.error("Title cannot be empty");
+      toast.custom(() => (
+        <AlertError title='Title cannot be empty' />
+      ));
       return;
     }
 
@@ -81,19 +80,36 @@ const PureChatItem = ({
     });
 
     toast.promise(renamePromise, {
-      loading: "Renaming chat...",
+      loading:
+      <AlertInfo
+        title="Renaming chat..."
+        icon={<Loader className="size-5 animate-spin text-white" />}
+      />,
+
       success: () => {
         setShowRenameDialog(false);
         setIsRenaming(false);
         if (onRename) {
           onRename(chat.id, newTitle.trim());
         }
-        return "Chat renamed successfully";
+        return <AlertInfo
+        title="Chat renamed successfully"
+      /> ;
       },
       error: () => {
         setIsRenaming(false);
-        return "Failed to rename chat";
+        return <AlertError
+        title="Failed to rename chat"
+      />
       },
+
+      style: {
+        background: "transparent",
+        padding: 0,
+        border: "none",
+        boxShadow: "none",
+      },
+
     });
   };
 
@@ -187,17 +203,17 @@ const PureChatItem = ({
                 setShowRenameDialog(true);
               }}
             >
-              <PencilEditIcon />
+              <Pencil className="text-content-soft" />
               <span>Rename</span>
             </DropdownMenuItem>
 
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="cursor-pointer">
-                <ShareIcon />
+                <ExternalLink className="text-content-soft" />
                 <span>Share</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuPortal>
-                <DropdownMenuSubContent>
+                <DropdownMenuSubContent sideOffset={10}>
                   <DropdownMenuItem
                     className="cursor-pointer flex-row justify-between"
                     onClick={() => {
@@ -205,12 +221,9 @@ const PureChatItem = ({
                     }}
                   >
                     <div className="flex flex-row items-center gap-2">
-                      <LockIcon size={12} />
+                      <Lock className="text-content-soft" size={12} />
                       <span>Private</span>
                     </div>
-                    {visibilityType === "private" ? (
-                      <CheckCircleFillIcon />
-                    ) : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer flex-row justify-between"
@@ -219,22 +232,19 @@ const PureChatItem = ({
                     }}
                   >
                     <div className="flex flex-row items-center gap-2">
-                      <GlobeIcon />
+                      <Globe className="text-content-soft" />
                       <span>Public</span>
                     </div>
-                    {visibilityType === "public" ? (
-                      <CheckCircleFillIcon />
-                    ) : null}
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuPortal>
             </DropdownMenuSub>
 
             <DropdownMenuItem
-              className="cursor-pointer text-destructive focus:bg-destructive/15 focus:text-destructive dark:text-red-500"
+              className="cursor-pointer text-content-error-light focus:text-content-error-light"
               onSelect={() => onDelete(chat.id)}
             >
-              <TrashIcon />
+              <Trash className="text-content-error-light" />
               <span>Delete</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -242,7 +252,7 @@ const PureChatItem = ({
       </SidebarMenuItem>
 
       <Dialog onOpenChange={setShowRenameDialog} open={showRenameDialog}>
-        <DialogContent>
+        <DialogContent className="sm:rounded-3xl">
           <DialogHeader>
             <DialogTitle>Rename Chat</DialogTitle>
             <DialogDescription>
@@ -260,7 +270,7 @@ const PureChatItem = ({
             placeholder="Enter chat title"
             value={newTitle}
           />
-          <DialogFooter className="flex gap-3">
+          <DialogFooter className="flex gap-2">
             <Button
               disabled={isRenaming}
               onClick={() => setShowRenameDialog(false)}
@@ -274,7 +284,7 @@ const PureChatItem = ({
               onClick={handleRename}
               type="button"
             >
-              {isRenaming ? "Renaming..." : "Rename"}
+              {isRenaming ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

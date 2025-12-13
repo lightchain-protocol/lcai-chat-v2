@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SearchResult } from "@/lib/db/queries";
 import { cn } from "@/lib/utils";
+import AlertError from "./ui/toast/AlertError";
 
 export function ChatSearch() {
   const router = useRouter();
@@ -48,7 +49,9 @@ export function ChatSearch() {
         setResults(data.results || []);
       } catch (error) {
         console.error("Search error:", error);
-        toast.error("Failed to search messages");
+        toast.custom(() => (
+        <AlertError title='Failed to search messages' />
+        ));
         setResults([]);
       } finally {
         setIsSearching(false);
@@ -77,7 +80,7 @@ export function ChatSearch() {
     <div className="p-4">
       <div>
           <div className="relative">
-            <Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-content-soft" />
+            <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-content-soft" />
             <Input
               autoFocus
               className="pr-4 pl-8"
@@ -103,15 +106,15 @@ export function ChatSearch() {
         <div className="flex-1 overflow-y-auto">
           {isSearching && (
             <div className="flex items-center justify-center py-2">
-              <div className="text-muted-foreground text-sm">Searching...</div>
+              <h6 className="text-content-default text-sm">Searching...</h6>
             </div>
           )}
 
           {!isSearching && query && results.length === 0 && (
             <div className="flex items-center justify-center py-2">
-              <div className="text-muted-foreground text-sm">
+              <h6 className="text-content-default text-sm">
                 No results found for &quot;{query}&quot;
-              </div>
+              </h6>
             </div>
           )}
 

@@ -51,6 +51,9 @@ import SubscriptionDialog from "./subscription-dialog";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import type { VisibilityType } from "./visibility-selector";
+import { Lock } from "lucide-react";
+import Image from "next/image";
+import AlertError from "./ui/toast/AlertError";
 
 function PureMultimodalInput({
   chatId,
@@ -220,9 +223,13 @@ function PureMultimodalInput({
         };
       }
       const { error } = await response.json();
-      toast.error(error);
+      toast.custom(() => (
+        <AlertError title={error} />
+      ));
     } catch (_error) {
-      toast.error("Failed to upload file, please try again!");
+      toast.custom(() => (
+        <AlertError title="Failed to upload file, please try again!" />
+      ));
     }
   }, []);
 
@@ -291,7 +298,9 @@ function PureMultimodalInput({
         onSubmit={(event) => {
           event.preventDefault();
           if (status !== "ready") {
-            toast.error("Please wait for the model to finish its response!");
+            toast.custom(() => (
+            <AlertError title="Please wait for the model to finish its response!" />
+          ));
           } else {
             submitForm();
           }
@@ -330,17 +339,21 @@ function PureMultimodalInput({
             ))}
           </div>
         )}
-        <div className="flex flex-row items-start gap-1 sm:gap-2">
+        <div className="flex flex-row items-start gap-1 sm:gap-2 relative">
+          <div className="pr-2 border-r border-surface-base-extraLight absolute top-2.5">
+            {hasActiveSubscription.data ? <Image src="/images/logo/favicon.png" width={16} height={16} alt="Icon"></Image>: <Lock className="text-content-light" size={16} /> }
+            
+          </div>
           <PromptInputTextarea
             autoFocus
-            className="grow resize-none border-0! border-none! bg-transparent p-2 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
+            className="grow resize-none border-0! border-none! bg-transparent pl-8! p-2 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
             disabled={!canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder="Send a message..."
+            placeholder={hasActiveSubscription.data ? "Send a message..." : "Activate your subscription and get credit to unlock chat..."}
             ref={textareaRef}
             rows={1}
             value={input}
@@ -372,7 +385,7 @@ function PureMultimodalInput({
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
             <PromptInputSubmit
-              className="size-8 rounded-full bg-primary text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground"
+              className="size-8 rounded-full bg-gradient-primary text-white disabled:bg-muted disabled:text-muted-foreground"
               disabled={!input.trim() || uploadQueue.length > 0}
               status={status}
             >
@@ -476,7 +489,7 @@ function PureModelSelectorCompact({
       value={selectedModel?.name}
     >
       <Trigger
-        className="flex h-8 items-center gap-2 rounded-lg border-0 px-2 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+        className="flex h-8 items-center gap-2 rounded-lg border-0 px-2 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-surface-base-faint data-[state=open]:bg-surface-base-faint"
         type="button"
       >
         <CpuIcon size={16} />

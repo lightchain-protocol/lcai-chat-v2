@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudDownloadIcon, MessageSquarePlus, UploadIcon } from "lucide-react";
+import { CloudDownloadIcon, Loader, MessageSquarePlus, Trash, UploadIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { User } from "next-auth";
@@ -43,6 +43,8 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Button } from "./ui/button";
+import AlertInfo from "./ui/toast/AlertInfo";
+import AlertError from "./ui/toast/AlertError";
 
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
@@ -59,14 +61,36 @@ export function AppSidebar({ user }: { user: User | undefined }) {
     });
 
     toast.promise(deletePromise, {
-      loading: "Deleting all chats...",
-      success: () => {
-        mutate(unstable_serialize(getChatHistoryPaginationKey));
-        router.push("/");
-        setShowDeleteAllDialog(false);
-        return "All chats deleted successfully";
-      },
-      error: "Failed to delete all chats",
+
+      loading: (
+      <AlertInfo
+        title="Deleting all chats..."
+        icon={<Loader className="size-5 animate-spin text-white" />}
+      />
+    ),
+
+    success: () => {
+      mutate(unstable_serialize(getChatHistoryPaginationKey));
+      router.push("/");
+      setShowDeleteAllDialog(false);
+      return <AlertInfo
+        title="All chats deleted successfully"
+      /> 
+    },
+
+    error: (
+      <AlertError
+        title="Failed to delete all chats"
+      />
+    ),
+
+    style: {
+      background: "transparent",
+      padding: 0,
+      border: "none",
+      boxShadow: "none",
+    },
+
     });
   };
 
@@ -85,12 +109,14 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 width={36}
                 height={36}
               />
-              <div className="flex flex-col gap-0.5"><span className="text-sm text-content-primary font-semibold whitespace-nowrap">Lightchain AI</span><span class="text-xs -tracking-[0.12px] text-content-placeholder whitespace-nowrap">Decentralized AI Chat</span></div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm text-content-primary font-semibold whitespace-nowrap">Lightchain AI</span>
+                <span className="text-xs -tracking-[0.12px] text-content-default whitespace-nowrap">Decentralized AI Chat</span></div>
               </div>
 
               <div className="flex flex-row gap-1">
                 <Button
-                  className={`h-8 p-1 md:h-fit md:p-2 ${user ? "text-content-default" : "text-content-extraLight"}`}
+                  className={`h-8.5 w-8.5 ${user ? "text-content-default" : "text-content-extraLight"}`}
                   onClick={() => {
                     setOpenMobile(false);
                     router.push("/");
@@ -105,7 +131,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      className={`h-8 p-1 md:h-fit md:p-2 ${user ? "text-content-default" : "text-content-extraLight"}`}
+                      className={`h-8.5 w-8.5 ${user ? "text-content-default" : "text-content-extraLight"}`}
                       type="button"
                       variant="ghost"
                       disabled={!user}
@@ -113,26 +139,26 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                       <MoreHorizontalIcon />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent align="start" sideOffset={10}>
                     <DropdownMenuItem
-                      className="flex items-center gap-2"
+                      className="flex items-center gap-2 text-content-ultra"
                       onSelect={() => setShowImportDialog(true)}
                     >
-                      <UploadIcon className="size-4" />
+                      <UploadIcon className="size-4 text-content-soft" />
                       Import from JSON
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      className="flex items-center gap-2"
+                      className="flex items-center gap-2 text-content-ultra"
                       onSelect={() => setShowRestoreDialog(true)}
                     >
-                      <CloudDownloadIcon className="size-4" />
+                      <CloudDownloadIcon className="size-4 text-content-soft" />
                       Restore from IPFS
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      className="flex items-center gap-2 text-red-600 focus:text-red-700"
+                      className="flex items-center gap-2 text-content-error-light focus:text-content-error-light"
                       onSelect={() => setShowDeleteAllDialog(true)}
                     >
-                      <TrashIcon />
+                      <Trash className="size-4 text-content-error-light" />
                       Delete All Chats
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -151,23 +177,23 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           !hasActiveSubscription.isLoading &&
           hasActiveSubscription.data && (
             <button
-              className="group relative flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/50 px-2 py-2 transition-colors hover:bg-zinc-900/50"
+              className="group relative flex w-full items-center justify-between rounded-xl border px-2 py-2 transition-colors"
               type="button"
             >
               <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
               <div className="flex items-center gap-3">
                 <div className="h-4 w-0.5 rounded-full bg-primary" />
                 <div className="flex items-center divide-x">
-                  <div className="pr-2 font-semibold text-sm text-white">
+                  <h6 className="pr-2 font-semibold text-sm text-content-strong">
                     Tier {activeSubscription.data?.tier || "Pro"}
-                  </div>
+                  </h6>
                   <div className="pl-2 text-left">
-                    <div className="text-xs text-zinc-400">
+                    <span className="text-xs text-content-strong block mb-1">
                       Subscription expires
-                    </div>
-                    <div className="font-medium text-sm text-zinc-300">
+                    </span>
+                    <span className="font-semibold text-xs text-content-default block">
                       {formatDate(activeSubscription.data?.expiryTimestamp)}
-                    </div>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -182,7 +208,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
         onOpenChange={setShowDeleteAllDialog}
         open={showDeleteAllDialog}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:rounded-3xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete all chats?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -192,7 +218,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAll}>
+            <AlertDialogAction className="bg-surface-base-error-default hover:bg-surface-base-error-default/90" onClick={handleDeleteAll}>
               Delete All
             </AlertDialogAction>
           </AlertDialogFooter>

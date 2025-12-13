@@ -59,7 +59,7 @@ export function SystemPromptSelector({
         onValueChange={handleValueChange}
         value={value || "default"}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full border border-bdr-soft bg-surface-base-faint rounded-xl">
           <SelectValue placeholder="Select a prompt..." />
         </SelectTrigger>
         <SelectContent className="!max-h-75 overflow-y-auto">
@@ -89,10 +89,10 @@ export function SystemPromptSelector({
                 {customTemplates.map((template) => (
                   <SelectItem key={template.id} value={template.id}>
                     <div className="flex flex-col items-start text-left">
-                      <div className="font-medium">{template.name}</div>
-                      <div className="line-clamp-3 whitespace-normal text-muted-foreground text-xs">
+                      <h6 className="font-medium text-content-strong">{template.name}</h6>
+                      <p className="line-clamp-3 whitespace-normal text-content-default text-xs">
                         {template.prompt}
-                      </div>
+                      </p>
                     </div>
                   </SelectItem>
                 ))}
@@ -109,7 +109,7 @@ export function SystemPromptSelector({
           size="icon"
           title="Create custom prompt"
           variant="outline"
-          className="px-4"
+          className="px-4 border border-bdr-soft bg-surface-base-faint"
         >
           <Plus className="h-4 w-4" />
         </Button>

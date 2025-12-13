@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import Image from "next/image";
+import AlertError from "./ui/toast/AlertError";
 
 export function ImportChatDialog(props: DialogProps) {
   const [isUploading, setIsUploading] = useState(false);
@@ -28,13 +29,17 @@ export function ImportChatDialog(props: DialogProps) {
 
     // Validate file type
     if (!file.name.endsWith(".json")) {
-      toast.error("Please select a JSON file");
+      toast.custom(() => (
+        <AlertError title='Please select a JSON file' />
+      ));
       return;
     }
 
     // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("File size must be less than 10MB");
+      toast.custom(() => (
+        <AlertError title='File size must be less than 10MB' />
+      ));
       return;
     }
 
@@ -72,13 +77,15 @@ export function ImportChatDialog(props: DialogProps) {
     } catch (error) {
       console.error("Import error:", error);
       if (error instanceof SyntaxError) {
-        toast.error("Invalid JSON file format");
+        toast.custom(() => (
+        <AlertError title='Invalid JSON file format' />
+        ));
       } else {
-        toast.error(
-          error instanceof Error
+        toast.custom(() => (
+        <AlertError title={ error instanceof Error
             ? error.message
-            : "Failed to import chat. Please check the file format."
-        );
+            : "Failed to import chat. Please check the file format."} />
+        ));
       }
     } finally {
       setIsUploading(false);

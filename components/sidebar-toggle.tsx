@@ -3,6 +3,7 @@ import { type SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { SidebarLeftIcon } from "./icons";
 import { Button } from "./ui/button";
+import { PanelRight } from "lucide-react";
 
 export function SidebarToggle({
   className,
@@ -11,12 +12,12 @@ export function SidebarToggle({
 
   return (
     <Button
-      className={cn("h-8 px-2 md:h-fit md:px-2 bg-surface-base-faint text-content-default", className)}
+      className={cn("w-9 h-9 p-1 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight", className)}
       data-testid="sidebar-toggle-button"
       onClick={toggleSidebar}
       variant="outline"
     >
-      <SidebarLeftIcon size={16} />
+      <PanelRight className="size-4.5!" />
     </Button>
   );
 }

@@ -12,10 +12,8 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { cn } from "@/lib/utils";
 import {
   CheckCircleFillIcon,
-  ChevronDownIcon,
-  GlobeIcon,
-  LockIcon,
 } from "./icons";
+import { ChevronDown, Globe, Lock } from "lucide-react";
 
 export type VisibilityType = "private" | "public";
 
@@ -29,13 +27,13 @@ const visibilities: Array<{
     id: "private",
     label: "Private",
     description: "Only you can access this chat",
-    icon: <LockIcon />,
+    icon: <Lock className="size-4.5!" />,
   },
   {
     id: "public",
     label: "Public",
     description: "Anyone with the link can access this chat",
-    icon: <GlobeIcon />,
+    icon: <Globe className="size-4.5!" />,
   },
 ];
 
@@ -64,18 +62,18 @@ export function VisibilitySelector({
       <DropdownMenuTrigger
         asChild
         className={cn(
-          "w-fit data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
+          "w-fit data-[state=open]:bg-surface-base-extraLight",
           className
         )}
       >
         <Button
-          className="hidden h-8 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 md:flex md:h-fit md:px-2 bg-surface-base-faint text-content-default"
+          className="hidden group focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 md:flex h-9 px-2 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight"
           data-testid="visibility-selector"
           variant="outline"
         >
           {selectedVisibility?.icon}
           <span className="md:sr-only">{selectedVisibility?.label}</span>
-          <ChevronDownIcon />
+          <ChevronDown className="size-4 transition-transform duration-100 group-data-[state=open]:rotate-180" />
         </Button>
       </DropdownMenuTrigger>
 
@@ -99,8 +97,7 @@ export function VisibilitySelector({
                 </div>
               )}
             </div>
-            <div className="text-foreground opacity-0 group-data-[active=true]/item:opacity-100 dark:text-foreground">
-              <CheckCircleFillIcon />
+            <div className="opacity-0 group-data-[active=true]/item:opacity-100 size-4 rounded-full border-4 border-surface-base-brand-default">
             </div>
           </DropdownMenuItem>
         ))}
