@@ -209,7 +209,7 @@ export default function PopupMobileMenu({ isActive, onClose }: PopupMobileMenuPr
 
                 {/* Footer */}
                 <div className="sticky bottom-0 border-t border-br-light-soft bg-surface-x-soft-hex p-3">
-                    <h6 className="block w-full rounded-xl pt-2 text-center text-sm font-medium bg-gradient-primary text-content-white"
+                    <h6 className="block w-full rounded-xl pt-2 text-center text-sm font-medium text-content-white"
                     >
                         Social Media
                     </h6>

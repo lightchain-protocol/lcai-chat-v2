@@ -17,6 +17,7 @@ import { type SubscriptionTier, tierDetails } from "@/config/subscription";
 import useSubscription from "@/hooks/use-subscription";
 import { cn } from "@/lib/utils";
 import AlertError from "./ui/toast/AlertError";
+import AlertSuccess from "./ui/toast/AlertSuccess";
 
 const billingPeriods = [
   { value: "monthly", label: "Monthly" },
@@ -50,7 +51,9 @@ const SubscriptionDialog = (props: DialogProps) => {
       ),
     onSuccess: () => {
       props.onOpenChange?.(false);
-      toast.success("Subscription successful");
+      toast.custom(() => (
+      <AlertSuccess title='Subscription successful' />
+      ));
     },
     onError: (error: any) => {
       toast.custom(() => (

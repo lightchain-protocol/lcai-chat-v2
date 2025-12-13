@@ -38,6 +38,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
+import AlertSuccess from "./ui/toast/AlertSuccess";
 
 const PureChatItem = ({
   chat,
@@ -147,7 +148,9 @@ const PureChatItem = ({
                             e.preventDefault();
                             e.stopPropagation();
                             await copyToClipboard(chat.ipfsCid || "");
-                            toast.success("CID copied to clipboard!");
+                            toast.custom(() => (
+                            <AlertSuccess title='CID copied to clipboard!' />
+                            ));
                           }}
                           type="button"
                         >

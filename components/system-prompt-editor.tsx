@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import AlertError from "./ui/toast/AlertError";
+import AlertSuccess from "./ui/toast/AlertSuccess";
 
 type SystemPromptEditorProps = {
   open: boolean;
@@ -54,7 +55,9 @@ export function SystemPromptEditor({
         throw new Error(error.error || "Failed to save prompt");
       }
 
-      toast.success("Custom prompt saved successfully");
+      toast.custom(() => (
+      <AlertSuccess title='Custom prompt saved successfully' />
+      ));
       setName("");
       setPrompt("");
       onOpenChange(false);

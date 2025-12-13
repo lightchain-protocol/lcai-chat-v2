@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AlertError from "./ui/toast/AlertError";
+import AlertSuccess from "./ui/toast/AlertSuccess";
 
 export function RestoreFromIPFSDialog(props: DialogProps) {
   const [cid, setCid] = useState("");
@@ -47,7 +48,9 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
         throw new Error(data.message || "Failed to restore chat");
       }
 
-      toast.success("Chat restored successfully!");
+      toast.custom(() => (
+      <AlertSuccess title='Chat restored successfully!' />
+      ));
       props.onOpenChange?.(false);
       setCid("");
       router.push(`/chat/${data.chatId}`);

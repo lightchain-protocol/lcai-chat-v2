@@ -238,7 +238,9 @@ function PureChatHeader({
               onChange={(promptId, prompt) => {
                 onSystemPromptChange?.(promptId, prompt);
                 setPromptDialogOpen(false);
-                toast.success("System prompt updated");
+                toast.custom(() => (
+                <AlertSuccess title='System prompt updated' />
+                ));
               }}
               onCreateNew={() => {
                 setPromptDialogOpen(false);

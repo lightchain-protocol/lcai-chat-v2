@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import Image from "next/image";
 import AlertError from "./ui/toast/AlertError";
+import AlertSuccess from "./ui/toast/AlertSuccess";
 
 export function ImportChatDialog(props: DialogProps) {
   const [isUploading, setIsUploading] = useState(false);
@@ -66,7 +67,9 @@ export function ImportChatDialog(props: DialogProps) {
 
       const result = await response.json();
 
-      toast.success("Chat imported successfully!");
+      toast.custom(() => (
+      <AlertSuccess title='Chat imported successfully!' />
+      ));
 
       // Close dialog
       props.onOpenChange?.(false);
