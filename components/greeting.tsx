@@ -70,7 +70,7 @@ export const Greeting = () => {
           ) : hasActiveSubscription.data ? null : (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
-              className="mx-auto w-full max-w-170 rounded-3xl p-1 bg-linear-to-r from-[#664BFD] to-[#EEA180] mt-10"
+              className="mx-auto w-full max-w-180 rounded-3xl p-1 bg-linear-to-r from-[#664BFD] to-[#EEA180] mt-10"
               exit={{ opacity: 0, y: 10 }}
               initial={{ opacity: 0, y: 10 }}
               transition={{ delay: 0.6, duration: 0.5 }}
@@ -102,7 +102,7 @@ export const Greeting = () => {
                     </div>
                     <div className="flex items-baseline gap-2 text-sm text-content-medium">
                       <Check size={16} className="translate-0.5" />
-                      <span>Choose from Basic, Pro, or <br /> Enterprise plans</span>
+                      <span>Choose from Basic, Pro, Enterprise plans</span>
                     </div>
                     <div className="flex items-baseline gap-2 text-sm text-content-medium">
                       <Check size={16} className="translate-0.5" />
