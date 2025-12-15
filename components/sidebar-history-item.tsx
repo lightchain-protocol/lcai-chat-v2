@@ -198,7 +198,7 @@ const PureChatItem = ({
             </SidebarMenuAction>
           </DropdownMenuTrigger>
 
-          <DropdownMenuContent align="end" side="bottom">
+          <DropdownMenuContent align="end" side="bottom" className="space-y-1">
             <DropdownMenuItem
               className="cursor-pointer"
               onSelect={() => {
@@ -216,7 +216,7 @@ const PureChatItem = ({
                 <span>Share</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuPortal>
-                <DropdownMenuSubContent sideOffset={10}>
+                <DropdownMenuSubContent sideOffset={10} className="spacey-y-1">
                   <DropdownMenuItem
                     className="cursor-pointer flex-row justify-between"
                     onClick={() => {

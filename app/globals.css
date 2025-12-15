@@ -54,7 +54,6 @@
   --surface-m-soft: rgba(36, 38, 51, 0.039);
   --surface-m-light: #f1f1f1;
   --surface-base-subtle: rgba(34, 35, 42, 0.02);
-  --surface-base-brand-strong: #8C71F6;
   --surface-base-faint: rgba(14, 18, 27, 0.04);
   --surface-base-extraLight: rgba(14, 18, 27, 0.04);
   --surface-base-light: rgba(204, 206, 239, 0.16);
@@ -73,6 +72,9 @@
   --content-strong: #22232A;
   --content-secondary: #565e78;
   --content-ultra: #020203;
+
+
+  --transparency-dark-mode-24: rgba(204, 206, 239, 0.24);
 
 
   /* border color */
@@ -128,6 +130,9 @@
   --surface-elevation-light: #0F0F14;
   --surface-base-dark: #181822;
   --surface-x-soft: rgba(204, 206, 239, 0.04);
+  --surface-base-faint: rgba(204, 206, 239, 0.04);
+
+  --transparency-dark-mode-24: rgba(204, 206, 239, 0.16);
 
   /* content color */
   --content-dark: #ffffff;
@@ -206,7 +211,7 @@
   --color-surface-m-soft: var(--surface-m-soft);
   --color-surface-m-light: var(--surface-m-light);
   --color-surface-base-subtle: var(--surface-base-subtle);
-  --color-surface-base-brand-strong: var(--surface-base-brand-strong);
+  --color-surface-base-brand-strong: #8C71F6;
   --color-surface-base-faint: var(--surface-base-faint);
   --color-surface-base-error-default: #E93544;
   --color-surface-base-extraLight: var(--surface-base-extraLight);
@@ -214,7 +219,10 @@
   --color-surface-elevation-light: var(--surface-elevation-light);
   --color-surface-base-dark: var(--surface-base-dark);
   --color-surface-base-brand-default: #693EE0;
-  --color-surface-x-soft: var(--surface-x-soft)
+  --color-surface-x-soft: var(--surface-x-soft);
+
+
+  --color-transparency-dark-mode-24: var(--transparency-dark-mode-24);
 
   /* content color */
   --color-content-dark: var(--content-dark);
@@ -227,6 +235,7 @@
   --color-content-strong: var(--content-strong);
   --color-content-secondary: var(--content-secondary);
   --color-content-ultra: var(--content-ultra);
+  --color-content-error-strong: #AD1F2B;
   --color-content-error-light: #D02533;
 
 

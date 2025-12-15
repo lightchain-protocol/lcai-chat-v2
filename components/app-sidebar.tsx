@@ -131,7 +131,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      className={`h-8.5 w-8.5 ${user ? "text-content-default" : "text-content-extraLight"}`}
+                      className={`h-8.5 w-8.5 hover:bg-surface-base-faint text-content-default hover:text-content-default data-[state=open]:bg-surface-base-faint ${user ? "text-content-default" : "text-content-extraLight"}`}
                       type="button"
                       variant="ghost"
                       disabled={!user}
@@ -139,7 +139,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                       <MoreHorizontalIcon />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" sideOffset={10}>
+                  <DropdownMenuContent align="start" sideOffset={10} className="space-y-1">
                     <DropdownMenuItem
                       className="flex items-center gap-2 text-content-ultra"
                       onSelect={() => setShowImportDialog(true)}
@@ -172,7 +172,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           <SidebarHistory user={user} />
         </SidebarContent>
 
-        {user && <div className="flex flex-col gap-2 px-4 py-6 border-t border-bdr-light">
+        {user && <div className="flex flex-col gap-2 px-4 py-4 border-t border-bdr-light">
           {user &&
           !hasActiveSubscription.isLoading &&
           hasActiveSubscription.data && (

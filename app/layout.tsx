@@ -101,11 +101,7 @@ export default async function RootLayout({
           disableTransitionOnChange
           enableSystem
         >
-          <Toaster position="top-right" offset={100} mobileOffset={80} toastOptions={{
-            style: {
-              minWidth: '300',
-            },
-          }} />
+          <Toaster position="top-right" offset={{ top: 100, right: 32 }} mobileOffset={{ top: 80, right: 16 }}/>
           <Web3WalletProvider cookies={cookies}>
             <SessionProvider>{children}</SessionProvider>
           </Web3WalletProvider>

@@ -2,13 +2,14 @@
 
 import type { DialogProps } from "@radix-ui/react-dialog";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckIcon, Loader2Icon } from "lucide-react";
+import { Check, Loader2Icon, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { formatEther } from "viem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -71,30 +72,32 @@ const SubscriptionDialog = (props: DialogProps) => {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-3xl bg-background p-0 sm:max-w-4xl">
-        {/* Gradient decorations */}
-        <div className="-top-20 -left-20 absolute z-[-1] size-64 rounded-full bg-[#7064E9] opacity-20 blur-3xl" />
-        <div className="-bottom-20 -right-20 absolute z-[-1] size-64 rounded-full bg-[#DD00AC] opacity-20 blur-3xl" />
-
-        <div className="relative p-8">
-          <DialogHeader className="mb-8">
+      <DialogContent hideClose className="max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-3xl! bg-surface-elevation-light p-0 sm:max-w-4xl">
+        <div className="relative p-4 sm:p-10 overflow-hidden">
+          {/* Gradient decorations */}
+        <div className="-top-28.5 -left-24.5 absolute z-[-1] size-59 rounded-full bg-surface-base-brand-strong opacity-20 blur-[100px]" />
+        <div className="-bottom-20 -right-15.5 absolute z-[-1] size-59 rounded-full bg-[#D806AF] opacity-20 blur-[100px]" />
+        <DialogClose asChild>
+          <X className="text-content-soft hover:text-surface-base-brand-strong absolute top-4 sm:top-6 sm:right-6 right-4 cursor-pointer md:size-8 size-5 sm:size-6" size={36} />
+        </DialogClose>
+          <DialogHeader className="mb-5">
             <DialogTitle asChild>
-              <h3 className="text-center font-semibold text-3xl text-content-dark">
+              <h3 className="text-center font-semibold text-2xl md:text-3xl xl:text-4xl -tracking-[0.36px] text-content-ultra">
                 Choose Your Plan
               </h3>
             </DialogTitle>
           </DialogHeader>
 
           {/* Billing Period Toggle */}
-          <div className="mb-8 flex justify-center">
-            <div className="inline-flex items-center gap-1 rounded-xl bg-surface-m-light p-1">
+          <div className="mb-12 flex justify-center">
+            <div className="inline-flex items-center gap-1 rounded-xl bg-surface-base-extraLight p-1">
               {billingPeriods.map((period) => (
                 <button
                   className={cn(
                     "rounded-lg px-6 py-2 font-medium text-sm transition-all",
                     billingPeriod === period.value
-                      ? "bg-background"
-                      : "text-content-default hover:bg-background",
+                      ? "bg-surface-base-dark dark:bg-[rgba(204,206,239,0.12)]"
+                      : "text-content-ultra hover:bg-surface-base-dark hover:dark:bg-[rgba(204,206,239,0.12)]",
                     subscribeMutation.isPending || tiers.isLoading
                       ? "cursor-not-allowed opacity-50"
                       : ""
@@ -114,16 +117,16 @@ const SubscriptionDialog = (props: DialogProps) => {
           {tiers.isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="flex flex-col items-center gap-3">
-                <Loader2Icon className="size-9 animate-spin text-[#7064E9]" />
-                <p className="text-zinc-400">Loading plans...</p>
+                <Loader2Icon className="size-9 animate-spin text-surface-base-brand-default" />
+                <p className="text-content-default">Loading plans...</p>
               </div>
             </div>
           ) : tiers.isError ? (
             <div className="flex items-center justify-center py-12">
               <div className="flex flex-col items-center gap-3">
-                <p className="text-zinc-400">Failed to load plans</p>
+                <p className="text-content-default">Failed to load plans</p>
                 <Button
-                  className="border-zinc-800"
+                  className="border-bdr-default"
                   onClick={() => tiers.refetch()}
                   size="sm"
                   variant="outline"
@@ -133,43 +136,43 @@ const SubscriptionDialog = (props: DialogProps) => {
               </div>
             </div>
           ) : (
-            <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               {tiers.data?.map((tier) => (
                 <div
                   className={cn(
-                    "relative flex flex-col rounded-2xl p-6",
+                    "relative flex flex-col rounded-[20px] p-6 bg-surface-base-dark",
                     tier.popular
-                      ? "border-2 border-primary"
-                      : "border border-bdr-default"
+                      ? "border-2 border-surface-base-brand-default"
+                      : "border border-bdr-soft"
                   )}
                   key={tier.name}
                 >
                   <div className="flex-1">
                     {tier.popular && (
                       <div className="-top-3 -translate-x-1/2 absolute left-1/2">
-                        <span className="rounded-full bg-linear-to-r from-[#DD00AC] to-[#7064E9] px-4 py-1 font-medium text-white text-xs">
+                        <span className="rounded-full whitespace-nowrap bg-surface-base-brand-default px-3 py-1.5 font-normal text-white text-sm">
                           Most Popular
                         </span>
                       </div>
                     )}
 
-                    <div className="mb-6 text-center">
-                      <h4 className="mb-3 font-semibold text-content-primary text-xl">
+                    <div className="mb-6">
+                      <h4 className="mb-4 font-semibold text-content-default text-lg">
                         {tier.name}
                       </h4>
-                      <div className="flex items-baseline justify-center gap-1">
-                        <span className="font-bold text-4xl text-content-primary">
+                      <div>
+                        <span className="font-semibold text-4xl text-content-strong">
                           {billingPeriod === "monthly"
                             ? tier.monthlyPrice
-                            : tier.yearlyPrice}{" "}
-                          <span className="text-sm">LCAI</span>
+                            : tier.yearlyPrice}
                         </span>
-                        <span className="text-sm text-content-light">
+                        <span className="text-sm font-bold text-content-strong inline-block ml-1">LCAI</span>
+                        <span className="text-sm text-content-soft">
                           /{billingPeriod === "monthly" ? "month" : "year"}
                         </span>
                       </div>
                       {billingPeriod === "yearly" && (
-                        <p className="mt-2 text-xs text-content-light">
+                        <p className="mt-2 text-xs text-content-strong">
                           Save $
                           {(tier.monthlyPrice * 12 - tier.yearlyPrice).toFixed(
                             2
@@ -182,11 +185,11 @@ const SubscriptionDialog = (props: DialogProps) => {
                     <ul className="mb-6 space-y-3">
                       {tier.features.map((feature) => (
                         <li
-                          className="flex items-start gap-2 text-sm text-content-light"
+                          className="flex items-start gap-2.5 text-sm text-content-strong"
                           key={feature}
                         >
                           <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-primary">
-                            <CheckIcon className="size-3 text-white" />
+                            <Check className="size-3 text-white" />
                           </span>
                           <span>{feature}</span>
                         </li>
@@ -195,9 +198,7 @@ const SubscriptionDialog = (props: DialogProps) => {
                   </div>
 
                   <Button
-                    className={cn(
-                      "w-full disabled:cursor-not-allowed disabled:opacity-50"
-                    )}
+                    className={`w-full disabled:cursor-not-allowed disabled:opacity-50 rounded-[10px] ${tier.popular ? "" : "border-bdr-soft bg-surface-base-subtle"}`}
                     disabled={subscribeMutation.isPending}
                     onClick={() => handleSubscribe(tier)}
                     variant={tier.popular ? "gradient" : "outline"}
@@ -215,18 +216,6 @@ const SubscriptionDialog = (props: DialogProps) => {
               ))}
             </div>
           )}
-
-          {/* Cancel Button */}
-          <div className="flex justify-center">
-            <Button
-              className="min-w-[200px]"
-              disabled={subscribeMutation.isPending}
-              onClick={() => props.onOpenChange?.(false)}
-              variant="outline"
-            >
-              Cancel
-            </Button>
-          </div>
         </div>
       </DialogContent>
     </Dialog>

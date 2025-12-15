@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronsUpDown, ChevronUp } from "lucide-react";
+import { ChevronsUpDown, ChevronUp, LogOut } from "lucide-react";
 import Image from "next/image";
 import type { User } from "next-auth";
 import { signOut, useSession } from "next-auth/react";
@@ -97,10 +97,11 @@ export function SidebarUserNav({ user }: { user: User }) {
             {/* <DropdownMenuSeparator /> */}
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button
-                className="w-full cursor-pointer"
+                className="w-full cursor-pointer font-medium"
                 onClick={handleSignOut}
                 type="button"
               >
+                <LogOut size={18} />
                 Disconnect & Sign out
               </button>
             </DropdownMenuItem>

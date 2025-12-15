@@ -50,7 +50,7 @@ export const ContextIcon = ({
 
   // Determine color based on warning level
   const colorClass = {
-    none: "text-current",
+    none: "text-[rgba(14,18,27,0.3)] dark:text-[rgba(204,206,239,0.2)]",
     info: "text-blue-500",
     warning: "text-yellow-500",
     critical: "text-red-500",

@@ -158,7 +158,7 @@ function PureChatHeader({
   };
 
   return (
-    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-3 md:py-4.5 md:px-2">
+    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-3 md:py-4.5 md:px-4">
       <SidebarToggle />
 
       {(!open || windowWidth < 768) && (
@@ -196,13 +196,13 @@ function PureChatHeader({
               <Download className="size-4.5!" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="start" className="min-w-46.5 space-y-1">
             <DropdownMenuItem onClick={handleExportChat}>
-              <DownloadIcon className="mr-2 size-4" />
+              <DownloadIcon className="size-4 text-content-soft" />
               Export as JSON
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleBackup}>
-              <CloudUploadIcon className="mr-2 size-4" />
+              <CloudUploadIcon className="size-4 text-content-soft" />
               Backup to IPFS
               {backupStatus?.backedUp && (
                 <span className="ml-auto text-muted-foreground text-xs">✓</span>

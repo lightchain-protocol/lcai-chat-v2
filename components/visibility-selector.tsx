@@ -10,10 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { cn } from "@/lib/utils";
-import {
-  CheckCircleFillIcon,
-} from "./icons";
-import { ChevronDown, Globe, Lock } from "lucide-react";
+import { ChevronDown, Globe, Lock, LucideIcon, LucideProps } from "lucide-react";
 
 export type VisibilityType = "private" | "public";
 
@@ -21,19 +18,19 @@ const visibilities: Array<{
   id: VisibilityType;
   label: string;
   description: string;
-  icon: ReactNode;
+  icon: LucideIcon;
 }> = [
   {
     id: "private",
     label: "Private",
     description: "Only you can access this chat",
-    icon: <Lock className="size-4.5!" />,
+    icon: Lock ,
   },
   {
     id: "public",
     label: "Public",
     description: "Anyone with the link can access this chat",
-    icon: <Globe className="size-4.5!" />,
+    icon: Globe,
   },
 ];
 
@@ -71,7 +68,9 @@ export function VisibilitySelector({
           data-testid="visibility-selector"
           variant="outline"
         >
-          {selectedVisibility?.icon}
+          {selectedVisibility && (
+            <selectedVisibility.icon className="size-4" />
+          )}
           <span className="md:sr-only">{selectedVisibility?.label}</span>
           <ChevronDown className="size-4 transition-transform duration-100 group-data-[state=open]:rotate-180" />
         </Button>
@@ -89,15 +88,18 @@ export function VisibilitySelector({
               setOpen(false);
             }}
           >
-            <div className="flex flex-col items-start gap-1">
-              {visibility.label}
-              {visibility.description && (
-                <div className="text-muted-foreground text-xs">
-                  {visibility.description}
-                </div>
-              )}
-            </div>
-            <div className="opacity-0 group-data-[active=true]/item:opacity-100 size-4 rounded-full border-4 border-surface-base-brand-default">
+            <div className="flex items-start gap-2.5">
+              <visibility.icon className="size-4 translate-y-1 text-content-soft" />
+                <div className="flex flex-col items-start gap-1">
+                <h6 className="text-base font-medium text-content-ultra">{visibility.label}</h6>
+                {visibility.description && (
+                  <p className="text-content-medium text-sm">
+                    {visibility.description}
+                  </p>
+                )}
+              </div>
+              <div className="absolute right-2.5 top-2.5 group-data-[active=true]/item:opacity-100 size-4 rounded-full border-3 group-data-[active=true]/item:border-4 border-transparency-dark-mode-24 group-data-[active=true]/item:border-surface-base-brand-default">
+              </div>
             </div>
           </DropdownMenuItem>
         ))}

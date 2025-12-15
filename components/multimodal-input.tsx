@@ -498,10 +498,10 @@ function PureModelSelectorCompact({
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] p-0">
+      <PromptInputModelSelectContent className="max-w-[300px] p-0 rounded-2xl">
         <div className="flex flex-col gap-px">
           {chatModels.map((model) => (
-            <SelectItem key={model.id} value={model.name}>
+            <SelectItem key={model.id} value={model.name} className="rounded-2xl">
               <h6 className="truncate font-medium text-xs mb-0.5">{model.name}</h6>
               <p className="mt-px text-[10px] text-muted-foreground leading-tight">
                 {model.description}

@@ -6,8 +6,7 @@ import { useCopyToClipboard } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { Action, Actions } from "./elements/actions";
-import { PencilEditIcon, ThumbDownIcon, ThumbUpIcon } from "./icons";
-import { Copy, CopyCheck, Loader } from "lucide-react";
+import { Copy, CopyCheck, Loader, Pencil, ThumbsDown, ThumbsUp } from "lucide-react";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
 
@@ -63,7 +62,7 @@ export function PureMessageActions({
               onClick={() => setMode("edit")}
               tooltip="Edit"
             >
-              <PencilEditIcon />
+              <Pencil />
             </Action>
           )}
           <Action onClick={handleCopy} tooltip="Copy">
@@ -150,7 +149,7 @@ export function PureMessageActions({
         <stop offset="1" stopColor="#DD00AC"/>
         </linearGradient>
         </defs>
-        </svg> : <ThumbUpIcon />}
+        </svg> : <ThumbsUp />}
       </Action>
 
       <Action
@@ -220,7 +219,7 @@ export function PureMessageActions({
         {vote && !vote.isUpvoted ? <svg className="text-content-light" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M15.7168 1.93994C16.3208 1.94005 16.9 2.17989 17.3271 2.60693C17.7544 3.03426 17.9951 3.61399 17.9951 4.21826V9.99951C17.9951 10.6038 17.7544 11.1835 17.3271 11.6108C16.9 12.038 16.3209 12.2787 15.7168 12.2788H13.7227L13.6377 12.2847C13.5539 12.2965 13.4729 12.3257 13.4004 12.3706C13.3039 12.4305 13.2254 12.5159 13.1748 12.6177L13.1738 12.6206L10.6807 17.5991C10.5378 17.8845 10.2449 18.0639 9.92578 18.0601C9.45954 18.0543 9.00029 17.9429 8.58301 17.7349C8.16573 17.5268 7.80083 17.2268 7.51562 16.8579C7.23042 16.489 7.03186 16.0603 6.93555 15.604C6.83928 15.1479 6.84731 14.6758 6.95898 14.2231L7.43066 12.2788H4.27832C3.92461 12.2788 3.57515 12.1958 3.25879 12.0376C2.94259 11.8794 2.6672 11.6496 2.45508 11.3667C2.24305 11.0839 2.09941 10.7555 2.03613 10.4077C1.97289 10.0597 1.99182 9.70136 2.09082 9.36182L3.77441 3.58057L3.83301 3.40576C3.98594 3.00503 4.24961 2.6539 4.59473 2.39502C4.98905 2.09932 5.46903 1.93996 5.96191 1.93994H15.7168Z" fill="currentColor"/>
           </svg>
-          : <ThumbDownIcon />}
+          : <ThumbsDown />}
       </Action>
     </Actions>
   );
