@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronsUpDown, ChevronUp, LogOut } from "lucide-react";
+import { ChevronsUpDown, LogOut } from "lucide-react";
 import Image from "next/image";
 import type { User } from "next-auth";
 import { signOut, useSession } from "next-auth/react";
@@ -14,10 +14,11 @@ import {
 import {
   SidebarMenu,
   SidebarMenuButton,
-  SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { LoaderIcon } from "./icons";
-import { toast } from "./toast";
+import { toast } from 'sonner'
+import AlertError from "./ui/toast/AlertError";
+import AlertSuccess from "./ui/toast/AlertSuccess";
 
 export function SidebarUserNav({ user }: { user: User }) {
   const { status } = useSession();
@@ -38,18 +39,17 @@ export function SidebarUserNav({ user }: { user: User }) {
       });
 
       // Show success message
-      toast({
-        type: "success",
-        description: "Successfully signed out!",
-      });
+
+      toast.custom((id) => (
+      <AlertSuccess id={id} title='Successfully signed out!' />
+      ));
 
       // Refresh page to show greeting/connect button
       window.location.reload();
     } catch (_error) {
-      toast({
-        type: "error",
-        description: "Failed to sign out. Please try again.",
-      });
+      toast.custom((id) => (
+      <AlertError id={id} title='Failed to sign out. Please try again.' />
+      ));
     }
   };
 

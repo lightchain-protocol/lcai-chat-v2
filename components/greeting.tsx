@@ -21,20 +21,22 @@ export const Greeting = () => {
       className="mx-auto mt-4 flex size-full max-w-3xl flex-col items-center justify-center px-4 md:px-8"
       key="overview"
     >
-      <motion.h1
-        animate={{ opacity: 1, y: 0 }}
-        className="mx-auto max-w-[600px] text-center font-medium text-[40px] text-content-dark leading-[1.05] tracking-[-1.4px] md:text-[50px] lg:text-[55px] xl:text-[60px]"
-        exit={{ opacity: 0, y: 10 }}
-        initial={{ opacity: 0, y: 10 }}
-        transition={{ delay: 0.2, duration: 0.5 }}
-      >
-        Start talking with <span className="text-content-light">Lightchain</span>{" "}
-        <span className="bg-gradient-primary bg-clip-text text-transparent">
-          AI Chat
-        </span>
-      </motion.h1>
+      {isConnected && <h2 className="text-2xl md:text-3xl xl:text-4xl font-semibold text-content-ultra">Start a conversation</h2>  }
 
       {!isConnected || status !== "authenticated" ? (
+        <>
+        <motion.h1
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-auto max-w-[600px] text-center font-medium text-[40px] text-content-dark leading-[1.05] tracking-[-1.4px] md:text-[50px] lg:text-[55px] xl:text-[60px]"
+          exit={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 10 }}
+          transition={{ delay: 0.2, duration: 0.5 }}
+        >
+          Start talking with <span className="text-content-light">Lightchain</span>{" "}
+          <span className="bg-gradient-primary bg-clip-text text-transparent">
+            AI Chat
+          </span>
+        </motion.h1>
         <motion.div
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-col items-center gap-8 mt-3"
@@ -51,10 +53,12 @@ export const Greeting = () => {
             Connect Wallet
           </Button>
         </motion.div>
+        </>
       ) : (
         <>
           {/* Subscription Status */}
           {hasActiveSubscription.isLoading ? (
+            <>
             <motion.div
               animate={{ opacity: 1, y: 0 }}
               className="flex items-center justify-center gap-2 py-3"
@@ -67,6 +71,7 @@ export const Greeting = () => {
                 Checking subscription status...
               </span>
             </motion.div>
+            </>
           ) : hasActiveSubscription.data ? null : (
             <motion.div
               animate={{ opacity: 1, y: 0 }}

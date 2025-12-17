@@ -14,27 +14,27 @@ const page = () => {
     const handleError = () => {
         toast.custom((id) => (
         <AlertError id={id} title='Something Went Wrong!' description='An unexpected error occurred. Please try again.' />
-        ), { duration: Infinity } );
+        ));
     }
     const handleReward = () => {
         toast.custom((id) => (
         <AlertReward id={id} title='Reward Issued!' description='Response saved and reward processed.' />
-        ), { duration: Infinity } );
+        ));
     }
     const handleWarning = () => {
         toast.custom((id) => (
         <AlertWarning id={id} title='Review Before Proceeding!' description='This needs your attention before continuing.' />
-        ), { duration: Infinity } );
+        ));
     }
     const handleSuccess = () => {
         toast.custom((id) => (
         <AlertSuccess id={id} title='Action Completed!' description='Your action was completed successfully.' />
-        ), { duration: Infinity } );
+        ));
     }
     const handleInfo = () => {
         toast.custom((id) => (
         <AlertInfo id={id} title='Some Useful Information' description='Take a moment to review this update.' />
-        ), { duration: Infinity } );
+        ));
     }
   return (
     <div>

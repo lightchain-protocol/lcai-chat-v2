@@ -21,9 +21,10 @@ import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import SubscriptionDialog from "./subscription-dialog";
-import { toast } from "./toast";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
+import { toast } from 'sonner'
+import AlertError from "./ui/toast/AlertError";
 
 export function Chat({
   id,
@@ -131,10 +132,9 @@ export function Chat({
     },
     onError: (error) => {
       if (error instanceof ChatSDKError) {
-        toast({
-          type: "error",
-          description: error.message,
-        });
+        toast.custom((id) => (
+        <AlertError id={id} title={error.message} />
+        ));
       }
     },
   });
