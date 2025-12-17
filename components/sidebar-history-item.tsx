@@ -7,7 +7,6 @@ import { useCopyToClipboard } from "usehooks-ts";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Chat } from "@/lib/db/schema";
 import {
-  CheckCircleFillIcon,
   MoreHorizontalIcon,
 } from "./icons";
 import { Button } from "./ui/button";

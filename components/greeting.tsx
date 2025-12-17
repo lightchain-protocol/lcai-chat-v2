@@ -21,8 +21,6 @@ export const Greeting = () => {
       className="mx-auto mt-4 flex size-full max-w-3xl flex-col items-center justify-center px-4 md:px-8"
       key="overview"
     >
-      {isConnected && <h2 className="text-2xl md:text-3xl xl:text-4xl font-semibold text-content-ultra">Start a conversation</h2>  }
-
       {!isConnected || status !== "authenticated" ? (
         <>
         <motion.h1

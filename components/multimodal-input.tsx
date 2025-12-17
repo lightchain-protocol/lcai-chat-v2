@@ -271,19 +271,14 @@ function PureMultimodalInput({
     [setAttachments, uploadFile]
   );
 
-  return (
-    <div className={cn("relative flex w-full flex-col gap-4", className)}>
-      {messages.length === 0 &&
-        attachments.length === 0 &&
-        uploadQueue.length === 0 &&
-        canUseChat && (
-          <SuggestedActions
-            chatId={chatId}
-            selectedVisibilityType={selectedVisibilityType}
-            sendMessage={sendMessage}
-          />
-        )}
+  const showEmptyState =
+  messages.length === 0 &&
+  attachments.length === 0 &&
+  uploadQueue.length === 0 &&
+  canUseChat;
 
+  return (
+    <div className={cn("relative flex w-full flex-col gap-8", className)}>
       <input
         className="-top-4 -left-4 pointer-events-none fixed size-0.5 opacity-0"
         multiple
@@ -292,6 +287,12 @@ function PureMultimodalInput({
         tabIndex={-1}
         type="file"
       />
+
+       {showEmptyState && (
+          <h2 className="text-2xl md:text-3xl xl:text-4xl font-semibold text-content-ultra text-center">
+            Start a conversation
+          </h2>
+        )}
 
       <PromptInput
         className="border border-bdr-light p-3 transition-all duration-200"
@@ -394,6 +395,17 @@ function PureMultimodalInput({
           )}
         </PromptInputToolbar>
       </PromptInput>
+
+      {messages.length === 0 &&
+        attachments.length === 0 &&
+        uploadQueue.length === 0 &&
+        canUseChat && (
+          <SuggestedActions
+            chatId={chatId}
+            selectedVisibilityType={selectedVisibilityType}
+            sendMessage={sendMessage}
+          />
+        )}
 
       {/* Subscription dialog for upgrades */}
       <SubscriptionDialog
