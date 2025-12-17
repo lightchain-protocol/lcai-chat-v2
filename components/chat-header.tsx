@@ -95,13 +95,13 @@ function PureChatHeader({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.custom(() => (
-        <AlertSuccess title='Chat exported successfully!' />
+      toast.custom((id) => (
+        <AlertSuccess id={id} title='Chat exported successfully!' />
         ));
     } catch (error) {
       console.error("Export error:", error);
-      toast.custom(() => (
-        <AlertError title='Failed to export chat' />
+      toast.custom((id) => (
+        <AlertError id={id} title='Failed to export chat' />
         ));
     }
   };
@@ -151,8 +151,8 @@ function PureChatHeader({
         },
       });
     } catch (error) {
-      toast.custom(() => (
-        <AlertError title={error instanceof Error ? error?.message : "Failed to backup chat"} />
+      toast.custom((id) => (
+        <AlertError id={id} title={error instanceof Error ? error?.message : "Failed to backup chat"} />
         ));
     }
   };
@@ -238,8 +238,8 @@ function PureChatHeader({
               onChange={(promptId, prompt) => {
                 onSystemPromptChange?.(promptId, prompt);
                 setPromptDialogOpen(false);
-                toast.custom(() => (
-                <AlertSuccess title='System prompt updated' />
+                toast.custom((id) => (
+                <AlertSuccess id={id} title='System prompt updated' />
                 ));
               }}
               onCreateNew={() => {

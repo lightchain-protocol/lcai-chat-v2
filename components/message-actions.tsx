@@ -39,8 +39,8 @@ export function PureMessageActions({
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
   if (!textFromParts) {
-    toast.custom(() => (
-      <AlertError title="There's no text to copy!" description="Please try again" />
+    toast.custom((id) => (
+      <AlertError id={id} title="There's no text to copy!" description="Please try again" />
     ));
     return;
   }

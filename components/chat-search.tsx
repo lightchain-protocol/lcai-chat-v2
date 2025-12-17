@@ -49,8 +49,8 @@ export function ChatSearch() {
         setResults(data.results || []);
       } catch (error) {
         console.error("Search error:", error);
-        toast.custom(() => (
-        <AlertError title='Failed to search messages' />
+        toast.custom((id) => (
+        <AlertError id={id} title='Failed to search messages' />
         ));
         setResults([]);
       } finally {

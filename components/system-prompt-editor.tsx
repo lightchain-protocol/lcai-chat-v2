@@ -34,8 +34,8 @@ export function SystemPromptEditor({
 
   const handleSave = async () => {
     if (!name.trim() || !prompt.trim()) {
-      toast.custom(() => (
-        <AlertError title='Please fill in all fields' />
+      toast.custom((id) => (
+        <AlertError id={id} title='Please fill in all fields' />
         ));
       return;
     }
@@ -55,8 +55,8 @@ export function SystemPromptEditor({
         throw new Error(error.error || "Failed to save prompt");
       }
 
-      toast.custom(() => (
-      <AlertSuccess title='Custom prompt saved successfully' />
+      toast.custom((id) => (
+      <AlertSuccess id={id} title='Custom prompt saved successfully' />
       ));
       setName("");
       setPrompt("");
@@ -64,8 +64,8 @@ export function SystemPromptEditor({
       onSave();
     } catch (error) {
       console.error("Error saving prompt:", error);
-      toast.custom(() => (
-        <AlertError title={error instanceof Error ? error.message : "Failed to save prompt"} />
+      toast.custom((id) => (
+        <AlertError id={id} title={error instanceof Error ? error.message : "Failed to save prompt"} />
       ));
     } finally {
       setLoading(false);
@@ -119,7 +119,7 @@ export function SystemPromptEditor({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-3">
           <Button disabled={loading} onClick={handleCancel} variant="outline">
             Cancel
           </Button>

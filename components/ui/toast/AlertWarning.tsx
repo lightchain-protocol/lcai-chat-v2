@@ -1,49 +1,43 @@
-import { TriangleAlert } from "lucide-react";
-import Image from "next/image";
+import AlertCloseButton from "./AlertCloseButton";
+import WarningIconSvg from "./WarningIconSvg";
 
 type AlertInfoProps = {
   children?: React.ReactNode;
   title?: string;
   description?: string;
   icon?: React.ReactNode;
+  id?: string | number;
 };
 const AlertWarning = ({
   children,
   title,
   description,
   icon,
+  id
 }: AlertInfoProps) => {
   return (
-    <div
-      className={`rounded-[20px] border-2 border-[rgba(14,18,27,0.06)] dark:border-[#281f03] bg-background shadow-shadow-toast backdrop-blur-[60px] p-3.5 flex gap-3 w-full relative ${title && description ? "items-start" : "items-center"
-      }`}
+    <div className={`rounded-[20px] bg-gradient-to-r dark:from-[#f5c10456] from-[#f5c10436] to-[#f5c10413] dark:to-[#f5c10421] w-full min-w-75 sm:min-w-90 relative p-0.5`}
     >
-      {/* background gradient 1 */}
-      <div className="absolute -top-[30px] -left-[30px] w-[calc(100%+20px)] h-[calc(100%+20px)] bg-[linear-gradient(90deg,#F7A720_0%,#FFF_64.15%)] dark:bg-[linear-gradient(90deg,#C89E00_0%,#695303_64.15%)] blur-[62px] opacity-30 z-[-1]"></div>
-      {/* background gradient 2 */}
-      <div className="absolute -top-0.5 -left-0.5 w-[calc(100%+4px)] h-[calc(100%+4px)] bg-[linear-gradient(91deg,#FFDFA6_2.15%,#FFF2DC_25.98%,#FFFBF4_98.16%)] dark:bg-[linear-gradient(90deg,rgba(244,192,0,0.20)_0%,rgba(158,125,1,0.02)_45.6%)] rounded-[20px]"></div>
-      {/* background image */}
-      <Image
-        className="absolute top-0 left-0 w-full h-full"
-        src="/images/bg/info-alert-bg-1.png"
-        width={422}
-        height={75}
-        alt="Background"
-      ></Image>
+      <div className={`rounded-[18px] bg-[linear-gradient(90deg,#FFEFD3_0%,#FFFDF9_38.81%)] shadow-[0_8px_36px_rgba(0,0,0,0.10)] w-full px-4 py-3 flex gap-3 dark:bg-[linear-gradient(90deg,#463704_0%,#261D00_70.83%)] dark:shadow-[-10px_0_30px_rgba(152,120,0,0.30),_0_20px_40px_rgba(0,0,0,0.40)]
+ ${
+        title && description ? "items-start" : "items-center"
+      }`}>
 
       {/* main content */}
-      <span className="shrink-0 text-xl w-11 h-11 rounded-full flex items-center justify-center bg-[linear-gradient(180deg,#FDC700_0%,#977700_100%)] shadow-[0_4px_24px_0_rgba(0,0,0,0.24),inset_0_0_4px_0_rgba(255,255,255,0.25)] relative z-[2]">
-        {icon ? icon : <TriangleAlert className="size-5 text-white" />}
+      <span className="shrink-0 text-xl w-11 h-11 rounded-full flex items-center justify-center bg-[linear-gradient(180deg,#FDC700_0%,#977700_100%)] shadow-[0_4px_24px_rgba(0,0,0,0.24),inset_0_0_4px_rgba(255,255,255,0.25)] dark:bg-[linear-gradient(180deg,#FDC700_0%,#977700_100%)] dark:shadow-[0_4px_24px_0_rgba(0,0,0,0.24),inset_0_0_4px_0_rgba(255,255,255,0.25)] relative z-2">
+        {icon ? icon : <WarningIconSvg />}
       </span>
       <div className="relative z-2">
         {title && (
-          <h6 className={`text-label-16-medium mb-1.5 text-[#7A2E0E] dark:text-content-strong`}>
+          <h6 className={`text-label-16-medium text-[#7A2E0E] dark:text-white`}>
             {title}
           </h6>
         )}
-        {description && <p className={`text-sm text-[#DC6803] dark:text-content-default`}>{description}</p>}
+        {description && <p className={`mt-1 text-sm text-[#DC6803] dark:text-content-default`}>{description}</p>}
         {children}
       </div>
+      <AlertCloseButton id={id!} />
+    </div>
     </div>
   );
 };

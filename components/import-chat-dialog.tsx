@@ -30,16 +30,16 @@ export function ImportChatDialog(props: DialogProps) {
 
     // Validate file type
     if (!file.name.endsWith(".json")) {
-      toast.custom(() => (
-        <AlertError title='Please select a JSON file' />
+      toast.custom((id) => (
+        <AlertError id={id} title='Please select a JSON file' />
       ));
       return;
     }
 
     // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      toast.custom(() => (
-        <AlertError title='File size must be less than 10MB' />
+      toast.custom((id) => (
+        <AlertError id={id} title='File size must be less than 10MB' />
       ));
       return;
     }
@@ -67,8 +67,8 @@ export function ImportChatDialog(props: DialogProps) {
 
       const result = await response.json();
 
-      toast.custom(() => (
-      <AlertSuccess title='Chat imported successfully!' />
+      toast.custom((id) => (
+      <AlertSuccess id={id} title='Chat imported successfully!' />
       ));
 
       // Close dialog
@@ -80,12 +80,12 @@ export function ImportChatDialog(props: DialogProps) {
     } catch (error) {
       console.error("Import error:", error);
       if (error instanceof SyntaxError) {
-        toast.custom(() => (
-        <AlertError title='Invalid JSON file format' />
+        toast.custom((id) => (
+        <AlertError id={id} title='Invalid JSON file format' />
         ));
       } else {
-        toast.custom(() => (
-        <AlertError title={ error instanceof Error
+        toast.custom((id) => (
+        <AlertError id={id} title={ error instanceof Error
             ? error.message
             : "Failed to import chat. Please check the file format."} />
         ));

@@ -223,12 +223,12 @@ function PureMultimodalInput({
         };
       }
       const { error } = await response.json();
-      toast.custom(() => (
-        <AlertError title={error} />
+      toast.custom((id) => (
+        <AlertError id={id} title={error} />
       ));
     } catch (_error) {
-      toast.custom(() => (
-        <AlertError title="Failed to upload file, please try again!" />
+      toast.custom((id) => (
+        <AlertError id={id} title="Failed to upload file, please try again!" />
       ));
     }
   }, []);
@@ -298,8 +298,8 @@ function PureMultimodalInput({
         onSubmit={(event) => {
           event.preventDefault();
           if (status !== "ready") {
-            toast.custom(() => (
-            <AlertError title="Please wait for the model to finish its response!" />
+            toast.custom((id) => (
+            <AlertError id={id} title="Please wait for the model to finish its response!" />
           ));
           } else {
             submitForm();
@@ -489,7 +489,7 @@ function PureModelSelectorCompact({
       value={selectedModel?.name}
     >
       <Trigger
-        className="flex h-8 items-center gap-2 rounded-lg border-0 px-2 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-surface-base-faint data-[state=open]:bg-surface-base-faint"
+        className="flex h-8 items-center gap-2 rounded-xl border-0 px-2 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-surface-base-faint data-[state=open]:bg-surface-base-faint"
         type="button"
       >
         <CpuIcon size={16} />
@@ -498,10 +498,10 @@ function PureModelSelectorCompact({
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] p-0 rounded-2xl">
+      <PromptInputModelSelectContent className="max-w-[300px] p-0 rounded-xl">
         <div className="flex flex-col gap-px">
           {chatModels.map((model) => (
-            <SelectItem key={model.id} value={model.name} className="rounded-2xl">
+            <SelectItem key={model.id} value={model.name} className="rounded-xl">
               <h6 className="truncate font-medium text-xs mb-0.5">{model.name}</h6>
               <p className="mt-px text-[10px] text-muted-foreground leading-tight">
                 {model.description}

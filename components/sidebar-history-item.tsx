@@ -65,8 +65,8 @@ const PureChatItem = ({
 
   const handleRename = () => {
     if (!newTitle.trim()) {
-      toast.custom(() => (
-        <AlertError title='Title cannot be empty' />
+      toast.custom((id) => (
+        <AlertError id={id} title='Title cannot be empty' />
       ));
       return;
     }
@@ -148,8 +148,8 @@ const PureChatItem = ({
                             e.preventDefault();
                             e.stopPropagation();
                             await copyToClipboard(chat.ipfsCid || "");
-                            toast.custom(() => (
-                            <AlertSuccess title='CID copied to clipboard!' />
+                            toast.custom((id) => (
+                            <AlertSuccess id={id} title='CID copied to clipboard!' />
                             ));
                           }}
                           type="button"

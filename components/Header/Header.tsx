@@ -102,7 +102,7 @@ export default function Header() {
             {/* Logo */}
             <div className="flex items-center gap-3 sm:gap-4 md:gap-5">
               <Link
-                className="logo flex items-center"
+                className="logo flex items-center max-w-[150px] sm:max-w-[200px]"
                 href="/"
                 aria-label="Lightchain Home"
               >

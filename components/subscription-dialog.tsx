@@ -52,13 +52,13 @@ const SubscriptionDialog = (props: DialogProps) => {
       ),
     onSuccess: () => {
       props.onOpenChange?.(false);
-      toast.custom(() => (
-      <AlertSuccess title='Subscription successful' />
+      toast.custom((id) => (
+      <AlertSuccess id={id} title='Subscription successful' />
       ));
     },
     onError: (error: any) => {
-      toast.custom(() => (
-        <AlertError title={error.walk?.()?.shortMessage ||
+      toast.custom((id) => (
+        <AlertError id={id} title={error.walk?.()?.shortMessage ||
           error.walk?.()?.message ||
           error.message ||
           "Subscription failed"} />
