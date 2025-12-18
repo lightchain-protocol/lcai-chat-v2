@@ -2,6 +2,8 @@
 
 import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
 import { motion } from "framer-motion";
+import { Loader } from "lucide-react";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import type { User } from "next-auth";
 import { useState } from "react";
@@ -25,12 +27,9 @@ import {
 } from "@/components/ui/sidebar";
 import type { Chat } from "@/lib/db/schema";
 import { fetcher } from "@/lib/utils";
-import { LoaderIcon } from "./icons";
 import { ChatItem } from "./sidebar-history-item";
-import Image from "next/image";
-import AlertInfo from "./ui/toast/AlertInfo";
-import { Loader } from "lucide-react";
 import AlertError from "./ui/toast/AlertError";
+import AlertInfo from "./ui/toast/AlertInfo";
 
 type GroupedChats = {
   today: Chat[];
@@ -146,10 +145,12 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
     });
 
     toast.promise(deletePromise, {
-      loading:<AlertInfo
-        title="Deleting chat..."
-        icon={<Loader className="size-5 animate-spin text-white" />}
-      />,
+      loading: (
+        <AlertInfo
+          icon={<Loader className="size-5 animate-spin text-white" />}
+          title="Deleting chat..."
+        />
+      ),
       success: () => {
         mutate((chatHistories) => {
           if (chatHistories) {
@@ -170,7 +171,6 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
         border: "none",
         boxShadow: "none",
       },
-
     });
 
     setShowDeleteDialog(false);
@@ -185,8 +185,16 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
       <SidebarGroup>
         <SidebarGroupContent>
           <div className="space-y-3">
-            <Image className="max-w-25 mx-auto" src="/images/icons/empty-chat-light.png" width={100} height={100} alt="Empty Chat"></Image>
-            <p className="text-content-medium text-sm text-center">Connect your wallet to sign in and view previous chats.</p>
+            <Image
+              alt="Empty Chat"
+              className="mx-auto max-w-25"
+              height={100}
+              src="/images/icons/empty-chat-light.png"
+              width={100}
+            />
+            <p className="text-center text-content-medium text-sm">
+              Connect your wallet to sign in and view previous chats.
+            </p>
           </div>
         </SidebarGroupContent>
       </SidebarGroup>
@@ -196,9 +204,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
   if (isLoading) {
     return (
       <SidebarGroup>
-        <h6 className="px-2 py-1 text-content-soft text-xs">
-          Today
-        </h6>
+        <h6 className="px-2 py-1 text-content-soft text-xs">Today</h6>
         <SidebarGroupContent>
           <div className="flex flex-col">
             {[44, 32, 28, 64, 52].map((item) => (
@@ -392,7 +398,10 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-surface-base-error-default hover:bg-surface-base-error-default/90" onClick={handleDelete}>
+            <AlertDialogAction
+              className="bg-surface-base-error-default hover:bg-surface-base-error-default/90"
+              onClick={handleDelete}
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

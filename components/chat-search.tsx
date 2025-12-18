@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SearchResult } from "@/lib/db/queries";
 import { cn } from "@/lib/utils";
+import { SidebarGroup, SidebarGroupContent } from "./ui/sidebar";
 import AlertError from "./ui/toast/AlertError";
 
 export function ChatSearch() {
@@ -50,7 +51,7 @@ export function ChatSearch() {
       } catch (error) {
         console.error("Search error:", error);
         toast.custom((id) => (
-        <AlertError id={id} title='Failed to search messages' />
+          <AlertError id={id} title="Failed to search messages" />
         ));
         setResults([]);
       } finally {
@@ -77,8 +78,9 @@ export function ChatSearch() {
   }, []);
 
   return (
-    <div className="p-4">
-      <div>
+    <SidebarGroup>
+      <SidebarGroupContent>
+        <div>
           <div className="relative">
             <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-content-soft" />
             <Input
@@ -103,7 +105,7 @@ export function ChatSearch() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto mt-2">
+        <div className="mt-2 flex-1 overflow-y-auto">
           {isSearching && (
             <div className="flex items-center justify-center py-2">
               <h6 className="text-content-default text-sm">Searching...</h6>
@@ -168,6 +170,7 @@ export function ChatSearch() {
             </div>
           )}
         </div>
-    </div>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }

@@ -1,21 +1,22 @@
 "use client";
 
-import { ChevronRight, Settings } from "lucide-react";
+import {
+  ChartCandlestick,
+  ChevronRight,
+  CodeXml,
+  GraduationCap,
+  Microscope,
+  Pencil,
+  PencilRuler,
+  Settings,
+  UserPen,
+} from "lucide-react";
+import { useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { fetcher } from "@/lib/utils";
-import { useState } from "react";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { DialogClose } from "./ui/dialog";
-import {
-  UserPen,
-  CodeXml,
-  Pencil,
-  GraduationCap,
-  Microscope,
-  ChartCandlestick,
-  PencilRuler,
-} from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 
 const ICON_MAP = {
   user: UserPen,
@@ -26,7 +27,6 @@ const ICON_MAP = {
   analyst: ChartCandlestick,
   technical: PencilRuler,
 } as const;
-
 
 export type PromptTemplate = {
   id: string;
@@ -72,109 +72,111 @@ export function SystemPromptSelector({
     <div className="space-y-5">
       {onCreateNew && (
         <button
+          className="grid w-full grid-cols-[1fr_20px] items-center gap-5 rounded-2xl border border-bdr-extraLight bg-surface-base-subtle py-4 pr-6 pl-4 hover:bg-surface-base-faint"
           disabled={disabled}
           onClick={onCreateNew}
-          className="grid grid-cols-[1fr_20px] items-center gap-5 w-full py-4 pl-4 pr-6 rounded-2xl border border-bdr-extraLight bg-surface-base-subtle hover:bg-surface-base-faint"
+          type="button"
         >
           <div className="flex items-center gap-3">
-            <span className="text-content-default size-11 flex items-center justify-center rounded-full border border-bdr-light bg-surface-elevation-light shrink-0">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-full border border-bdr-light bg-surface-elevation-light text-content-default">
               <Settings size={20} />
             </span>
             <div className="text-left">
-              <h6 className="text-content-strong font-semibold -tracking-[0.096px] leading-[1.2]">Custom</h6>
-              <p className="text-sm text-content-default mt-0.5">Create a custom system prompt.</p>
+              <h6 className="-tracking-[0.096px] font-semibold text-content-strong leading-[1.2]">
+                Custom
+              </h6>
+              <p className="mt-0.5 text-content-default text-sm">
+                Create a custom system prompt.
+              </p>
             </div>
           </div>
-          <ChevronRight size={24} className="text-content-medium" />
+          <ChevronRight className="text-content-medium" size={24} />
         </button>
       )}
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-6">
-        <span className="w-full h-px bg-surface-base-extraLight"></span>
+        <span className="h-px w-full bg-surface-base-extraLight" />
         <span className="text-content-medium text-sm">Or</span>
-        <span className="w-full h-px bg-surface-base-extraLight"></span>
+        <span className="h-px w-full bg-surface-base-extraLight" />
       </div>
 
-      <div className="border-b border-bdr-extraLight pb-1">
+      <div className="border-bdr-extraLight border-b pb-1">
         <RadioGroup
-        disabled={disabled}
-        value={selectedId}
-        onValueChange={setSelectedId}
-        className="space-y-4 max-h-100 overflow-y-auto px-2.5 -mx-2.5"
-      >
-        {/* Presets */}
-        {presetTemplates.length > 0 && (
-          <div className="space-y-3">
-            <h6 className="text-sm font-medium text-content-soft">
-              Choose from presets
-            </h6>
+          className="-mx-2.5 max-h-100 space-y-4 overflow-y-auto px-2.5"
+          disabled={disabled}
+          onValueChange={setSelectedId}
+          value={selectedId}
+        >
+          {/* Presets */}
+          {presetTemplates.length > 0 && (
+            <div className="space-y-3">
+              <h6 className="font-medium text-content-soft text-sm">
+                Choose from presets
+              </h6>
 
               {presetTemplates.map((template) => {
                 const Icon = template.icon ? ICON_MAP[template.icon] : null;
 
                 return (
                   <RadioGroupItem
+                    className="after:-translate-y-1/2 relative grid w-full cursor-pointer grid-cols-[1fr_20px] items-center gap-5 rounded-2xl border border-bdr-extraLight p-4 transition-colors duration-200 after:absolute after:top-1/2 after:right-4 after:size-5 after:rounded-full after:border-5 after:border-transparency-dark-mode-24 after:shadow-[0_1.364px_2.727px_rgba(10,13,20,0.03)] after:content-[''] hover:border-surface-base-brand-default data-[state=checked]:border-surface-base-brand-default data-[state=checked]:after:border-surface-base-brand-strong"
+                    id={template.id}
                     key={template.id}
                     value={template.id}
-                    id={template.id}
-                    className="grid grid-cols-[1fr_20px] items-center gap-5 w-full rounded-2xl border border-bdr-extraLight hover:border-surface-base-brand-default p-4 cursor-pointer transition-colors duration-200 data-[state=checked]:border-surface-base-brand-default relative after:content-[''] after:absolute after:right-4 after:top-1/2 after:-translate-y-1/2 after:size-5 after:rounded-full after:border-5 after:border-transparency-dark-mode-24 after:shadow-[0_1.364px_2.727px_rgba(10,13,20,0.03)] data-[state=checked]:after:border-surface-base-brand-strong"
                   >
                     <div className="flex items-center gap-3 text-left">
-                      <span className="text-content-default size-11 flex items-center justify-center rounded-full border border-bdr-light bg-surface-elevation-light shrink-0">
+                      <span className="flex size-11 shrink-0 items-center justify-center rounded-full border border-bdr-light bg-surface-elevation-light text-content-default">
                         {Icon && <Icon size={20} />}
                       </span>
                       <div>
-                        <h6 className="text-content-strong font-semibold -tracking-[0.096px] leading-[1.2]">
+                        <h6 className="-tracking-[0.096px] font-semibold text-content-strong leading-[1.2]">
                           {template.name}
                         </h6>
                         {template.description && (
-                          <p className="text-sm text-content-default font-normal mt-0.5">
+                          <p className="mt-0.5 font-normal text-content-default text-sm">
                             {template.description}
                           </p>
                         )}
                       </div>
                     </div>
                   </RadioGroupItem>
-                )
-              } 
-              )}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
 
-        {/* Custom */}
-        {customTemplates.length > 0 && (
-          <div className="space-y-3">
-            <h6 className="text-sm font-medium text-content-soft">
-              Custom
-            </h6>
+          {/* Custom */}
+          {customTemplates.length > 0 && (
+            <div className="space-y-3">
+              <h6 className="font-medium text-content-soft text-sm">Custom</h6>
 
-            {customTemplates.map((template) => (
-              <RadioGroupItem
-                key={template.id}
-                value={template.id}
-                id={template.id}
-                className="grid grid-cols-[1fr_20px] items-center gap-5 w-full rounded-2xl border border-bdr-extraLight hover:border-surface-base-brand-default p-4 cursor-pointer transition-colors duration-200 data-[state=checked]:border-surface-base-brand-default relative after:content-[''] after:absolute after:right-4 after:top-1/2 after:-translate-y-1/2 after:size-5 after:rounded-full after:border-5 after:border-transparency-dark-mode-24 after:shadow-[0_1.364px_2.727px_rgba(10,13,20,0.03)] data-[state=checked]:after:border-surface-base-brand-strong"
-              >
-                <div className="flex items-center gap-3 text-left">
-                  <span className="text-content-default size-11 flex items-center justify-center rounded-full border border-bdr-light bg-surface-elevation-light shrink-0">
-                    <Settings size={20} />
-                  </span>
-                  <div>
-                    <h6 className="text-content-strong font-semibold -tracking-[0.096px] leading-[1.2]">
-                      {template.name}
-                    </h6>
-                    {template.prompt && (
-                      <p className="text-sm text-content-default font-normal mt-0.5">
-                        {template.prompt}
-                      </p>
-                    )}
+              {customTemplates.map((template) => (
+                <RadioGroupItem
+                  className="after:-translate-y-1/2 relative grid w-full cursor-pointer grid-cols-[1fr_20px] items-center gap-5 rounded-2xl border border-bdr-extraLight p-4 transition-colors duration-200 after:absolute after:top-1/2 after:right-4 after:size-5 after:rounded-full after:border-5 after:border-transparency-dark-mode-24 after:shadow-[0_1.364px_2.727px_rgba(10,13,20,0.03)] after:content-[''] hover:border-surface-base-brand-default data-[state=checked]:border-surface-base-brand-default data-[state=checked]:after:border-surface-base-brand-strong"
+                  id={template.id}
+                  key={template.id}
+                  value={template.id}
+                >
+                  <div className="flex items-center gap-3 text-left">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-full border border-bdr-light bg-surface-elevation-light text-content-default">
+                      <Settings size={20} />
+                    </span>
+                    <div>
+                      <h6 className="-tracking-[0.096px] font-semibold text-content-strong leading-[1.2]">
+                        {template.name}
+                      </h6>
+                      {template.prompt && (
+                        <p className="mt-0.5 font-normal text-content-default text-sm">
+                          {template.prompt}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </RadioGroupItem>
-            ))}
-          </div>
-        )}
-      </RadioGroup>
+                </RadioGroupItem>
+              ))}
+            </div>
+          )}
+        </RadioGroup>
       </div>
 
       {/* Actions */}
@@ -183,10 +185,10 @@ export function SystemPromptSelector({
           <Button variant="outline">Cancel</Button>
         </DialogClose>
         <Button
+          className="text-sm"
           disabled={!selectedId || disabled}
           onClick={handleSave}
           variant="gradient"
-          className="text-sm"
         >
           Save Prompt
         </Button>

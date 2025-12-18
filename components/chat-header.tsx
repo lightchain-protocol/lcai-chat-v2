@@ -31,10 +31,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
-import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
-import AlertSuccess from "./ui/toast/AlertSuccess";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
+import AlertSuccess from "./ui/toast/AlertSuccess";
+import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
 
 const FILENAME_REGEX = /filename="(.+)"/;
 
@@ -96,13 +96,13 @@ function PureChatHeader({
       URL.revokeObjectURL(url);
 
       toast.custom((id) => (
-        <AlertSuccess id={id} title='Chat exported successfully!' />
-        ));
+        <AlertSuccess id={id} title="Chat exported successfully!" />
+      ));
     } catch (error) {
       console.error("Export error:", error);
       toast.custom((id) => (
-        <AlertError id={id} title='Failed to export chat' />
-        ));
+        <AlertError id={id} title="Failed to export chat" />
+      ));
     }
   };
 
@@ -113,14 +113,14 @@ function PureChatHeader({
       });
 
       toast.promise(responsePromise, {
-         loading: (
-              <AlertInfo
-                title="Backing up chat..."
-                icon={<Loader className="size-5 animate-spin text-white" />}
-              />
-            ),
+        loading: (
+          <AlertInfo
+            icon={<Loader className="size-5 animate-spin text-white" />}
+            title="Backing up chat..."
+          />
+        ),
 
-            success: async (response) => {
+        success: async (response) => {
           const data = await response.json();
 
           if (!response.ok) {
@@ -133,16 +133,14 @@ function PureChatHeader({
           // Refresh the first page of sidebar history to show backup icon
           await globalMutate("/api/history?limit=20");
 
-          return <AlertInfo
-                title={`Chat backed up! CID: ${data.cid.slice(0, 12)}...`}
-              /> ;
+          return (
+            <AlertInfo
+              title={`Chat backed up! CID: ${data.cid.slice(0, 12)}...`}
+            />
+          );
         },
-        error: (
-          <AlertError
-            title="Failed to backup chat"
-          />
-        ),
-    
+        error: <AlertError title="Failed to backup chat" />,
+
         style: {
           background: "transparent",
           padding: 0,
@@ -152,18 +150,23 @@ function PureChatHeader({
       });
     } catch (error) {
       toast.custom((id) => (
-        <AlertError id={id} title={error instanceof Error ? error?.message : "Failed to backup chat"} />
-        ));
+        <AlertError
+          id={id}
+          title={
+            error instanceof Error ? error?.message : "Failed to backup chat"
+          }
+        />
+      ));
     }
   };
 
   return (
-    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-3 md:py-4.5 md:px-4">
+    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-3 md:px-4 md:py-4.5">
       <SidebarToggle />
 
       {(!open || windowWidth < 768) && (
         <Button
-          className="order-2 ml-auto h-8 px-2 md:order-1 md:ml-0 md:h-fit md:px-2 bg-surface-base-faint text-content-default"
+          className="order-2 ml-auto h-8 bg-surface-base-faint px-2 text-content-default md:order-1 md:ml-0 md:h-fit md:px-2"
           onClick={() => {
             router.push("/");
             router.refresh();
@@ -187,12 +190,14 @@ function PureChatHeader({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              className="order-3 h-9 px-2 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight data-[state=open]:bg-surface-base-extraLight"
+              className="order-3 h-9 border-surface-base-extraLight bg-surface-base-faint px-2 text-content-default hover:bg-surface-base-extraLight data-[state=open]:bg-surface-base-extraLight"
               title="Export, backup, and import options"
               type="button"
               variant="outline"
             >
-              <span className="hidden md:inline text-sm leading-0">Export & Backup</span>
+              <span className="hidden text-sm leading-0 md:inline">
+                Export & Backup
+              </span>
               <Download className="size-4.5!" />
             </Button>
           </DropdownMenuTrigger>
@@ -214,42 +219,46 @@ function PureChatHeader({
 
       {!isReadonly && onSystemPromptChange && (
         <Button
-          className="order-4 h-9 px-2 md:h-fit md:px-2 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight"
+          className="order-4 h-9 border-surface-base-extraLight bg-surface-base-faint px-2 text-content-default hover:bg-surface-base-extraLight md:h-fit md:px-2"
           onClick={() => setPromptDialogOpen(true)}
           title="System prompt settings"
           type="button"
           variant="outline"
         >
-          <span className="hidden md:inline text-sm leading-0">System Prompt</span>
+          <span className="hidden text-sm leading-0 md:inline">
+            System Prompt
+          </span>
           <Settings2 className="size-4.5!" />
         </Button>
       )}
 
       <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
-        <DialogContent className="sm:rounded-3xl sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl sm:rounded-3xl">
           <DialogHeader>
             <DialogTitle asChild>
-              <h4 className="text-xl font-semibold text-content-strong -tracking-[0.2px] leading-[1.2]">System Prompt Settings</h4>
+              <h4 className="-tracking-[0.2px] font-semibold text-content-strong text-xl leading-[1.2]">
+                System Prompt Settings
+              </h4>
             </DialogTitle>
-            <DialogDescription className="text-content-default -tracking-[0.16px] text-base mt-1">
+            <DialogDescription className="-tracking-[0.16px] mt-1 text-base text-content-default">
               Choose a personality or create a custom prompt for the AI.
             </DialogDescription>
           </DialogHeader>
-          <div className="w-full h-px bg-bdr-light my-6"></div>
-            <SystemPromptSelector
-              onChange={(promptId, prompt) => {
-                onSystemPromptChange?.(promptId, prompt);
-                setPromptDialogOpen(false);
-                toast.custom((id) => (
-                <AlertSuccess id={id} title='System prompt updated' />
-                ));
-              }}
-              onCreateNew={() => {
-                setPromptDialogOpen(false);
-                setEditorDialogOpen(true);
-              }}
-              value={systemPromptId}
-            />
+          <div className="my-6 h-px w-full bg-bdr-light" />
+          <SystemPromptSelector
+            onChange={(promptId, prompt) => {
+              onSystemPromptChange?.(promptId, prompt);
+              setPromptDialogOpen(false);
+              toast.custom((id) => (
+                <AlertSuccess id={id} title="System prompt updated" />
+              ));
+            }}
+            onCreateNew={() => {
+              setPromptDialogOpen(false);
+              setEditorDialogOpen(true);
+            }}
+            value={systemPromptId}
+          />
         </DialogContent>
       </Dialog>
 
