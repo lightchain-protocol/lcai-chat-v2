@@ -15,7 +15,7 @@ type SuggestedActionsProps = {
 
 function PureSuggestedActions({ chatId, sendMessage }: SuggestedActionsProps) {
   const suggestedActions = [
-    "What is ligthchain AI?",
+    "What is Lightchain AI?",
     "What are the advantages of using Next.js?",
     "Write code to demonstrate bitcoin's algorithm",
     "Help me write an essay about Blockchain",
