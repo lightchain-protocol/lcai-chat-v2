@@ -10,7 +10,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -73,9 +72,9 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
             Enter the IPFS CID (Content Identifier) to restore a chat backup.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 mt-3">
+        <div className="space-y-4 mt-6">
           <div className="space-y-2">
-            <Label htmlFor="cid">IPFS CID</Label>
+            <Label htmlFor="cid" className="font-medium">IPFS CID</Label>
             <Input
               disabled={isRestoring}
               id="cid"
@@ -94,7 +93,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
             </ul>
           </div>
         </div>
-        <DialogFooter className="flex gap-2">
+        <div className="flex gap-2 justify-end mt-6">
           <Button
             disabled={isRestoring}
             onClick={() => props.onOpenChange?.(false)}
@@ -113,7 +112,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
               "Restore"
             )}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

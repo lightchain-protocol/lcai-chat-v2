@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Globe, Lock, LucideIcon, LucideProps } from "lucide-react";
+import { ChevronDown, Globe, Lock, LucideIcon } from "lucide-react";
 
 export type VisibilityType = "private" | "public";
 

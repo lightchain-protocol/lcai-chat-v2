@@ -65,7 +65,7 @@ export default function Navbar() {
               >
                 <div
                   className={clsx(
-                    "wrapper mt-0 overflow-hidden rounded-b-2xl border border-br-light-soft border-t-0 bg-surface-x-soft-hex shadow-[0_8px_24px_-6px_rgba(12,12,13,0.08),_0_4px_4px_-4px_rgba(12,12,13,0.05)]",
+                    "wrapper mt-0 overflow-hidden rounded-b-2xl border border-bdr-light border-t-0 bg-surface-x-soft-hex shadow-[0_8px_24px_-6px_rgba(12,12,13,0.08),_0_4px_4px_-4px_rgba(12,12,13,0.05)]",
                     width,
                     "max-w-[95vw] xl:max-w-none"
                   )}
@@ -87,12 +87,12 @@ export default function Navbar() {
                           key={i}
                           className={clsx(
                             "single-mega-item p-4",
-                            !isLast && "border-r border-br-light-soft"
+                            !isLast && "border-r border-bdr-light"
                           )}
                         >
                           {/* Title like the screenshot */}
                           {g.heading && (
-                            <h3 className="lcai-short-title mb-3 border-b border-br-light-soft pb-2 text-xs font-semibold uppercase tracking-wide text-content-soft">
+                            <h3 className="lcai-short-title mb-3 border-b border-bdr-light pb-2 text-xs font-semibold uppercase tracking-wide text-content-soft">
                               {g.heading}
                             </h3>
                           )}

@@ -3,6 +3,7 @@ export type PromptPreset = {
   name: string;
   prompt: string;
   description?: string;
+  icon: "user" | "code" | "writer" | "teacher" | "research" | "analyst" | "technical";
 };
 
 export const promptPresets: PromptPreset[] = [
@@ -10,49 +11,50 @@ export const promptPresets: PromptPreset[] = [
     id: "default",
     name: "Default Assistant",
     prompt: "You are a helpful AI assistant.",
-    description: "General-purpose assistant for all types of tasks",
+    description: "General-purpose assistant",
+    icon: "user",
   },
   {
     id: "code",
     name: "Code Expert",
-    prompt:
-      "You are an expert programmer. Provide clear, concise code examples with explanations. Focus on best practices, performance, and maintainability. When writing code, include comments explaining key concepts.",
-    description: "Specialized in programming and software development",
+    prompt: "You are an expert programmer...",
+    description: "Specialized in programming",
+    icon: "code",
   },
   {
     id: "writer",
     name: "Creative Writer",
-    prompt:
-      "You are a creative writing assistant. Help with storytelling, character development, and engaging narratives. Be descriptive and imaginative. Focus on vivid imagery, compelling dialogue, and emotional resonance.",
-    description: "Perfect for creative writing and storytelling",
+    prompt: "You are a creative writing assistant...",
+    description: "Perfect for creative writing",
+    icon: "writer",
   },
   {
     id: "teacher",
     name: "Patient Teacher",
-    prompt:
-      "You are a patient teacher. Explain concepts clearly, use analogies, and check for understanding. Break down complex topics into simple, digestible steps. Ask follow-up questions to ensure comprehension.",
-    description: "Educational assistant for learning new concepts",
+    prompt: "You are a patient teacher...",
+    description: "Educational assistant",
+    icon: "teacher",
   },
   {
     id: "researcher",
     name: "Research Assistant",
-    prompt:
-      "You are a research assistant. Provide well-researched information, think critically, and present multiple perspectives on topics. Cite sources when possible and acknowledge limitations in your knowledge.",
-    description: "Focused on research and factual analysis",
+    prompt: "You are a research assistant...",
+    description: "Focused on research",
+    icon: "research",
   },
   {
     id: "analyst",
     name: "Business Analyst",
-    prompt:
-      "You are a business analyst. Focus on data-driven insights, strategic thinking, and practical business solutions. Analyze problems systematically and provide actionable recommendations with clear reasoning.",
-    description: "Business strategy and analysis specialist",
+    prompt: "You are a business analyst...",
+    description: "Business strategy specialist",
+    icon: "analyst",
   },
   {
     id: "technical-writer",
     name: "Technical Writer",
-    prompt:
-      "You are a technical writer. Create clear, concise documentation. Use plain language, proper formatting, and logical structure. Focus on accuracy and accessibility for the target audience.",
-    description: "Documentation and technical writing expert",
+    prompt: "You are a technical writer...",
+    description: "Documentation expert",
+    icon: "technical",
   },
 ];
 

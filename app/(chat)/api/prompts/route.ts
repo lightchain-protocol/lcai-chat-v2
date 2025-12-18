@@ -34,6 +34,7 @@ export async function GET() {
         description: preset.description,
         isDefault: true,
         isPreset: true,
+        icon: preset.icon
       })),
       ...customTemplates.map((template) => ({
         id: template.id,

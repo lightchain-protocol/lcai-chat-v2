@@ -103,7 +103,7 @@ export function ChatSearch() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto mt-2">
           {isSearching && (
             <div className="flex items-center justify-center py-2">
               <h6 className="text-content-default text-sm">Searching...</h6>

@@ -55,7 +55,7 @@
   --surface-m-light: #f1f1f1;
   --surface-base-subtle: rgba(34, 35, 42, 0.02);
   --surface-base-faint: rgba(14, 18, 27, 0.04);
-  --surface-base-extraLight: rgba(14, 18, 27, 0.04);
+  --surface-base-extraLight: rgba(14, 18, 27, 0.06);
   --surface-base-light: rgba(204, 206, 239, 0.16);
   --surface-elevation-light: #ffffff;
   --surface-base-dark: #ffffff;
@@ -82,6 +82,7 @@
   --border-light: rgba(14, 18, 27, 0.06);
   --border-soft: rgba(14, 18, 27, 0.08);
   --border-error-toast: rgba(14, 18, 27, 0.06);
+  --border-extraLight: rgba(14, 18, 27, 0.06);
 
   /* shadow */
   --shadow-toast: 0 8px 36px 0 rgb(0 0 0 / 20%);
@@ -150,6 +151,7 @@
   --border-light: rgba(204, 206, 239, 0.08);
   --border-soft: rgba(204, 206, 239, 0.12);
   --border-error-toast: #220404;
+  --border-extraLight: rgba(204, 206, 239, 0.06);
 
 
   /* shadow */
@@ -244,6 +246,7 @@
   --color-bdr-light: var(--border-light);
   --color-bdr-soft: var(--border-soft);
   --color-bdr-error-toast: var(--border-error-toast);
+  --color-bdr-extraLight: var(--border-extraLight);
 
   /* gradient bg */
   --color-gradient-primary: linear-gradient(270deg, #7064E9 0%, #DD00AC 100%);

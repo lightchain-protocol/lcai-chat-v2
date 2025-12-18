@@ -126,7 +126,7 @@ export default function PopupMobileMenu({ isActive, onClose }: PopupMobileMenuPr
                 )}
             >
                 {/* Header */}
-                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-br-light-soft bg-surface-x-soft-hex p-4">
+                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-bdr-light bg-surface-x-soft-hex p-4">
                     <Link href="/" onClick={onClose} className="inline-flex items-center gap-2">
                         <Image
                             src="/images/logo/logo-dark.svg"

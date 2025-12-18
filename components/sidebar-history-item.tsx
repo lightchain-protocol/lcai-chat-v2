@@ -14,7 +14,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
@@ -255,7 +254,7 @@ const PureChatItem = ({
 
       <Dialog onOpenChange={setShowRenameDialog} open={showRenameDialog}>
         <DialogContent className="sm:rounded-3xl">
-          <DialogHeader>
+          <DialogHeader className="mb-4">
             <DialogTitle>Rename Chat</DialogTitle>
             <DialogDescription>
               Enter a new title for your chat conversation.
@@ -272,7 +271,7 @@ const PureChatItem = ({
             placeholder="Enter chat title"
             value={newTitle}
           />
-          <DialogFooter className="flex gap-2">
+          <div className="flex justify-end gap-2 mt-4">
             <Button
               disabled={isRenaming}
               onClick={() => setShowRenameDialog(false)}
@@ -288,7 +287,7 @@ const PureChatItem = ({
             >
               {isRenaming ? "Saving..." : "Save"}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </>

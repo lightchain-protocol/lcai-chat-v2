@@ -165,7 +165,7 @@ export function ImportChatDialog(props: DialogProps) {
           </div>
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 mt-6">
           <Button
             disabled={isUploading}
             onClick={() => props.onOpenChange?.(false)}

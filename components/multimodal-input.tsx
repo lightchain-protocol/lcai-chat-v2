@@ -295,7 +295,7 @@ function PureMultimodalInput({
         )}
 
       <PromptInput
-        className="border border-bdr-light p-3 transition-all duration-200"
+        className="border border-bdr-light p-3 sm:p-4 transition-all duration-200"
         onSubmit={(event) => {
           event.preventDefault();
           if (status !== "ready") {
@@ -341,13 +341,13 @@ function PureMultimodalInput({
           </div>
         )}
         <div className="flex flex-row items-start gap-1 sm:gap-2 relative">
-          <div className="pr-2 border-r border-surface-base-extraLight absolute top-2.5">
+          <div className="pr-2 border-r border-surface-base-extraLight absolute top-[3px] sm:top-0.5">
             {hasActiveSubscription.data ? <Image src="/images/logo/favicon.png" width={16} height={16} alt="Icon"></Image>: <Lock className="text-content-light" size={16} /> }
             
           </div>
           <PromptInputTextarea
             autoFocus
-            className="grow resize-none border-0! border-none! bg-transparent pl-8! p-2 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
+            className="grow resize-none border-0! border-none! bg-transparent pl-8! px-2 pb-2 pt-0 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
             disabled={!canUseChat}
@@ -386,7 +386,7 @@ function PureMultimodalInput({
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
             <PromptInputSubmit
-              className="size-8 rounded-full bg-gradient-primary text-white disabled:bg-muted disabled:text-muted-foreground"
+              className="size-8 rounded-full bg-gradient-primary text-white disabled:[background:#c1c1c1] dark:disabled:[background:#303030]  disabled:text-muted-foreground"
               disabled={!input.trim() || uploadQueue.length > 0}
               status={status}
             >
@@ -501,7 +501,7 @@ function PureModelSelectorCompact({
       value={selectedModel?.name}
     >
       <Trigger
-        className="flex h-8 items-center gap-2 rounded-xl border-0 px-2 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-surface-base-faint data-[state=open]:bg-surface-base-faint"
+        className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-surface-base-faint data-[state=open]:bg-surface-base-faint"
         type="button"
       >
         <CpuIcon size={16} />
@@ -510,10 +510,10 @@ function PureModelSelectorCompact({
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] p-0 rounded-xl">
+      <PromptInputModelSelectContent className="max-w-[300px] p-0 rounded-lg">
         <div className="flex flex-col gap-px">
           {chatModels.map((model) => (
-            <SelectItem key={model.id} value={model.name} className="rounded-xl">
+            <SelectItem key={model.id} value={model.name} className="rounded-lg">
               <h6 className="truncate font-medium text-xs mb-0.5">{model.name}</h6>
               <p className="mt-px text-[10px] text-muted-foreground leading-tight">
                 {model.description}

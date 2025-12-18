@@ -226,14 +226,16 @@ function PureChatHeader({
       )}
 
       <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
-        <DialogContent className="sm:rounded-3xl">
+        <DialogContent className="sm:rounded-3xl sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>System Prompt Settings</DialogTitle>
-            <DialogDescription>
+            <DialogTitle asChild>
+              <h4 className="text-xl font-semibold text-content-strong -tracking-[0.2px] leading-[1.2]">System Prompt Settings</h4>
+            </DialogTitle>
+            <DialogDescription className="text-content-default -tracking-[0.16px] text-base mt-1">
               Choose a personality or create a custom prompt for the AI.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
+          <div className="w-full h-px bg-bdr-light my-6"></div>
             <SystemPromptSelector
               onChange={(promptId, prompt) => {
                 onSystemPromptChange?.(promptId, prompt);
@@ -248,8 +250,6 @@ function PureChatHeader({
               }}
               value={systemPromptId}
             />
-            <p className="text-sm mt-3 text-content-default">Pick a preset to customize the assistant’s behavior.</p>
-          </div>
         </DialogContent>
       </Dialog>
 

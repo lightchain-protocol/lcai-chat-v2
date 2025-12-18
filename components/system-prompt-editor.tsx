@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -80,17 +79,19 @@ export function SystemPromptEditor({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className="sm:max-w-xl sm:rounded-3xl">
         <DialogHeader>
-          <DialogTitle>Create Custom Prompt</DialogTitle>
-          <DialogDescription>
+          <DialogTitle asChild>
+            <h4 className="text-xl font-semibold text-content-strong -tracking-[0.2px] leading-[1.2]">Create Custom Prompt</h4>
+          </DialogTitle>
+          <DialogDescription className="text-content-default -tracking-[0.16px] text-base mt-1">
             Create a custom system prompt for personalized AI behavior.
           </DialogDescription>
         </DialogHeader>
-
-        <div className="grid gap-4 py-4">
+        <div className="w-full h-px bg-bdr-light my-6"></div>
+        <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name" className="font-medium">Name</Label>
             <Input
               disabled={loading}
               id="name"
@@ -102,9 +103,9 @@ export function SystemPromptEditor({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="prompt">System Prompt</Label>
+            <Label htmlFor="prompt" className="font-medium">System Prompt</Label>
             <Textarea
-              className="resize-none"
+              className="resize-none rounded-[10px] border-bdr-light bg-surface-base-subtle focus:bg-surface-base-faint"
               disabled={loading}
               id="prompt"
               onChange={(e) => setPrompt(e.target.value)}
@@ -112,21 +113,21 @@ export function SystemPromptEditor({
               rows={10}
               value={prompt}
             />
-            <p className="text-muted-foreground text-xs">
+            <p className="text-content-light text-[15px]">
               This prompt will define the AI's personality and behavior for this
               chat.
             </p>
           </div>
         </div>
-
-        <DialogFooter className="gap-3">
+        <div className="w-full h-px bg-bdr-light my-6"></div>
+        <div className="flex justify-end gap-2">
           <Button disabled={loading} onClick={handleCancel} variant="outline">
             Cancel
           </Button>
-          <Button disabled={loading} onClick={handleSave}>
+          <Button disabled={loading} onClick={handleSave} variant="gradient" className="text-sm">
             {loading ? "Saving..." : "Save Prompt"}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
