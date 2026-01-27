@@ -9,42 +9,46 @@ export type SubscriptionTier = {
 
 export const tierDetails: SubscriptionTier[] = [
   {
-    id: 0,
+    id: 1,
     name: "Basic",
-    monthlyPrice: 2,
-    yearlyPrice: 20,
+    monthlyPrice: 4200,
+    yearlyPrice: 45_000,
+    popular: true,
     features: [
       "100 messages per month",
-      "Access to basic models",
-      "1 concurrent session",
-    ],
-  },
-  {
-    id: 1,
-    name: "Pro",
-    popular: true,
-    monthlyPrice: 5,
-    yearlyPrice: 50,
-    features: [
-      "Unlimited messages",
-      "Access to all models",
-      "5 concurrent sessions",
-      "Advanced features",
-    ],
-  },
-  {
-    id: 2,
-    name: "Enterprise",
-    monthlyPrice: 10,
-    yearlyPrice: 100,
-    features: [
-      "Unlimited everything",
-      "Custom models",
+      "Access to Lightchain AI Model",
       "Unlimited sessions",
-      "API access",
-      "Custom integrations",
+      "Import / Export chats",
+      "Custom system prompt settings",
+      "Public & private chats",
     ],
   },
+  // {
+  //   id: 2,
+  //   name: "Pro",
+  //   popular: true,
+  //   monthlyPrice: 5,
+  //   yearlyPrice: 50,
+  //   features: [
+  //     "Unlimited messages",
+  //     "Access to all models",
+  //     "5 concurrent sessions",
+  //     "Advanced features",
+  //   ],
+  // },
+  // {
+  //   id: 3,
+  //   name: "Enterprise",
+  //   monthlyPrice: 10,
+  //   yearlyPrice: 100,
+  //   features: [
+  //     "Unlimited everything",
+  //     "Custom models",
+  //     "Unlimited sessions",
+  //     "API access",
+  //     "Custom integrations",
+  //   ],
+  // },
 ];
 
 export const tokenLimits = {

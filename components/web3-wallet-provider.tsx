@@ -8,7 +8,13 @@ import { siweConfig } from "@/lib/siwe/config";
 import { networks, projectId, wagmiAdapter } from "@/lib/wagmi";
 
 // Set up queryClient
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 // Set up metadata
 const metadata = {

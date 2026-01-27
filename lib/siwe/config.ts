@@ -6,13 +6,13 @@ import {
   type SIWEVerifyMessageArgs,
 } from "@reown/appkit-siwe";
 import { getCsrfToken, getSession, signIn, signOut } from "next-auth/react";
-import { lcaiTestnet } from "@/config";
+import config from "@/config";
 
 export const siweConfig = createSIWEConfig({
   getMessageParams: async () => ({
     domain: typeof window !== "undefined" ? window.location.host : "",
     uri: typeof window !== "undefined" ? window.location.origin : "",
-    chains: [lcaiTestnet.id],
+    chains: config.chains.map((chain) => chain.id),
     statement: "Sign in with Lightchain AI to LCAI Chat",
   }),
 
@@ -37,7 +37,7 @@ export const siweConfig = createSIWEConfig({
 
     return {
       address: session.user.walletAddress,
-      chainId: lcaiTestnet.id,
+      chainId: config.chains[0].id,
     } as SIWESession;
   },
 

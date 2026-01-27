@@ -1,112 +1,57 @@
 export default [
   {
     inputs: [
-      {
-        internalType: "address payable",
-        name: "_treasury",
-        type: "address",
-      },
-      {
-        internalType: "address",
-        name: "_defaultAdmin",
-        type: "address",
-      },
+      { internalType: "address", name: "_paymentToken", type: "address" },
+      { internalType: "address", name: "_treasury", type: "address" },
+      { internalType: "address", name: "_timelock", type: "address" },
+      { internalType: "address", name: "_admin", type: "address" },
     ],
     stateMutability: "nonpayable",
     type: "constructor",
   },
+  { inputs: [], name: "EnforcedPause", type: "error" },
+  { inputs: [], name: "ExpectedPause", type: "error" },
+  { inputs: [], name: "HaveActiveSubscription", type: "error" },
+  { inputs: [], name: "IncorrectPayment", type: "error" },
+  { inputs: [], name: "InvalidAddress", type: "error" },
+  { inputs: [], name: "InvalidDuration", type: "error" },
+  { inputs: [], name: "InvalidPrice", type: "error" },
+  { inputs: [], name: "InvalidTier", type: "error" },
   {
-    inputs: [],
-    name: "AccessControlBadConfirmation",
+    inputs: [{ internalType: "address", name: "owner", type: "address" }],
+    name: "OwnableInvalidOwner",
     type: "error",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-      {
-        internalType: "bytes32",
-        name: "neededRole",
-        type: "bytes32",
-      },
-    ],
-    name: "AccessControlUnauthorizedAccount",
+    inputs: [{ internalType: "address", name: "account", type: "address" }],
+    name: "OwnableUnauthorizedAccount",
     type: "error",
   },
+  { inputs: [], name: "PlanNotActive", type: "error" },
+  { inputs: [], name: "ReentrancyGuardReentrantCall", type: "error" },
   {
-    inputs: [],
-    name: "EnforcedPause",
+    inputs: [{ internalType: "address", name: "token", type: "address" }],
+    name: "SafeERC20FailedOperation",
     type: "error",
   },
-  {
-    inputs: [],
-    name: "ExpectedPause",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "HaveActiveSubscription",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "IncorrectPayment",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "InvalidAddress",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "InvalidDuration",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "InvalidPrice",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "InvalidTier",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "PlanNotActive",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "ReentrancyGuardReentrantCall",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "TransferFailed",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "TreasuryNotSet",
-    type: "error",
-  },
+  { inputs: [], name: "Unauthorized", type: "error" },
   {
     anonymous: false,
     inputs: [
       {
         indexed: true,
         internalType: "address",
-        name: "admin",
+        name: "previousAdmin",
+        type: "address",
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "newAdmin",
         type: "address",
       },
     ],
-    name: "AdminAdded",
+    name: "AdminUpdated",
     type: "event",
   },
   {
@@ -115,11 +60,17 @@ export default [
       {
         indexed: true,
         internalType: "address",
-        name: "admin",
+        name: "previousOwner",
+        type: "address",
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "newOwner",
         type: "address",
       },
     ],
-    name: "AdminRemoved",
+    name: "OwnershipTransferred",
     type: "event",
   },
   {
@@ -140,10 +91,24 @@ export default [
     inputs: [
       {
         indexed: true,
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
+        internalType: "address",
+        name: "oldToken",
+        type: "address",
       },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "newToken",
+        type: "address",
+      },
+    ],
+    name: "PaymentTokenUpdated",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "uint256", name: "tier", type: "uint256" },
       {
         indexed: false,
         internalType: "uint256",
@@ -156,12 +121,6 @@ export default [
         name: "yearlyPrice",
         type: "uint256",
       },
-      {
-        indexed: false,
-        internalType: "bool",
-        name: "isActive",
-        type: "bool",
-      },
     ],
     name: "PlanPriceUpdated",
     type: "event",
@@ -169,112 +128,29 @@ export default [
   {
     anonymous: false,
     inputs: [
-      {
-        indexed: true,
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        indexed: true,
-        internalType: "bytes32",
-        name: "previousAdminRole",
-        type: "bytes32",
-      },
-      {
-        indexed: true,
-        internalType: "bytes32",
-        name: "newAdminRole",
-        type: "bytes32",
-      },
+      { indexed: true, internalType: "uint256", name: "tier", type: "uint256" },
+      { indexed: false, internalType: "bool", name: "isActive", type: "bool" },
     ],
-    name: "RoleAdminChanged",
+    name: "PlanStatusToggled",
     type: "event",
   },
   {
     anonymous: false,
     inputs: [
-      {
-        indexed: true,
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "sender",
-        type: "address",
-      },
-    ],
-    name: "RoleGranted",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "sender",
-        type: "address",
-      },
-    ],
-    name: "RoleRevoked",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
       {
         indexed: false,
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "expiredAt",
-        type: "uint256",
+        internalType: "string",
+        name: "version",
+        type: "string",
       },
     ],
-    name: "SubscriptionExpired",
+    name: "SpecVersionAnnounced",
     type: "event",
   },
   {
     anonymous: false,
     inputs: [
-      {
-        indexed: true,
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
+      { indexed: true, internalType: "address", name: "user", type: "address" },
       {
         indexed: false,
         internalType: "uint256",
@@ -301,43 +177,6 @@ export default [
       },
     ],
     name: "SubscriptionPurchased",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "duration",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "price",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "newExpiryTimestamp",
-        type: "uint256",
-      },
-    ],
-    name: "SubscriptionRenewed",
     type: "event",
   },
   {
@@ -374,145 +213,65 @@ export default [
   },
   {
     inputs: [],
-    name: "ADMIN_ROLE",
-    outputs: [
-      {
-        internalType: "bytes32",
-        name: "",
-        type: "bytes32",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "DEFAULT_ADMIN_ROLE",
-    outputs: [
-      {
-        internalType: "bytes32",
-        name: "",
-        type: "bytes32",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
     name: "DURATION_MONTHLY",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "DURATION_YEARLY",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "MAX_TIER",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "MONTHLY_DURATION",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "TIER_1",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "TIER_2",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "TIER_3",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
     name: "YEARLY_DURATION",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "newAdmin",
-        type: "address",
-      },
-    ],
-    name: "addAdmin",
-    outputs: [],
-    stateMutability: "nonpayable",
+    inputs: [],
+    name: "admin",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
     type: "function",
   },
   {
@@ -521,21 +280,9 @@ export default [
     outputs: [
       {
         components: [
-          {
-            internalType: "uint256",
-            name: "monthlyPrice",
-            type: "uint256",
-          },
-          {
-            internalType: "uint256",
-            name: "yearlyPrice",
-            type: "uint256",
-          },
-          {
-            internalType: "bool",
-            name: "isActive",
-            type: "bool",
-          },
+          { internalType: "uint256", name: "monthlyPrice", type: "uint256" },
+          { internalType: "uint256", name: "yearlyPrice", type: "uint256" },
+          { internalType: "bool", name: "isActive", type: "bool" },
         ],
         internalType: "struct LCAIChatSubscription.PlanPrice[]",
         name: "",
@@ -546,32 +293,14 @@ export default [
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-    ],
+    inputs: [{ internalType: "uint256", name: "tier", type: "uint256" }],
     name: "getPlan",
     outputs: [
       {
         components: [
-          {
-            internalType: "uint256",
-            name: "monthlyPrice",
-            type: "uint256",
-          },
-          {
-            internalType: "uint256",
-            name: "yearlyPrice",
-            type: "uint256",
-          },
-          {
-            internalType: "bool",
-            name: "isActive",
-            type: "bool",
-          },
+          { internalType: "uint256", name: "monthlyPrice", type: "uint256" },
+          { internalType: "uint256", name: "yearlyPrice", type: "uint256" },
+          { internalType: "bool", name: "isActive", type: "bool" },
         ],
         internalType: "struct LCAIChatSubscription.PlanPrice",
         name: "",
@@ -582,162 +311,41 @@ export default [
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
-    ],
+    inputs: [{ internalType: "address", name: "user", type: "address" }],
     name: "getRemainingTime",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-    ],
-    name: "getRoleAdmin",
-    outputs: [
-      {
-        internalType: "bytes32",
-        name: "",
-        type: "bytes32",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
-    ],
+    inputs: [{ internalType: "address", name: "user", type: "address" }],
     name: "getSubscription",
     outputs: [
-      {
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "expiryTimestamp",
-        type: "uint256",
-      },
-      {
-        internalType: "bool",
-        name: "isExpired",
-        type: "bool",
-      },
+      { internalType: "uint256", name: "tier", type: "uint256" },
+      { internalType: "uint256", name: "expiryTimestamp", type: "uint256" },
+      { internalType: "bool", name: "isExpired", type: "bool" },
     ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "user", type: "address" }],
+    name: "hasActiveSubscription",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "account", type: "address" }],
+    name: "isAdmin",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
-    name: "getTotalActiveSubscribers",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-    ],
-    name: "grantRole",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
-    ],
-    name: "hasActiveSubscription",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-    ],
-    name: "hasRole",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-    ],
-    name: "isAdmin",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
+    name: "owner",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
     stateMutability: "view",
     type: "function",
   },
@@ -751,178 +359,80 @@ export default [
   {
     inputs: [],
     name: "paused",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
     stateMutability: "view",
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    inputs: [],
+    name: "paymentToken",
+    outputs: [{ internalType: "contract IERC20", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     name: "planPrices",
     outputs: [
-      {
-        internalType: "uint256",
-        name: "monthlyPrice",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "yearlyPrice",
-        type: "uint256",
-      },
-      {
-        internalType: "bool",
-        name: "isActive",
-        type: "bool",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "admin",
-        type: "address",
-      },
-    ],
-    name: "removeAdmin",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        internalType: "address",
-        name: "callerConfirmation",
-        type: "address",
-      },
-    ],
-    name: "renounceRole",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "role",
-        type: "bytes32",
-      },
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-    ],
-    name: "revokeRole",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "duration",
-        type: "uint256",
-      },
-    ],
-    name: "subscribe",
-    outputs: [],
-    stateMutability: "payable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "",
-        type: "address",
-      },
-    ],
-    name: "subscriptions",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "expiryTimestamp",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes4",
-        name: "interfaceId",
-        type: "bytes4",
-      },
-    ],
-    name: "supportsInterface",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
+      { internalType: "uint256", name: "monthlyPrice", type: "uint256" },
+      { internalType: "uint256", name: "yearlyPrice", type: "uint256" },
+      { internalType: "bool", name: "isActive", type: "bool" },
     ],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
-    name: "totalActiveSubscribers",
+    name: "renounceOwnership",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "tier", type: "uint256" },
+      { internalType: "uint256", name: "duration", type: "uint256" },
+    ],
+    name: "subscribe",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "", type: "address" }],
+    name: "subscriptions",
     outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
+      { internalType: "uint256", name: "tier", type: "uint256" },
+      { internalType: "uint256", name: "expiryTimestamp", type: "uint256" },
     ],
     stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "tier", type: "uint256" }],
+    name: "togglePlanStatus",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "totalSubscribers",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "newOwner", type: "address" }],
+    name: "transferOwnership",
+    outputs: [],
+    stateMutability: "nonpayable",
     type: "function",
   },
   {
     inputs: [],
     name: "treasury",
-    outputs: [
-      {
-        internalType: "address payable",
-        name: "",
-        type: "address",
-      },
-    ],
+    outputs: [{ internalType: "address", name: "", type: "address" }],
     stateMutability: "view",
     type: "function",
   },
@@ -934,27 +444,38 @@ export default [
     type: "function",
   },
   {
+    inputs: [{ internalType: "address", name: "_admin", type: "address" }],
+    name: "updateAdmin",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
     inputs: [
-      {
-        internalType: "uint256",
-        name: "tier",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "monthlyPrice",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "yearlyPrice",
-        type: "uint256",
-      },
-      {
-        internalType: "bool",
-        name: "isActive",
-        type: "bool",
-      },
+      { internalType: "uint256[3]", name: "monthlyPrices", type: "uint256[3]" },
+      { internalType: "uint256[3]", name: "yearlyPrices", type: "uint256[3]" },
+    ],
+    name: "updateAllPlanPrices",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "newPaymentToken", type: "address" },
+      { internalType: "uint256[3]", name: "monthlyPrices", type: "uint256[3]" },
+      { internalType: "uint256[3]", name: "yearlyPrices", type: "uint256[3]" },
+    ],
+    name: "updatePaymentToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "tier", type: "uint256" },
+      { internalType: "uint256", name: "monthlyPrice", type: "uint256" },
+      { internalType: "uint256", name: "yearlyPrice", type: "uint256" },
     ],
     name: "updatePlanPrice",
     outputs: [],
@@ -962,20 +483,18 @@ export default [
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "address payable",
-        name: "newTreasury",
-        type: "address",
-      },
-    ],
+    inputs: [{ internalType: "address", name: "newTreasury", type: "address" }],
     name: "updateTreasury",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",
   },
   {
-    stateMutability: "payable",
-    type: "receive",
+    inputs: [],
+    name: "version",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
   },
+  { stateMutability: "payable", type: "receive" },
 ] as const;

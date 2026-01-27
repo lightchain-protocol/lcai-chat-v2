@@ -81,7 +81,7 @@ export function UsageWarningBanner({
         className
       )}
     >
-      <Icon className={cn("mt-0.5 h-5 w-5 flex-shrink-0", config.iconColor)} />
+      <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", config.iconColor)} />
 
       <div className="flex-1 space-y-1">
         <div className={cn("font-medium text-sm", config.textColor)}>

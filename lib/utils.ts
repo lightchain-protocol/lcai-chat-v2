@@ -64,7 +64,7 @@ export function generateUUID(): string {
 }
 
 type ResponseMessageWithoutId = CoreToolMessage | CoreAssistantMessage;
-type ResponseMessage = ResponseMessageWithoutId & { id: string };
+type ResponseMessage = ResponseMessageWithoutId & { id: string };  
 
 export function getMostRecentUserMessage(messages: UIMessage[]) {
   const userMessages = messages.filter((message) => message.role === 'user');
@@ -103,14 +103,19 @@ export function getTextFromMessage(message: ChatMessage): string {
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('');
-}
+} 
 
-  export function formatDate(timestamp: number | undefined) {
-    if (!timestamp) return "N/A";
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
+export function formatDate(timestamp: number | undefined) {
+  if (!timestamp) return "N/A";
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+export function formatNumber(number?: string | number) {
+  if (!number) return "0";
+  return Number(number).toLocaleString();
+}

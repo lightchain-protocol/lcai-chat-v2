@@ -1,5 +1,7 @@
 import { useMemo } from "react";
-import { getContract, parseEther } from "viem";
+import { toast } from "sonner";
+import { erc20Abi, formatEther, getContract, parseEther } from "viem";
+import { useAccount } from "wagmi";
 import { type UseQueryReturnType, useQuery } from "wagmi/query";
 import config from "@/config";
 import { tierDetails } from "@/config/subscription";
@@ -10,6 +12,26 @@ import useWeb3Clients from "./use-web3-clients";
 export default function useSubscription() {
   const chain = useCurrentChain();
   const { publicClient, walletClient } = useWeb3Clients();
+  const { address } = useAccount();
+
+  const lcaiTokenContract = useMemo(
+    () =>
+      getContract({
+        address: config.lcaiToken[chain.id].address,
+        abi: erc20Abi,
+        client: {
+          public: publicClient,
+          wallet: walletClient,
+        },
+      }),
+    [chain.id, publicClient, walletClient]
+  );
+
+  const lcaiBalance: UseQueryReturnType<bigint, Error> = useQuery({
+    queryKey: ["lcaiBalance", address],
+    queryFn: () => lcaiTokenContract.read.balanceOf([address as `0x${string}`]),
+    enabled: !!address && !!lcaiTokenContract,
+  });
 
   const contract = useMemo(
     () =>
@@ -21,6 +43,29 @@ export default function useSubscription() {
     [chain.id, publicClient]
   );
 
+  const checkAllowance = async (
+    owner: `0x${string}`,
+    spender: `0x${string}`,
+    amount: bigint
+  ) => {
+    if (!lcaiTokenContract || !walletClient || !owner) return;
+
+    const allowance = await lcaiTokenContract.read.allowance([owner, spender]);
+
+    if (allowance < amount) {
+      // Approve only the exact amount needed for this transaction
+      const { request } = await lcaiTokenContract.simulate.approve(
+        [spender, amount],
+        {
+          account: walletClient.account.address,
+        }
+      );
+      const hash = await walletClient.writeContract(request);
+      await publicClient.waitForTransactionReceipt({ hash });
+      toast.success("Token spend approved successfully");
+    }
+  };
+
   const subscribe = async (
     tier: number,
     yearly: boolean,
@@ -30,19 +75,21 @@ export default function useSubscription() {
       throw new Error("No address found");
     }
 
-    const value = parseEther(`${price}`);
-    const balance = await publicClient.getBalance({
-      address: walletClient.account.address,
-    });
+    const priceInWei = parseEther(`${price}`);
 
-    if (balance < value) {
+    if (+formatEther(lcaiBalance.data || 0n) < +price) {
       throw new Error("Insufficient balance");
     }
+
+    await checkAllowance(
+      address as `0x${string}`,
+      config.subscriptionContractAddress[chain.id],
+      priceInWei
+    );
 
     const { request } = await contract.simulate.subscribe(
       [BigInt(tier), BigInt(yearly ? 1 : 0)],
       {
-        value,
         account: walletClient.account.address,
       }
     );

@@ -1,6 +1,5 @@
-import type { AppKitNetwork } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { lcaiTestnet } from "@/config";
+import config from "@/config";
 
 // Get projectId from https://dashboard.reown.com
 export const projectId =
@@ -10,7 +9,7 @@ if (!projectId) {
   throw new Error("Project ID is not defined");
 }
 
-export const networks = [lcaiTestnet] as [AppKitNetwork, ...AppKitNetwork[]];
+export const networks = config.chains;
 
 //Set up the Wagmi Adapter (Config)
 export const wagmiAdapter = new WagmiAdapter({
@@ -19,4 +18,4 @@ export const wagmiAdapter = new WagmiAdapter({
   networks,
 });
 
-export const config = wagmiAdapter.wagmiConfig;
+export const wagmiConfig = wagmiAdapter.wagmiConfig;
