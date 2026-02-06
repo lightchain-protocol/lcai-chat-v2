@@ -65,8 +65,8 @@ function PureMessages({
       ref={messagesContainerRef}
       style={{ overflowAnchor: "none" }}
     >
-      <Conversation className="lc-conversation h-full mx-auto flex min-w-0 max-w-4xl flex-col gap-4 md:gap-6">
-        <ConversationContent className="h-full flex flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
+      <Conversation className="lc-conversation mx-auto flex h-full min-w-0 max-w-4xl flex-col gap-4 md:gap-6">
+        <ConversationContent className="flex h-full flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && <Greeting />}
 
           {messages.map((message, index) => (

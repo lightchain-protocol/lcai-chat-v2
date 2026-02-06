@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { Context } from "./elements/context";
 import {
   PromptInput,
+  PromptInputButton,
   PromptInputModelSelect,
   PromptInputModelSelectContent,
   PromptInputSubmit,
@@ -43,6 +44,7 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   CpuIcon,
+  GlobeIcon,
   PaperclipIcon,
   StopIcon,
 } from "./icons";
@@ -71,6 +73,8 @@ function PureMultimodalInput({
   selectedModelId,
   onModelChange,
   usage,
+  enableWebSearch,
+  onWebSearchToggle,
 }: {
   chatId: string;
   input: string;
@@ -87,6 +91,8 @@ function PureMultimodalInput({
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   usage?: AppUsage;
+  enableWebSearch?: boolean;
+  onWebSearchToggle?: (enabled: boolean) => void;
 }) {
   const session = useSession();
   const subscription = useSubscription();
@@ -368,14 +374,19 @@ function PureMultimodalInput({
               selectedModelId={selectedModelId}
               status={status}
             /> */}
-            {/* <PromptInputButton
-              className="flex h-8 items-center gap-2 rounded-lg border-0 px-2"
-              onClick={() => setUseWebSearch(!useWebSearch)}
-              variant={useWebSearch ? "default" : "ghost"}
+            <PromptInputButton
+              className={cn(
+                "flex h-8 items-center gap-1.5 rounded-xl border-0 px-2 transition-colors",
+                enableWebSearch
+                  ? "bg-gradient-primary text-white"
+                  : "text-content-default hover:bg-surface-base-faint"
+              )}
+              onClick={() => onWebSearchToggle?.(!enableWebSearch)}
+              variant="ghost"
             >
               <GlobeIcon size={14} />
-              <span>Search</span>
-            </PromptInputButton> */}
+              <span className="hidden text-xs font-medium sm:block">Search</span>
+            </PromptInputButton>
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
@@ -432,6 +443,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+      return false;
+    }
+    if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
       return false;
     }
 

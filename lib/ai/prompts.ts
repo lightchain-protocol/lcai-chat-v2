@@ -41,18 +41,92 @@ About the origin of user's request:
 - country: ${requestHints.country}
 `;
 
+/**
+ * Build the web search system prompt with search context injected.
+ * Mirrors _build_system_message from chat-api-service/send_message.py
+ */
+export const buildWebSearchSystemPrompt = ({
+  webContext,
+  sources,
+}: {
+  webContext: string;
+  sources: string[];
+}) => {
+  if (!webContext) {
+    return regularPrompt;
+  }
+
+  // Build reference URLs block filtering out google search URLs
+  let referenceUrlsBlock = "No web search sources available.";
+  if (sources.length > 0) {
+    const filteredSources = sources.filter(
+      (source) => !source.includes("google.com/search?q=")
+    );
+    if (filteredSources.length > 0) {
+      referenceUrlsBlock = filteredSources
+        .map((source, i) => {
+          if (source.includes(" - ")) {
+            const [title, url] = source.split(" - ");
+            return `${i + 1}. [${title}](${url})`;
+          }
+          return `${i + 1}. ${source}`;
+        })
+        .join("\n");
+    } else {
+      referenceUrlsBlock =
+        "No specific reference URLs found in organic results.";
+    }
+  }
+
+  return `You are Metis, a helpful AI assistant created by Lightchain AI.
+
+You have access to the following Web Search Context (ground truth):
+${webContext}
+
+Reference URLs (for citation):
+${referenceUrlsBlock}
+
+Response Rules:
+- Synthesize a direct, comprehensive, up-to-date answer based on the Web Search Context and prior knowledge. Treat the Web Search Context as source of truth if it conflicts with prior knowledge.
+- CRITICAL: If you see "Answer box:" in the Web Search Context, prioritize this over any other sources or prior knowledge.
+- For current date/time questions: Look for phrases like "Today is", "Current date", or specific current dates in the Web Search Context. These indicate the most current information available.
+- Prefer the most recent, reputable sources; if sources disagree, choose the majority among the most recent ones.
+- If the context is clearly outdated or insufficient, briefly note that and answer with best effort.
+- Format exactly as:
+  1. Answer(5-6 sentences)
+  2. Empty line (just "\\n")
+  Sources:
+  1. [Descriptive name](URL)
+  2. [Descriptive name](URL)
+  3. [Descriptive name](URL)
+  4. [Descriptive name](URL)
+  5. [Descriptive name](URL)
+- Return sources in markdown format: use markdown links [Descriptive name](URL) for each source. Include 4-5 relevant sources from the list above.`;
+};
+
 export const systemPrompt = ({
   requestHints,
   customSystemPrompt,
+  webSearchContext,
 }: {
   requestHints?: RequestHints;
   customSystemPrompt?: string | null;
+  webSearchContext?: { context: string; sources: string[] } | null;
 }) => {
+  // If web search context is provided, use the dedicated web search prompt
+  if (webSearchContext?.context) {
+    return buildWebSearchSystemPrompt({
+      webContext: webSearchContext.context,
+      sources: webSearchContext.sources,
+    });
+  }
+
   let prompt = regularPrompt;
 
   if (requestHints) prompt += `\n\n${getRequestPromptFromHints(requestHints)}`;
 
   if (customSystemPrompt) prompt += `\n\n${customSystemPrompt}`;
 
-  return `${prompt}\n\n${webSearchPrompt}\n\n${webSearchUseCases}`;
+  // return `${prompt}\n\n${webSearchPrompt}\n\n${webSearchUseCases}`;
+  return `${prompt}`;
 };

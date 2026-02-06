@@ -37,6 +37,7 @@ import {
   generateUUID,
   getTextFromMessage,
 } from "@/lib/utils";
+import { performWebSearch } from "@/lib/ai/web-search";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 export const maxDuration = 60;
@@ -74,12 +75,14 @@ export async function POST(request: Request) {
       selectedChatModel,
       selectedVisibilityType,
       systemPrompt: customSystemPrompt,
+      enableWebSearch,
     }: {
       id: string;
       message: ChatMessage;
       selectedChatModel: ChatModel["id"];
       selectedVisibilityType: VisibilityType;
       systemPrompt?: string | null;
+      enableWebSearch?: boolean;
     } = requestBody;
 
     const session = await auth();
@@ -155,6 +158,21 @@ export async function POST(request: Request) {
     const streamId = generateUUID();
     await createStreamId({ streamId, chatId: id });
 
+    // Perform web search if enabled
+    let webSearchContext: { context: string; sources: string[] } | null = null;
+    if (enableWebSearch) {
+      const userText = getTextFromMessage(message);
+      if (userText) {
+        const searchResult = await performWebSearch(userText, 5);
+        if (searchResult.success) {
+          webSearchContext = {
+            context: searchResult.context,
+            sources: searchResult.sources,
+          };
+        }
+      }
+    }
+
     let finalMergedUsage: AppUsage | undefined;
 
     const maxOutputTokens = entitlementsByUserType[userType].maxTokens;
@@ -163,7 +181,7 @@ export async function POST(request: Request) {
       execute: ({ writer: dataStream }) => {
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt({ customSystemPrompt }),
+          system: systemPrompt({ customSystemPrompt, webSearchContext }),
           messages: convertToModelMessages(uiMessages),
           experimental_transform: smoothStream({ chunking: "word" }),
           stopWhen: stepCountIs(5),

@@ -17,6 +17,7 @@ import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
+import { SourceLinkChip } from "./source-link-chip";
 import { Weather } from "./weather";
 
 const PurePreviewMessage = ({
@@ -41,7 +42,9 @@ const PurePreviewMessage = ({
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
 
-  const attachmentsFromMessage = message.parts.filter(
+  const parts = message.parts ?? [];
+
+  const attachmentsFromMessage = parts.filter(
     (part) => part.type === "file"
   );
 
@@ -49,7 +52,7 @@ const PurePreviewMessage = ({
   const searchResults = useMemo(() => {
     const results: CitationSource[] = [];
 
-    for (const part of message.parts) {
+    for (const part of parts) {
       if (
         part.type === "tool-webSearch" &&
         part.state === "output-available" &&
@@ -61,7 +64,7 @@ const PurePreviewMessage = ({
     }
 
     return results;
-  }, [message.parts]);
+  }, [parts]);
 
   // Replace citation patterns with inline citation components
   const replaceCitations = (text: string): string => {
@@ -107,13 +110,13 @@ const PurePreviewMessage = ({
 
         <div
           className={cn("flex flex-col", {
-            "gap-2 md:gap-4": message.parts?.some(
+            "gap-2 md:gap-4": parts.some(
               (p) => p.type === "text" && p.text?.trim()
             ),
             "min-h-96": message.role === "assistant" && requiresScrollPadding,
             "w-full":
               (message.role === "assistant" &&
-                message.parts?.some(
+                parts.some(
                   (p) => p.type === "text" && p.text?.trim()
                 )) ||
               mode === "edit",
@@ -139,7 +142,7 @@ const PurePreviewMessage = ({
             </div>
           )}
 
-          {message.parts?.map((part, index) => {
+          {parts.map((part, index) => {
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
 
@@ -183,7 +186,16 @@ const PurePreviewMessage = ({
                           {replaceCitations(sanitizeText(part.text))}
                         </Response>
                       ) : (
-                        <Response>{sanitizeText(part.text)}</Response>
+                        <Response
+                          components={{
+                            a({ href, children }) {
+                              if (!href) return <>{children}</>;
+                              return <SourceLinkChip href={href} />;
+                            },
+                          }}
+                        >
+                          {sanitizeText(part.text)}
+                        </Response>
                       )}
                     </MessageContent>
                   </div>
@@ -298,7 +310,7 @@ export const PreviewMessage = memo(
     if (prevProps.requiresScrollPadding !== nextProps.requiresScrollPadding) {
       return false;
     }
-    if (!equal(prevProps.message.parts, nextProps.message.parts)) {
+    if (!equal(prevProps.message.parts ?? [], nextProps.message.parts ?? [])) {
       return false;
     }
     if (!equal(prevProps.vote, nextProps.vote)) {

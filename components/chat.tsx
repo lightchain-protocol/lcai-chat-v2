@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
@@ -21,10 +22,9 @@ import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import SubscriptionDialog from "./subscription-dialog";
+import AlertError from "./ui/toast/AlertError";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
-import { toast } from 'sonner'
-import AlertError from "./ui/toast/AlertError";
 
 export function Chat({
   id,
@@ -66,6 +66,9 @@ export function Chat({
   );
   const systemPromptRef = useRef(systemPrompt);
 
+  const [enableWebSearch, setEnableWebSearch] = useState(false);
+  const enableWebSearchRef = useRef(enableWebSearch);
+
   // Fetch prompt templates to match initial prompt
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
     "/api/prompts",
@@ -92,6 +95,10 @@ export function Chat({
     systemPromptRef.current = systemPrompt;
   }, [systemPrompt]);
 
+  useEffect(() => {
+    enableWebSearchRef.current = enableWebSearch;
+  }, [enableWebSearch]);
+
   const {
     messages,
     setMessages,
@@ -116,6 +123,7 @@ export function Chat({
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
+            enableWebSearch: enableWebSearchRef.current,
             ...request.body,
           },
         };
@@ -132,9 +140,8 @@ export function Chat({
     },
     onError: (error) => {
       if (error instanceof ChatSDKError) {
-        toast.custom((id) => (
-        <AlertError id={id} title={error.message} />
-        ));
+        // biome-ignore lint/nursery/noShadow: this is a toast error
+        toast.custom((id) => <AlertError id={id} title={error.message} />);
       }
     },
   });
@@ -172,7 +179,7 @@ export function Chat({
 
   return (
     <>
-      <div className="overscroll-behavior-contain flex h-[calc(100svh-58px)] md:h-[calc(100svh-80px)] min-w-0 touch-pan-y flex-col bg-background">
+      <div className="overscroll-behavior-contain flex h-[calc(100svh-58px)] min-w-0 touch-pan-y flex-col bg-background md:h-[calc(100svh-80px)]">
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
@@ -202,14 +209,20 @@ export function Chat({
           votes={votes}
         />
 
-        <div className={`sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4`}>
+        <div
+          className={
+            "sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4"
+          }
+        >
           {!isReadonly && (
             <MultimodalInput
               attachments={attachments}
               chatId={id}
+              enableWebSearch={enableWebSearch}
               input={input}
               messages={messages}
               onModelChange={setCurrentModelId}
+              onWebSearchToggle={setEnableWebSearch}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}
