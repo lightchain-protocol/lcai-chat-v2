@@ -4,6 +4,8 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
+import { Lock } from "lucide-react";
+import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
   type ChangeEvent,
@@ -29,10 +31,8 @@ import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
-import { Context } from "./elements/context";
 import {
   PromptInput,
-  PromptInputButton,
   PromptInputModelSelect,
   PromptInputModelSelectContent,
   PromptInputSubmit,
@@ -44,7 +44,6 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   CpuIcon,
-  GlobeIcon,
   PaperclipIcon,
   StopIcon,
 } from "./icons";
@@ -52,10 +51,9 @@ import { PreviewAttachment } from "./preview-attachment";
 import SubscriptionDialog from "./subscription-dialog";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import type { VisibilityType } from "./visibility-selector";
-import { Lock } from "lucide-react";
-import Image from "next/image";
+import { Switch } from "./ui/switch";
 import AlertError from "./ui/toast/AlertError";
+import type { VisibilityType } from "./visibility-selector";
 
 function PureMultimodalInput({
   chatId,
@@ -229,9 +227,7 @@ function PureMultimodalInput({
         };
       }
       const { error } = await response.json();
-      toast.custom((id) => (
-        <AlertError id={id} title={error} />
-      ));
+      toast.custom((id) => <AlertError id={id} title={error} />);
     } catch (_error) {
       toast.custom((id) => (
         <AlertError id={id} title="Failed to upload file, please try again!" />
@@ -243,13 +239,13 @@ function PureMultimodalInput({
     return myProvider.languageModel(selectedModelId);
   }, [selectedModelId]);
 
-  const contextProps = useMemo(
-    () => ({
-      usage,
-      subscriptionTier,
-    }),
-    [usage, subscriptionTier]
-  );
+  // const contextProps = useMemo(
+  //   () => ({
+  //     usage,
+  //     subscriptionTier,
+  //   }),
+  //   [usage, subscriptionTier]
+  // );
 
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -278,10 +274,10 @@ function PureMultimodalInput({
   );
 
   const showEmptyState =
-  messages.length === 0 &&
-  attachments.length === 0 &&
-  uploadQueue.length === 0 &&
-  canUseChat;
+    messages.length === 0 &&
+    attachments.length === 0 &&
+    uploadQueue.length === 0 &&
+    canUseChat;
 
   return (
     <div className={cn("relative flex w-full flex-col gap-8", className)}>
@@ -294,20 +290,23 @@ function PureMultimodalInput({
         type="file"
       />
 
-       {showEmptyState && (
-          <h2 className="text-2xl md:text-3xl xl:text-4xl font-semibold text-content-ultra text-center">
-            Start a conversation
-          </h2>
-        )}
+      {showEmptyState && (
+        <h2 className="text-center font-semibold text-2xl text-content-ultra md:text-3xl xl:text-4xl">
+          Start a conversation
+        </h2>
+      )}
 
       <PromptInput
-        className="border border-bdr-light p-3 sm:p-4 transition-all duration-200"
+        className="border border-bdr-light p-3 transition-all duration-200 sm:p-4"
         onSubmit={(event) => {
           event.preventDefault();
           if (status !== "ready") {
             toast.custom((id) => (
-            <AlertError id={id} title="Please wait for the model to finish its response!" />
-          ));
+              <AlertError
+                id={id}
+                title="Please wait for the model to finish its response!"
+              />
+            ));
           } else {
             submitForm();
           }
@@ -346,26 +345,38 @@ function PureMultimodalInput({
             ))}
           </div>
         )}
-        <div className="flex flex-row items-start gap-1 sm:gap-2 relative">
-          <div className="pr-2 border-r border-surface-base-extraLight absolute top-[3px] sm:top-0.5">
-            {hasActiveSubscription.data ? <Image src="/images/logo/favicon.png" width={16} height={16} alt="Icon"></Image>: <Lock className="text-content-light" size={16} /> }
-            
+        <div className="relative flex flex-row items-start gap-1 sm:gap-2">
+          <div className="absolute top-[3px] border-surface-base-extraLight border-r pr-2 sm:top-0.5">
+            {hasActiveSubscription.data ? (
+              <Image
+                alt="Icon"
+                height={16}
+                src="/images/logo/favicon.png"
+                width={16}
+              />
+            ) : (
+              <Lock className="text-content-light" size={16} />
+            )}
           </div>
           <PromptInputTextarea
             autoFocus
-            className="grow resize-none border-0! border-none! bg-transparent pl-8! px-2 pb-2 pt-0 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
+            className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
             disabled={!canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder={hasActiveSubscription.data ? "Send a message..." : "Activate your subscription and get credit to unlock chat..."}
+            placeholder={
+              hasActiveSubscription.data
+                ? "Send a message..."
+                : "Activate your subscription and get credit to unlock chat..."
+            }
             ref={textareaRef}
             rows={1}
             value={input}
           />{" "}
-          <Context {...contextProps} />
+          {/* <Context {...contextProps} /> */}
         </div>
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
@@ -374,19 +385,14 @@ function PureMultimodalInput({
               selectedModelId={selectedModelId}
               status={status}
             /> */}
-            <PromptInputButton
-              className={cn(
-                "flex h-8 items-center gap-1.5 rounded-xl border-0 px-2 transition-colors",
-                enableWebSearch
-                  ? "bg-gradient-primary text-white"
-                  : "text-content-default hover:bg-surface-base-faint"
-              )}
-              onClick={() => onWebSearchToggle?.(!enableWebSearch)}
-              variant="ghost"
-            >
-              <GlobeIcon size={14} />
-              <span className="hidden text-xs font-medium sm:block">Search</span>
-            </PromptInputButton>
+            <div className="flex items-center gap-2 px-1 py-1">
+              <Switch
+                checked={enableWebSearch ?? false}
+                className="rounded-full!"
+                onCheckedChange={onWebSearchToggle}
+              />
+              <span className="text-content-secondary text-sm">Web Search</span>
+            </div>
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
@@ -397,7 +403,7 @@ function PureMultimodalInput({
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
             <PromptInputSubmit
-              className="size-8 rounded-full bg-gradient-primary text-white disabled:[background:#c1c1c1] dark:disabled:[background:#303030]  disabled:text-muted-foreground"
+              className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
               disabled={!input.trim() || uploadQueue.length > 0}
               status={status}
             >
@@ -515,7 +521,7 @@ function PureModelSelectorCompact({
       value={selectedModel?.name}
     >
       <Trigger
-        className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-surface-base-faint data-[state=open]:bg-surface-base-faint"
+        className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
         type="button"
       >
         <CpuIcon size={16} />
@@ -524,11 +530,17 @@ function PureModelSelectorCompact({
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] p-0 rounded-lg">
+      <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
         <div className="flex flex-col gap-px">
           {chatModels.map((model) => (
-            <SelectItem key={model.id} value={model.name} className="rounded-lg">
-              <h6 className="truncate font-medium text-xs mb-0.5">{model.name}</h6>
+            <SelectItem
+              className="rounded-lg"
+              key={model.id}
+              value={model.name}
+            >
+              <h6 className="mb-0.5 truncate font-medium text-xs">
+                {model.name}
+              </h6>
               <p className="mt-px text-[10px] text-muted-foreground leading-tight">
                 {model.description}
               </p>
