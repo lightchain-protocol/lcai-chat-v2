@@ -15,8 +15,32 @@ import {
 } from "lucide-react";
 import { useAppKit } from "@reown/appkit/react";
 import { useAccount } from "wagmi";
+import { iconMap } from "@/lib/nav/iconMap";
+import { resolveTarget } from "@/lib/nav/resolveTarget";
+import type { RawNavConfig } from "@/lib/nav/types";
+import type { MenuConfig } from "./types";
 
-export default function Header() {
+function resolveMenus(raw: RawNavConfig[]): MenuConfig[] {
+  return raw.map((menu) => ({
+    ...menu,
+    columns: menu.columns.map((col) => {
+      if (col.type === "cards") {
+        return {
+          ...col,
+          items: col.items.map((item) => ({
+            ...item,
+            icon: iconMap[item.iconKey] ?? iconMap["default"],
+            target: resolveTarget(item.href, item.target),
+          })),
+        };
+      }
+      return col;
+    }),
+  }));
+}
+
+export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
+  const menus = resolveMenus(rawMenus);
   const [isMenuActive, setIsMenuActive] = useState(false);
   const [isSticky, setIsSticky] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -125,7 +149,7 @@ export default function Header() {
 
             {/* Desktop nav */}
             <div className="hidden xl:block">
-              <Navbar />
+              <Navbar menus={menus} />
             </div>
 
             {/* Actions */}
@@ -170,7 +194,7 @@ export default function Header() {
       {/* Header spacer */}
       <div className="h-16 md:h-20" />
 
-      <PopupMobileMenu isActive={isMenuActive} onClose={closeMenu} />
+      <PopupMobileMenu menus={menus} isActive={isMenuActive} onClose={closeMenu} />
     </>
   );
 }

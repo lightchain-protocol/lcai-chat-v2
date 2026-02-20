@@ -2,10 +2,9 @@
 
 import React from "react";
 import clsx from "clsx";
-import { menus } from "./menuConfig";
 import NavCard from "./NavCard";
 import ImageCard from "./ImageCard";
-import type { MegaCol } from "./types";
+import type { MegaCol, MenuConfig } from "./types";
 import { ChevronDown } from "lucide-react";
 
 /** Merge pattern: [title, cards] -> single visual column */
@@ -23,7 +22,7 @@ function groupColumns(cols: MegaCol[]) {
   return grouped;
 }
 
-export default function Navbar() {
+export default function Navbar({ menus }: { menus: MenuConfig[] }) {
   const [open, setOpen] = React.useState<number | null>(null);
 
   return (

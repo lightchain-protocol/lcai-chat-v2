@@ -5,6 +5,7 @@ import { DataStreamProvider } from "@/components/data-stream-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "../(auth)/auth";
 import Header from "@/components/Header/Header";
+import { fetchNavConfig } from "@/lib/nav/fetchNavConfig";
 
 export const experimental_ppr = true;
 
@@ -13,7 +14,7 @@ export default async function Layout({
 }: {
   children: React.ReactNode;
 }) {
-  const [session, cookieStore] = await Promise.all([auth(), cookies()]);
+  const [session, cookieStore, rawMenus] = await Promise.all([auth(), cookies(), fetchNavConfig()]);
   const isCollapsed = cookieStore.get("sidebar_state")?.value !== "true";
 
   return (
@@ -23,7 +24,7 @@ export default async function Layout({
         strategy="beforeInteractive"
       />
       <DataStreamProvider>
-        <Header />
+        <Header rawMenus={rawMenus} />
         <SidebarProvider defaultOpen={!isCollapsed}>
           <AppSidebar user={session?.user} />
           <SidebarInset>{children}</SidebarInset>
