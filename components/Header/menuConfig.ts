@@ -50,7 +50,7 @@ export const menus: MenuConfig[] = [
         items: [
           { label: "Roadmap", desc: "Our development journey", href: "https://lightchain.ai/roadmap", icon: Route },
           { label: "Whitepaper", desc: "Read the technical overview", href: "https://lightchain.ai/lightchain-whitepaper.pdf", icon: FileText },
-          { label: "Audits", desc: "Security verification reports", href: "https://docs.lightchain.ai/lightchain-docs/audits", icon: ShieldCheck },
+          { label: "Audits", desc: "Security verification reports", href: "https://docs.lightchain.ai/docs/getting-started/audits", icon: ShieldCheck },
           { label: "LCAI Brand Guideline", desc: "Visual assets and brand identity", href: "https://lightchain.ai/brand", icon: BadgeCheck },
         ],
       },
