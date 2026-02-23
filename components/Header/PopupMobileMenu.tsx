@@ -5,12 +5,11 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 
-// ⬇️ reuse the SAME desktop config
-import { menus } from './menuConfig';
 import { MegaCol, MenuConfig, NavCardItem } from './types';
 import { ChevronDown, Facebook, Instagram, Network, Twitter, X } from 'lucide-react';
 
 interface PopupMobileMenuProps {
+    menus: MenuConfig[];
     isActive: boolean;
     onClose: () => void;
 }
@@ -73,7 +72,7 @@ function extractItemsFromColumns(columns: MegaCol[]) {
     return groups;
 }
 
-export default function PopupMobileMenu({ isActive, onClose }: PopupMobileMenuProps) {
+export default function PopupMobileMenu({ menus, isActive, onClose }: PopupMobileMenuProps) {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [openIdx, setOpenIdx] = useState<number | null>(0);
 
@@ -100,7 +99,7 @@ export default function PopupMobileMenu({ isActive, onClose }: PopupMobileMenuPr
             label: m.label,
             groups: extractItemsFromColumns(m.columns || []),
         }));
-    }, []);
+    }, [menus]);
 
     return (
         <div
