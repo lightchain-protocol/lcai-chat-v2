@@ -1,23 +1,19 @@
 "use client";
 
+import { useAppKit } from "@reown/appkit/react";
+import { Menu, MoonIcon, SunIcon, WalletMinimal } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import Navbar from "./Navbar";
-import PopupMobileMenu from "./PopupMobileMenu";
-import { Button } from "../ui/button";
-import { Menu, WalletMinimal } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useEffect, useRef, useState } from "react";
 import { useIsClient } from "usehooks-ts";
-import {
-  MoonIcon,
-  SunIcon,
-} from "lucide-react";
-import { useAppKit } from "@reown/appkit/react";
 import { useAccount } from "wagmi";
 import { iconMap } from "@/lib/nav/iconMap";
 import { resolveTarget } from "@/lib/nav/resolveTarget";
 import type { RawNavConfig } from "@/lib/nav/types";
+import { Button } from "../ui/button";
+import Navbar from "./Navbar";
+import PopupMobileMenu from "./PopupMobileMenu";
 import type { MenuConfig } from "./types";
 
 function resolveMenus(raw: RawNavConfig[]): MenuConfig[] {
@@ -76,9 +72,8 @@ export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
       return () => {
         document.body.style.overflow = prev;
       };
-    } else {
-      document.body.style.overflow = "";
     }
+    document.body.style.overflow = "";
   }, [isMenuActive]);
 
   // Close on ESC
@@ -119,30 +114,31 @@ export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
   return (
     <>
       <header
+        className={`!h-16 md:!h-20 fixed right-0 left-0 z-50 w-full border-bdr-light border-b bg-background transition-all duration-300 ease-in-out ${isSticky ? "!border-br-light shadow-[0_24px_28px_0_rgba(0,0,0,0.06)]" : ""}`}
         ref={headerRef}
-        className={`fixed left-0 right-0 z-50 w-full border-b transition-all duration-300 ease-in-out bg-background border-bdr-light !h-16 md:!h-20 ${isSticky ? "!border-br-light shadow-[0_24px_28px_0_rgba(0,0,0,0.06)]": ""}`}>
+      >
         <div className="h-full px-4 sm:px-6 md:px-8 lg:px-12 xl:px-14">
-          <div className="relative mx-auto max-device-width flex h-full items-center justify-between gap-2 sm:gap-4 md:gap-6 lg:gap-8">
+          <div className="max-device-width relative mx-auto flex h-full items-center justify-between gap-2 sm:gap-4 md:gap-6 lg:gap-8">
             {/* Logo */}
             <div className="flex items-center gap-3 sm:gap-4 md:gap-5">
               <Link
-                className="logo flex items-center max-w-[150px] sm:max-w-[200px]"
-                href="/"
                 aria-label="Lightchain Home"
+                className="logo flex max-w-[150px] items-center sm:max-w-[200px]"
+                href="/"
               >
                 <Image
-                  src="/images/logo/logo-dark.svg"
-                  width={200}
-                  height={39}
                   alt="Lightchain"
                   className="dark:hidden"
+                  height={39}
+                  src="/images/logo/logo-dark.svg"
+                  width={200}
                 />
                 <Image
-                  src="/images/logo/logo.svg"
-                  width={200}
-                  height={39}
                   alt="Lightchain"
                   className="hidden dark:block"
+                  height={39}
+                  src="/images/logo/logo.svg"
+                  width={200}
                 />
               </Link>
             </div>
@@ -154,9 +150,8 @@ export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
 
             {/* Actions */}
             <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
-
               <Button
-                className="rounded-full size-10"
+                className="size-10 rounded-full"
                 onClick={toggleTheme}
                 type="button"
                 variant="outline"
@@ -166,22 +161,32 @@ export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
                     ? `Toggle ${resolvedTheme === "dark" ? "light" : "dark"} mode`
                     : "Toggle theme"}
                 </span>
-                {isClient && resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
+                {isClient && resolvedTheme === "dark" ? (
+                  <SunIcon />
+                ) : (
+                  <MoonIcon />
+                )}
               </Button>
 
-                {!isConnected && <Button onClick={() => open()} variant="gradient" className="hidden sm:flex rounded-[10px]">
-                <WalletMinimal />
-                Connect Wallet
-              </Button>}
-              
-              {/* Mobile menu trigger */}
-              <div className="block xl:hidden h-10">
+              {!isConnected && (
                 <Button
-                  aria-haspopup="dialog"
+                  className="hidden rounded-[10px] sm:flex"
+                  onClick={() => open()}
+                  variant="gradient"
+                >
+                  <WalletMinimal />
+                  Connect Wallet
+                </Button>
+              )}
+
+              {/* Mobile menu trigger */}
+              <div className="block h-10 xl:hidden">
+                <Button
                   aria-expanded={isMenuActive}
-                  variant="outline"
+                  aria-haspopup="dialog"
+                  className="flex size-10 items-center justify-center rounded-full border border-bdr-soft bg-surface-base-subtle text-content-strong transition-all"
                   onClick={toggleMenu}
-                  className="transition-all size-10 flex items-center justify-center rounded-full border border-bdr-soft bg-surface-base-subtle text-content-strong"
+                  variant="outline"
                 >
                   <Menu size={24} />
                 </Button>
@@ -194,7 +199,11 @@ export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
       {/* Header spacer */}
       <div className="h-16 md:h-20" />
 
-      <PopupMobileMenu menus={menus} isActive={isMenuActive} onClose={closeMenu} />
+      <PopupMobileMenu
+        isActive={isMenuActive}
+        menus={menus}
+        onClose={closeMenu}
+      />
     </>
   );
 }

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Inter } from "next/font/google";
+import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -101,7 +101,11 @@ export default async function RootLayout({
           disableTransitionOnChange
           enableSystem
         >
-          <Toaster position="top-right" offset={{ top: 100, right: 32 }} mobileOffset={{ top: 80, right: 16 }}/>
+          <Toaster
+            mobileOffset={{ top: 80, right: 16 }}
+            offset={{ top: 100, right: 32 }}
+            position="top-right"
+          />
           <Web3WalletProvider cookies={cookies}>
             <SessionProvider>{children}</SessionProvider>
           </Web3WalletProvider>
