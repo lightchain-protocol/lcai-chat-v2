@@ -3,7 +3,6 @@
 import React from "react";
 import clsx from "clsx";
 import NavCard from "./NavCard";
-import ImageCard from "./ImageCard";
 import type { MegaCol, MenuConfig } from "./types";
 import { ChevronDown } from "lucide-react";
 
@@ -29,14 +28,19 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
     <nav className="mainmenu-nav relative" onMouseLeave={() => setOpen(null)}>
       <ul className="mainmenu flex items-center">
         {menus.map((menu, idx) => {
+          const groupedCols = groupColumns(menu.columns);
+          const cols = groupedCols.filter((col) => col.content.type !== "imageCard");
+          const contentColCount = cols.filter((c) => c.content.type !== "title").length;
+          const effectiveWidth = contentColCount <= 1 ? undefined : menu.width;
+
           const width =
-            menu.width === "small"
+            effectiveWidth === "small" || effectiveWidth === undefined
               ? "w-[300px]"
-              : menu.width === "wide"
+              : effectiveWidth === "wide"
                 ? "w-[600px]"
                 : "w-[900px]"; // xwide
+
           const align = menu.align === "right" ? "right-0" : "left-0";
-          const cols = groupColumns(menu.columns);
 
           return (
             <li
@@ -71,9 +75,9 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
                 >
                   <div
                     className={clsx(
-                      menu.width === "xwide"
+                      effectiveWidth === "xwide"
                         ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-                        : menu.width === "wide"
+                        : effectiveWidth === "wide"
                           ? "grid grid-cols-1 md:grid-cols-2"
                           : "grid grid-cols-1"
                     )}
@@ -105,12 +109,6 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
                                 </li>
                               ))}
                             </ul>
-                          )}
-
-                          {g.content.type === "imageCard" && (
-                            <div className="relative h-full">
-                              <ImageCard {...g.content} />
-                            </div>
                           )}
                         </div>
                       );
