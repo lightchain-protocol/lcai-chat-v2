@@ -3,28 +3,31 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { useAccount } from "wagmi";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import { useProtocolSession } from "@/hooks/use-protocol-session";
+import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { ChatSDKError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
-import useAppStore from "@/store";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
-import SubscriptionDialog from "./subscription-dialog";
 import AlertError from "./ui/toast/AlertError";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
+
+const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
 export function Chat({
   id,
@@ -52,8 +55,6 @@ export function Chat({
 
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
-  const { isSubscriptionDialogOpen, setIsSubscriptionDialogOpen } =
-    useAppStore();
 
   const [input, setInput] = useState<string>("");
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
@@ -68,6 +69,55 @@ export function Chat({
 
   const [enableWebSearch, setEnableWebSearch] = useState(false);
   const enableWebSearchRef = useRef(enableWebSearch);
+  const { walletClient } = useWeb3Clients();
+  const { address } = useAccount();
+
+  // Protocol mode: session management for on-chain encrypted chat
+  const { getTransport: getProtocolTransport } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address
+  );
+
+  // Build the transport — protocol mode uses DefaultChatTransport with a custom
+  // fetch that routes through ProtocolTransport (encrypt → gateway → relay).
+  // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const transport = useMemo(() => {
+    if (isProtocolMode) {
+      return new DefaultChatTransport({
+        api: "/protocol",
+        async fetch(_url, init) {
+          const t = await getProtocolTransport();
+          const body = JSON.parse((init?.body as string) ?? "{}");
+          const { response } = await t.sendMessages({
+            messages: body.messages ?? [],
+            body,
+            signal: init?.signal ?? undefined,
+          });
+
+          return response;
+        },
+      });
+    }
+    return new DefaultChatTransport({
+      api: "/api/chat",
+      fetch: fetchWithErrorHandlers,
+      prepareSendMessagesRequest(request) {
+        return {
+          body: {
+            id: request.id,
+            message: request.messages.at(-1),
+            selectedChatModel: currentModelIdRef.current,
+            selectedVisibilityType: visibilityType,
+            systemPrompt: systemPromptRef.current,
+            enableWebSearch: enableWebSearchRef.current,
+            ...request.body,
+          },
+        };
+      },
+    });
+  }, [visibilityType, getProtocolTransport]);
 
   // Fetch prompt templates to match initial prompt
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
@@ -112,23 +162,7 @@ export function Chat({
     messages: initialMessages,
     experimental_throttle: 100,
     generateId: generateUUID,
-    transport: new DefaultChatTransport({
-      api: "/api/chat",
-      fetch: fetchWithErrorHandlers,
-      prepareSendMessagesRequest(request) {
-        return {
-          body: {
-            id: request.id,
-            message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
-            selectedVisibilityType: visibilityType,
-            systemPrompt: systemPromptRef.current,
-            enableWebSearch: enableWebSearchRef.current,
-            ...request.body,
-          },
-        };
-      },
-    }),
+    transport,
     onData: (dataPart) => {
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
       if (dataPart.type === "data-usage") {
@@ -139,10 +173,10 @@ export function Chat({
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
-      if (error instanceof ChatSDKError) {
-        // biome-ignore lint/nursery/noShadow: this is a toast error
-        toast.custom((id) => <AlertError id={id} title={error.message} />);
-      }
+      // biome-ignore lint/nursery/noShadow: this is a toast error
+      toast.custom((id) => (
+        <AlertError id={id} title={error.message || "Something went wrong"} />
+      ));
     },
   });
 
@@ -236,11 +270,6 @@ export function Chat({
           )}
         </div>
       </div>
-
-      <SubscriptionDialog
-        onOpenChange={setIsSubscriptionDialogOpen}
-        open={isSubscriptionDialogOpen}
-      />
 
       {/* <AlertDialog
         onOpenChange={setShowCreditCardAlert}

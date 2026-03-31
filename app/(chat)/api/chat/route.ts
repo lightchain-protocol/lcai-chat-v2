@@ -16,6 +16,7 @@ import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import type { ChatModel } from "@/lib/ai/models";
 import { systemPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
+import { performWebSearch } from "@/lib/ai/web-search";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -37,7 +38,6 @@ import {
   generateUUID,
   getTextFromMessage,
 } from "@/lib/utils";
-import { performWebSearch } from "@/lib/ai/web-search";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 export const maxDuration = 60;

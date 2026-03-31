@@ -4,7 +4,6 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Lock } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -23,9 +22,6 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
-import type { SubscriptionTierType } from "@/config/subscription";
-import useSubscription from "@/hooks/use-subscription";
-import { useUsageWarnings } from "@/hooks/use-usage-warnings";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -48,7 +44,6 @@ import {
   StopIcon,
 } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
-import SubscriptionDialog from "./subscription-dialog";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
@@ -93,28 +88,8 @@ function PureMultimodalInput({
   onWebSearchToggle?: (enabled: boolean) => void;
 }) {
   const session = useSession();
-  const subscription = useSubscription();
-  const { hasActiveSubscription } = subscription;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
-  const [showSubscriptionDialog, setShowSubscriptionDialog] = useState(false);
-
-  // Map blockchain tier names to our tier names
-  const getSubscriptionTierType = (): SubscriptionTierType => {
-    const tier = subscription.activeSubscription.data?.tier;
-    if (tier === "Pro") return "pro";
-    if (tier === "Enterprise") return "enterprise";
-    return "basic";
-  };
-
-  const subscriptionTier = getSubscriptionTierType();
-
-  // Enable usage warnings
-  useUsageWarnings({
-    usage,
-    subscriptionTier,
-    onUpgradeClick: () => setShowSubscriptionDialog(true),
-  });
 
   const adjustHeight = useCallback(() => {
     if (textareaRef.current) {
@@ -139,10 +114,7 @@ function PureMultimodalInput({
     ""
   );
 
-  const canUseChat = useMemo(() => {
-    if (session.status !== "authenticated") return false;
-    return hasActiveSubscription.data ?? false;
-  }, [session.status, hasActiveSubscription.data]);
+  const canUseChat = session.status === "authenticated";
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -347,16 +319,12 @@ function PureMultimodalInput({
         )}
         <div className="relative flex flex-row items-start gap-1 sm:gap-2">
           <div className="absolute top-[3px] border-surface-base-extraLight border-r pr-2 sm:top-0.5">
-            {hasActiveSubscription.data ? (
-              <Image
-                alt="Icon"
-                height={16}
-                src="/images/logo/favicon.png"
-                width={16}
-              />
-            ) : (
-              <Lock className="text-content-light" size={16} />
-            )}
+            <Image
+              alt="Icon"
+              height={16}
+              src="/images/logo/favicon.png"
+              width={16}
+            />
           </div>
           <PromptInputTextarea
             autoFocus
@@ -367,11 +335,7 @@ function PureMultimodalInput({
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder={
-              hasActiveSubscription.data
-                ? "Send a message..."
-                : "Activate your subscription and get credit to unlock chat..."
-            }
+            placeholder="Send a message..."
             ref={textareaRef}
             rows={1}
             value={input}
@@ -423,12 +387,6 @@ function PureMultimodalInput({
             sendMessage={sendMessage}
           />
         )}
-
-      {/* Subscription dialog for upgrades */}
-      <SubscriptionDialog
-        onOpenChange={setShowSubscriptionDialog}
-        open={showSubscriptionDialog}
-      />
     </div>
   );
 }

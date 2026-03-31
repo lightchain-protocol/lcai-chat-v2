@@ -3,7 +3,7 @@
 import { ChevronsUpDown, LogOut } from "lucide-react";
 import Image from "next/image";
 import type { User } from "next-auth";
-import { signOut, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useDisconnect } from "wagmi";
 import {
   DropdownMenu,
@@ -30,25 +30,17 @@ export function SidebarUserNav({ user }: { user: User }) {
 
   const handleSignOut = async () => {
     try {
-      // Disconnect wallet
+      // Disconnecting the wallet triggers AppKit's signOutOnDisconnect,
+      // which calls our SIWE signOut callback (clears NextAuth session).
+      // The SIWESessionSync component handles the soft refresh via DOM event.
       await disconnectAsync();
 
-      // Sign out from NextAuth
-      await signOut({
-        redirect: false,
-      });
-
-      // Show success message
-
       toast.custom((id) => (
-      <AlertSuccess id={id} title='Successfully signed out!' />
+        <AlertSuccess id={id} title='Successfully signed out!' />
       ));
-
-      // Refresh page to show greeting/connect button
-      window.location.reload();
     } catch (_error) {
       toast.custom((id) => (
-      <AlertError id={id} title='Failed to sign out. Please try again.' />
+        <AlertError id={id} title='Failed to sign out. Please try again.' />
       ));
     }
   };

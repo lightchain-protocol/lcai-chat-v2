@@ -2,6 +2,7 @@
 
 import { SiweMessage } from "siwe";
 import { auth } from "@/app/(auth)/auth";
+import config from "@/config";
 import { createUser, getUserByWallet } from "@/lib/db/queries";
 
 /**
@@ -63,7 +64,7 @@ export async function getSIWESession() {
 
     return {
       address: session.user.id,
-      chainId: 504, // LCAI Testnet
+      chainId: config.chains[0].id,
     };
   } catch (error) {
     console.error("Error getting SIWE session:", error);

@@ -12,9 +12,11 @@ import useAppStore from "@/store";
 export const Greeting = () => {
   const { status } = useSession();
   const { setIsSubscriptionDialogOpen } = useAppStore();
-  const { hasActiveSubscription } = useSubscription();
+  // const { hasActiveSubscription } = useSubscription();
   const { open } = useAppKit();
   const { isConnected } = useAccount();
+
+  return null;
 
   return (
     <div

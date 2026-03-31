@@ -1,5 +1,26 @@
 import { type Chain, mainnet } from "viem/chains";
 
+export const lcaiDevnet: Chain = {
+  id: 31337,
+  name: "LCAI Devnet",
+  nativeCurrency: {
+    name: "LCAI",
+    symbol: "LCAI",
+    decimals: 18,
+  },
+  rpcUrls: {
+    default: {
+      http: ["http://localhost:8545"],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: "LCAI Devnet Explorer",
+      url: "http://localhost",
+    },
+  },
+};
+
 export const lcaiTestnet: Chain = {
   id: 504,
   name: "LCAI Testnet",
@@ -31,13 +52,29 @@ const customMainnet: Chain = {
 };
 
 const config = {
-  chains: [customMainnet] as [Chain, ...Chain[]],
+  chains: [lcaiDevnet, customMainnet] as [Chain, ...Chain[]],
   subscriptionContractAddress: {
     // [lcaiTestnet.id]: "0x0670662b75f92D14A645545bf3B0eDdfd5E299bd",
     [mainnet.id]: "0x535AE6B51742df53c1d5C4Ae6496cAd935615E3b",
   } as Record<number, `0x${string}`>,
 
+  // Transitional: contract addresses from env vars until GET /api/system/config exists
+  jobRegistryAddress: {
+    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_JOB_REGISTRY_ADDRESS ?? "0x") as `0x${string}`,
+  } as Record<number, `0x${string}`>,
+
+  aiConfigAddress: {
+    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_AI_CONFIG_ADDRESS ?? "0x") as `0x${string}`,
+  } as Record<number, `0x${string}`>,
+
   lcaiToken: {
+    [lcaiDevnet.id]: {
+      address: "0x0000000000000000000000000000000000000000",
+      symbol: "LCAI",
+      name: "LCAI",
+      image: "/images/logo/favicon.png",
+      decimals: 18,
+    },
     [mainnet.id]: {
       address: "0x9ca8530ca349c966fe9ef903df17a75b8a778927",
       symbol: "LCAI", // token symbol

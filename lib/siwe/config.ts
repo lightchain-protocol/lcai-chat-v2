@@ -8,6 +8,16 @@ import {
 import { getCsrfToken, getSession, signIn, signOut } from "next-auth/react";
 import config from "@/config";
 
+/**
+ * Custom DOM event dispatched after SIWE sign-in or sign-out completes.
+ * The SIWESessionSync component listens for this to trigger a soft refresh.
+ */
+function dispatchSessionChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("siwe-session-changed"));
+  }
+}
+
 export const siweConfig = createSIWEConfig({
   getMessageParams: async () => ({
     domain: typeof window !== "undefined" ? window.location.host : "",
@@ -30,7 +40,6 @@ export const siweConfig = createSIWEConfig({
 
   getSession: async () => {
     const session = await getSession();
-    console.log("session in siwe config", session);
     if (!session?.user?.id) {
       return null;
     }
@@ -51,8 +60,7 @@ export const siweConfig = createSIWEConfig({
       });
 
       if (success?.ok) {
-        // Refresh the page after successful sign-in
-        window.location.reload();
+        dispatchSessionChanged();
         return true;
       }
 
@@ -63,14 +71,8 @@ export const siweConfig = createSIWEConfig({
   },
   signOut: async () => {
     try {
-      // Sign out from NextAuth
-      await signOut({
-        redirect: false,
-      });
-
-      // Refresh the page to show the greeting/connect button again
-      window.location.reload();
-
+      await signOut({ redirect: false });
+      dispatchSessionChanged();
       return true;
     } catch (_error) {
       return false;
