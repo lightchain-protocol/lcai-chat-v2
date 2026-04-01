@@ -8,13 +8,9 @@
  */
 
 import type { Abi, Log, PublicClient, WalletClient } from "viem";
-import {
-  decodeEventLog,
-  toHex,
-} from "viem";
-
-import { jobRegistryAbi } from "@/contracts/job-registry-abi";
+import { decodeEventLog, toHex } from "viem";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
+import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 
 import {
   decrypt,
@@ -38,15 +34,15 @@ export type SessionStatus =
   | "ready"
   | "error";
 
-export interface ProtocolSession {
+export type ProtocolSession = {
   status: SessionStatus;
   sessionId: number | null;
   relayUrl: string | null;
   relayToken: string | null;
   error: string | null;
-}
+};
 
-export interface SessionManagerConfig {
+export type SessionManagerConfig = {
   gateway: GatewayClient;
   modelId: string;
   walletClient: WalletClient;
@@ -54,7 +50,7 @@ export interface SessionManagerConfig {
   jobRegistryAddress: `0x${string}`;
   aiConfigAddress: `0x${string}`;
   relayUrl: string;
-}
+};
 
 const SESSION_STORAGE_KEY = "lc-protocol-session";
 
@@ -130,10 +126,7 @@ export class SessionManager {
       // Stale session — reset and fall through to create a new one
       this.reset();
     }
-    if (
-      this.state.status !== "idle" &&
-      this.state.status !== "error"
-    ) {
+    if (this.state.status !== "idle" && this.state.status !== "error") {
       return; // Already in progress
     }
 
@@ -155,7 +148,9 @@ export class SessionManager {
       let sessionId: number;
       try {
         sessionId = await this.createSessionOnChain(
-          modelIdBytes32, prepared, keyExchange,
+          modelIdBytes32,
+          prepared,
+          keyExchange
         );
       } catch (err) {
         // Retry once on stale dispatcher signature (nonce already consumed)
@@ -164,7 +159,9 @@ export class SessionManager {
           keyExchange = await this.performKeyExchange(prepared);
           this.sessionKey = keyExchange.sessionKey;
           sessionId = await this.createSessionOnChain(
-            modelIdBytes32, prepared, keyExchange,
+            modelIdBytes32,
+            prepared,
+            keyExchange
           );
         } else {
           throw err;
@@ -203,7 +200,9 @@ export class SessionManager {
    * This two-step flow is needed because browser wallets (MetaMask) cannot
    * sign type-3 blob transactions with sidecars.
    */
-  async submitJob(plaintext: string): Promise<{ jobId: number; txHash: string }> {
+  async submitJob(
+    plaintext: string
+  ): Promise<{ jobId: number; txHash: string }> {
     if (!this.sessionKey) {
       throw new Error("Session not initialized — no session key");
     }
@@ -238,11 +237,7 @@ export class SessionManager {
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "submitJob",
-      args: [
-        BigInt(this.state.sessionId),
-        blobHashes,
-        dataLength,
-      ],
+      args: [BigInt(this.state.sessionId), blobHashes, dataLength],
       value: fee,
     });
 
@@ -253,11 +248,7 @@ export class SessionManager {
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "submitJob",
-      args: [
-        BigInt(this.state.sessionId),
-        blobHashes,
-        dataLength,
-      ],
+      args: [BigInt(this.state.sessionId), blobHashes, dataLength],
       value: fee,
       gas: (gasEstimate * 120n) / 100n,
     });
@@ -328,7 +319,7 @@ export class SessionManager {
   private async createSessionOnChain(
     modelIdBytes32: `0x${string}`,
     prepared: PrepareSessionResponse,
-    keyExchange: { encWorkerKey: string; encDisputerKey: string },
+    keyExchange: { encWorkerKey: string; encDisputerKey: string }
   ): Promise<number> {
     const account = this.walletClient.account;
     if (!account) throw new Error("Wallet account not available");
@@ -398,7 +389,10 @@ export class SessionManager {
     if (prepared.disputerEncryptionKey) {
       const disputerPubRaw = hexToUint8(prepared.disputerEncryptionKey);
       const disputerPub = await importPublicKey(disputerPubRaw);
-      const encDisputerKeyBytes = await encryptSessionKey(sessionKey, disputerPub);
+      const encDisputerKeyBytes = await encryptSessionKey(
+        sessionKey,
+        disputerPub
+      );
       encDisputerKey = uint8ToBase64(encDisputerKeyBytes);
     }
 
@@ -422,7 +416,7 @@ export class SessionManager {
 
       lastPendingMessage = response.message;
       attempt += 1;
-      await sleep(Math.min(1_000 * attempt, 4_000));
+      await sleep(Math.min(1000 * attempt, 4000));
     }
 
     throw new Error(`Timed out waiting for relay token: ${lastPendingMessage}`);
@@ -499,11 +493,22 @@ export class SessionManager {
 function parseSessionCreatedEvent(logs: Log[], abi: Abi) {
   for (const log of logs) {
     try {
-      const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
-      if (decoded.eventName === "SessionCreated") return decoded as typeof decoded & {
-        args: { sessionId: bigint; user: `0x${string}`; modelId: `0x${string}` };
-      };
-    } catch { continue; }
+      const decoded = decodeEventLog({
+        abi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === "SessionCreated")
+        return decoded as typeof decoded & {
+          args: {
+            sessionId: bigint;
+            user: `0x${string}`;
+            modelId: `0x${string}`;
+          };
+        };
+    } catch {
+      // eslint-disable-next-line no-empty
+    }
   }
   throw new Error("SessionCreated event not found in receipt");
 }
@@ -511,11 +516,18 @@ function parseSessionCreatedEvent(logs: Log[], abi: Abi) {
 function parseJobSubmittedEvent(logs: Log[], abi: Abi) {
   for (const log of logs) {
     try {
-      const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
-      if (decoded.eventName === "JobSubmitted") return decoded as typeof decoded & {
-        args: { jobId: bigint; sessionId: bigint };
-      };
-    } catch { continue; }
+      const decoded = decodeEventLog({
+        abi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === "JobSubmitted")
+        return decoded as typeof decoded & {
+          args: { jobId: bigint; sessionId: bigint };
+        };
+    } catch {
+      // eslint-disable-next-line no-empty
+    }
   }
   throw new Error("JobSubmitted event not found in receipt");
 }
@@ -528,10 +540,12 @@ function isStaleSignatureError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
   // Match contract custom error selectors or message strings
-  return msg.includes("invaliddispatchersignature")
-    || msg.includes("signatureexpired")
-    || msg.includes("invalid dispatcher signature")
-    || msg.includes("signature expired");
+  return (
+    msg.includes("invaliddispatchersignature") ||
+    msg.includes("signatureexpired") ||
+    msg.includes("invalid dispatcher signature") ||
+    msg.includes("signature expired")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +553,7 @@ function isStaleSignatureError(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 function isReadyTokenResponse(
-  response: TokenResponse | PendingTokenResponse,
+  response: TokenResponse | PendingTokenResponse
 ): response is TokenResponse {
   return "token" in response && Boolean(response.token);
 }
@@ -555,8 +569,8 @@ function padHexTo32Bytes(hex: string): `0x${string}` {
 
 function uint8ToBase64(bytes: Uint8Array): string {
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
   }
   return btoa(binary);
 }
@@ -574,7 +588,7 @@ function hexToUint8(hex: string): Uint8Array {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
   const bytes = new Uint8Array(clean.length / 2);
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
+    bytes[i] = Number.parseInt(clean.substring(i * 2, i * 2 + 2), 16);
   }
   return bytes;
 }

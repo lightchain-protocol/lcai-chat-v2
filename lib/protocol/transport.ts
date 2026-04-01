@@ -14,7 +14,7 @@
  * doesn't support custom headers.
  */
 
-import type { WSFrame, WSErrorFrame } from "./relay-client";
+import type { WSErrorFrame, WSFrame } from "./relay-client";
 import { RelayClient } from "./relay-client";
 import type { SessionManagerConfig } from "./session";
 import { SessionManager } from "./session";
@@ -27,16 +27,14 @@ import { SessionManager } from "./session";
  * encoding decrypted relay frames in AI SDK data stream protocol format.
  */
 export class ProtocolTransport {
-  private sessionMgr: SessionManager;
+  private readonly sessionMgr: SessionManager;
   private relayClient: RelayClient | null = null;
-  private onSessionStatus?: (status: string) => void;
 
   constructor(config: SessionManagerConfig) {
     this.sessionMgr = new SessionManager(config);
   }
 
   setOnSessionStatus(cb: (status: string) => void) {
-    this.onSessionStatus = cb;
     this.sessionMgr.setOnStatusChange(cb);
   }
 
@@ -67,7 +65,10 @@ export class ProtocolTransport {
     this.ensureRelayConnected();
 
     // Extract plaintext from the last user message
-    const lastMessage = options.messages[options.messages.length - 1];
+    const lastMessage = options.messages.at(-1);
+    if (!lastMessage) {
+      throw new Error("No messages provided");
+    }
     const plaintext = extractTextFromMessage(lastMessage);
     if (!plaintext) {
       throw new Error("No text content in last message");
@@ -159,9 +160,7 @@ export class ProtocolTransport {
 
               if (wsFrame.payload && !started) {
                 started = true;
-                controller.enqueue(
-                  sse({ type: "text-start", id: partId })
-                );
+                controller.enqueue(sse({ type: "text-start", id: partId }));
               }
 
               if (wsFrame.payload) {
@@ -175,9 +174,7 @@ export class ProtocolTransport {
 
               if (wsFrame.type === "complete") {
                 if (started) {
-                  controller.enqueue(
-                    sse({ type: "text-end", id: partId })
-                  );
+                  controller.enqueue(sse({ type: "text-end", id: partId }));
                 }
                 controller.close();
                 unsubscribe();
@@ -185,9 +182,7 @@ export class ProtocolTransport {
             } catch (err) {
               const msg =
                 err instanceof Error ? err.message : "decryption failed";
-              controller.enqueue(
-                sse({ type: "error", errorText: msg })
-              );
+              controller.enqueue(sse({ type: "error", errorText: msg }));
               controller.close();
               unsubscribe();
             }
@@ -210,6 +205,6 @@ function extractTextFromMessage(message: {
   if (!message.parts) return null;
   const textParts = message.parts
     .filter((p) => p.type === "text" && p.text)
-    .map((p) => p.text!);
+    .map((p) => p.text);
   return textParts.join("\n") || null;
 }

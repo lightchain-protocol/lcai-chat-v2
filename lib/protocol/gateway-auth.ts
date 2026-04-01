@@ -2,16 +2,16 @@ const TOKEN_KEY = "lc-auth-token";
 
 export type SignMessageFn = (message: string) => Promise<`0x${string}`>;
 
-interface AuthChallengeResponse {
+type AuthChallengeResponse = {
   message: string;
   expiresAt: string;
-}
+};
 
-interface AuthVerifyResponse {
+type AuthVerifyResponse = {
   token: string;
   wallet: string;
   expiresAt: string;
-}
+};
 
 /**
  * Handles authentication for the LightChain Gateway API.
@@ -21,14 +21,14 @@ interface AuthVerifyResponse {
  * both gateway-owned endpoints and dispatcher proxy endpoints.
  */
 export class GatewayAuth {
+  private readonly baseUrl: string;
+  private readonly signMessage: SignMessageFn;
   private cachedToken: string | null = null;
   private cachedTokenExpiresAt = 0;
 
-  constructor(
-    private readonly baseUrl: string,
-    private readonly address: string,
-    private readonly signMessage: SignMessageFn,
-  ) {
+  constructor(baseUrl: string, signMessage: SignMessageFn) {
+    this.baseUrl = baseUrl;
+    this.signMessage = signMessage;
     this.restoreToken();
   }
 
@@ -44,17 +44,20 @@ export class GatewayAuth {
     }
 
     const challenge = await this.getJSON<AuthChallengeResponse>(
-      "/api/auth/challenge",
+      "/api/dispatcher/auth/challenge"
     );
     if (!challenge.message) {
       throw new Error("Auth challenge missing message");
     }
 
     const signature = await this.signMessage(challenge.message);
-    const verified = await this.postJSON<AuthVerifyResponse>("/api/auth/verify", {
-      message: challenge.message,
-      signature,
-    });
+    const verified = await this.postJSON<AuthVerifyResponse>(
+      "/api/dispatcher/auth/verify",
+      {
+        message: challenge.message,
+        signature,
+      }
+    );
     if (!verified.token) {
       throw new Error("Auth verification did not return a token");
     }
@@ -77,7 +80,7 @@ export class GatewayAuth {
    * Alias for buildProtectedHeaders — no distinction needed after auth unification.
    */
   async buildBearerOnlyHeaders(): Promise<Record<string, string>> {
-    return this.buildProtectedHeaders();
+    return await this.buildProtectedHeaders();
   }
 
   /**
@@ -86,7 +89,11 @@ export class GatewayAuth {
   clearToken() {
     this.cachedToken = null;
     this.cachedTokenExpiresAt = 0;
-    try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* SSR */ }
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* SSR */
+    }
   }
 
   reset() {
@@ -96,7 +103,9 @@ export class GatewayAuth {
   private persistToken(token: string, expiresAt: string) {
     try {
       sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiresAt }));
-    } catch { /* SSR */ }
+    } catch {
+      /* SSR */
+    }
   }
 
   private restoreToken() {
@@ -110,7 +119,9 @@ export class GatewayAuth {
       } else {
         sessionStorage.removeItem(TOKEN_KEY);
       }
-    } catch { /* SSR or corrupt */ }
+    } catch {
+      /* SSR or corrupt */
+    }
   }
 
   private async getJSON<T>(path: string): Promise<T> {
@@ -130,7 +141,9 @@ export class GatewayAuth {
   private async handleResponse<T>(res: Response): Promise<T> {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Gateway auth error: ${res.status} ${res.statusText} ${text}`);
+      throw new Error(
+        `Gateway auth error: ${res.status} ${res.statusText} ${text}`
+      );
     }
     return res.json() as Promise<T>;
   }

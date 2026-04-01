@@ -11,7 +11,7 @@
  *   { type: "error", code, jobId, sessionId, droppedSeq, message, ts }
  */
 
-export interface WSFrame {
+export type WSFrame = {
   type: "chunk" | "complete" | "error";
   jobId: number;
   sessionId: number;
@@ -21,9 +21,9 @@ export interface WSFrame {
   signature: string;
   correlationId: string;
   ts: number;
-}
+};
 
-export interface WSErrorFrame {
+export type WSErrorFrame = {
   type: "error";
   code: string;
   jobId: number;
@@ -32,15 +32,11 @@ export interface WSErrorFrame {
   message: string;
   correlationId: string;
   ts: number;
-}
+};
 
 export type FrameCallback = (frame: WSFrame | WSErrorFrame) => void;
 
-export type RelayStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "error";
+export type RelayStatus = "disconnected" | "connecting" | "connected" | "error";
 
 /**
  * RelayClient manages a WebSocket connection to the relay server.
@@ -48,17 +44,19 @@ export type RelayStatus =
  */
 export class RelayClient {
   private ws: WebSocket | null = null;
-  private jobCallbacks = new Map<number, FrameCallback>();
+  private readonly jobCallbacks = new Map<number, FrameCallback>();
   private status: RelayStatus = "disconnected";
   private onStatusChange?: (status: RelayStatus) => void;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly maxReconnectDelay = 30_000;
   private reconnectAttempt = 0;
+  private readonly relayUrl: string;
+  private token: string;
 
-  constructor(
-    private relayUrl: string,
-    private token: string,
-  ) {}
+  constructor(relayUrl: string, token: string) {
+    this.relayUrl = relayUrl;
+    this.token = token;
+  }
 
   setOnStatusChange(cb: (status: RelayStatus) => void) {
     this.onStatusChange = cb;
@@ -173,7 +171,7 @@ export class RelayClient {
     if (this.reconnectTimer) return;
     const delay = Math.min(
       1000 * 2 ** this.reconnectAttempt,
-      this.maxReconnectDelay,
+      this.maxReconnectDelay
     );
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => {

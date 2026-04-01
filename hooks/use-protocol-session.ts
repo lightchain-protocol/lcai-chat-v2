@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
 
 import config from "@/config";
-import { GatewayClient } from "@/lib/protocol/gateway-client";
+import useWeb3Clients from "@/hooks/use-web3-clients";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
+import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
 import { ProtocolTransport } from "@/lib/protocol/transport";
-import useWeb3Clients from "@/hooks/use-web3-clients";
 
 /**
  * React hook that manages a LightChain protocol session.
@@ -22,7 +22,7 @@ import useWeb3Clients from "@/hooks/use-web3-clients";
 export function useProtocolSession(
   modelId: string,
   walletClient: WalletClient | undefined,
-  address: string | undefined,
+  address: string | undefined
 ) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +48,7 @@ export function useProtocolSession(
   const getGateway = useCallback(() => {
     if (!gatewayRef.current) {
       const client = walletClientRef.current;
+      // biome-ignore lint/nursery/noShadow: walletAddress is shadowed to avoid confusion
       const walletAddress = addressRef.current;
       const account = client?.account;
       if (client && walletAddress && account) {
@@ -57,13 +58,13 @@ export function useProtocolSession(
         }
 
         const auth = new GatewayAuth(
+          // biome-ignore lint/performance/useTopLevelRegex: regex is used for path joining
           gatewayBaseUrl.replace(/\/+$/, ""),
-          walletAddress,
           async (message) =>
             client.signMessage({
               account: account.address,
               message,
-            }) as Promise<`0x${string}`>,
+            }) as Promise<`0x${string}`>
         );
         gatewayRef.current = new GatewayClient(undefined, auth);
       } else {
@@ -98,7 +99,9 @@ export function useProtocolSession(
 
     const client = walletClientRef.current;
     if (!client?.account) {
-      throw new Error("Wallet not connected — cannot create protocol transport");
+      throw new Error(
+        "Wallet not connected — cannot create protocol transport"
+      );
     }
 
     const gateway = getGateway();
@@ -109,10 +112,14 @@ export function useProtocolSession(
     const aiConfigAddress = config.aiConfigAddress[protocolChainId];
 
     if (!jobRegistryAddress || jobRegistryAddress === "0x") {
-      throw new Error(`JobRegistry address not configured for chain ${protocolChainId}`);
+      throw new Error(
+        `JobRegistry address not configured for chain ${protocolChainId}`
+      );
     }
     if (!aiConfigAddress || aiConfigAddress === "0x") {
-      throw new Error(`AIConfig address not configured for chain ${protocolChainId}`);
+      throw new Error(
+        `AIConfig address not configured for chain ${protocolChainId}`
+      );
     }
 
     const transport = new ProtocolTransport({
@@ -122,7 +129,9 @@ export function useProtocolSession(
       publicClient,
       jobRegistryAddress,
       aiConfigAddress,
-      relayUrl: process.env.NEXT_PUBLIC_RELAY_URL ?? gatewayBaseUrl.replace(/\/+$/, ""),
+      relayUrl:
+        // biome-ignore lint/performance/useTopLevelRegex: regex is used for path joining
+        process.env.NEXT_PUBLIC_RELAY_URL ?? gatewayBaseUrl.replace(/\/+$/, ""),
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);

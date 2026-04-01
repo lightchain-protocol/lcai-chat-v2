@@ -5,52 +5,53 @@
  * Base URL comes from NEXT_PUBLIC_GATEWAY_URL env var.
  */
 
-export interface ModelInfo {
+export type ModelInfo = {
   id: string;
   name: string;
-}
+};
 
-export interface ModelsResponse {
+export type ModelsResponse = {
   models: ModelInfo[];
-}
+};
 
-export interface PrepareSessionResponse {
+export type PrepareSessionResponse = {
   worker: string;
   workerEncryptionKey: string;
   disputerEncryptionKey?: string;
   signature: string;
   nonce: number;
   expiry: number;
-}
+};
 
-export interface UploadBlobResponse {
+export type UploadBlobResponse = {
   blobHashes: string[];
-}
+};
 
-export interface TokenResponse {
+export type TokenResponse = {
   token: string;
   expiresAt: string;
-}
+};
 
-export interface PendingTokenResponse {
+export type PendingTokenResponse = {
   status: "pending";
   message: string;
-}
+};
 
-export interface AuthProvider {
+export type AuthProvider = {
   buildProtectedHeaders(): Promise<Record<string, string>>;
   buildBearerOnlyHeaders?(): Promise<Record<string, string>>;
   clearToken?(): void;
-}
+};
 
 export class GatewayClientError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly body: string,
-  ) {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(message: string, status: number, body: string) {
     super(message);
     this.name = "GatewayClientError";
+    this.status = status;
+    this.body = body;
   }
 }
 
@@ -62,36 +63,37 @@ export class GatewayClient {
     const url = baseUrl ?? process.env.NEXT_PUBLIC_GATEWAY_URL;
     if (!url) {
       throw new Error(
-        "Gateway URL not configured: set NEXT_PUBLIC_GATEWAY_URL or pass baseUrl",
+        "Gateway URL not configured: set NEXT_PUBLIC_GATEWAY_URL or pass baseUrl"
       );
     }
     // Strip trailing slash for consistent path joining
+    // biome-ignore lint/performance/useTopLevelRegex: regex is used for path joining
     this.baseUrl = url.replace(/\/+$/, "");
     this.auth = auth;
   }
 
   async getModels(): Promise<ModelsResponse> {
-    return this.get<ModelsResponse>("/api/models");
+    return await this.get<ModelsResponse>("/api/models");
   }
 
   async prepareSession(modelId: string): Promise<PrepareSessionResponse> {
-    return this.post<PrepareSessionResponse>(
+    return await this.post<PrepareSessionResponse>(
       "/api/sessions/prepare",
       { modelId },
-      { protected: true },
+      { protected: true }
     );
   }
 
   async uploadBlob(base64Data: string): Promise<UploadBlobResponse> {
-    return this.post<UploadBlobResponse>(
+    return await this.post<UploadBlobResponse>(
       "/api/blobs",
       { data: base64Data },
-      { protected: true, bearerOnly: true },
+      { protected: true, bearerOnly: true }
     );
   }
 
   async getSessionToken(
-    sessionId: number,
+    sessionId: number
   ): Promise<TokenResponse | PendingTokenResponse> {
     let res = await this.getResponse(`/api/sessions/${sessionId}/token`, {
       protected: true,
@@ -114,7 +116,7 @@ export class GatewayClient {
 
   private async get<T>(
     path: string,
-    options?: { protected?: boolean },
+    options?: { protected?: boolean }
   ): Promise<T> {
     const res = await this.getResponse(path, options);
     return this.handleResponse<T>(res);
@@ -123,7 +125,7 @@ export class GatewayClient {
   private async post<T>(
     path: string,
     body: unknown,
-    options?: { protected?: boolean; bearerOnly?: boolean },
+    options?: { protected?: boolean; bearerOnly?: boolean }
   ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
@@ -138,16 +140,17 @@ export class GatewayClient {
 
   private async getResponse(
     path: string,
-    options?: { protected?: boolean; bearerOnly?: boolean },
+    options?: { protected?: boolean; bearerOnly?: boolean }
   ): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       headers: await this.getRequestHeaders(options),
     });
   }
 
-  private async getRequestHeaders(
-    options?: { protected?: boolean; bearerOnly?: boolean },
-  ): Promise<Record<string, string>> {
+  private async getRequestHeaders(options?: {
+    protected?: boolean;
+    bearerOnly?: boolean;
+  }): Promise<Record<string, string>> {
     if (!options?.protected) {
       return {};
     }
@@ -155,9 +158,9 @@ export class GatewayClient {
       throw new Error("Protected gateway request requires auth provider");
     }
     if (options.bearerOnly && this.auth.buildBearerOnlyHeaders) {
-      return this.auth.buildBearerOnlyHeaders();
+      return await this.auth.buildBearerOnlyHeaders();
     }
-    return this.auth.buildProtectedHeaders();
+    return await this.auth.buildProtectedHeaders();
   }
 
   private async handleResponse<T>(res: Response): Promise<T> {
@@ -166,7 +169,7 @@ export class GatewayClient {
       throw new GatewayClientError(
         `Gateway API error: ${res.status} ${res.statusText}`,
         res.status,
-        text,
+        text
       );
     }
     return res.json() as Promise<T>;
