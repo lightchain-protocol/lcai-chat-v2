@@ -10,6 +10,8 @@ import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
 import { ProtocolTransport } from "@/lib/protocol/transport";
 
+const TRAILING_SLASHES_REGEX = /\/+$/;
+
 /**
  * React hook that manages a LightChain protocol session.
  *
@@ -52,7 +54,7 @@ export function useProtocolSession(
       const walletAddress = addressRef.current;
       const account = client?.account;
       if (client && walletAddress && account) {
-        const gatewayBaseUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
+        const gatewayBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL;
         if (!gatewayBaseUrl) {
           throw new Error("Gateway URL not configured");
         }
@@ -107,7 +109,8 @@ export function useProtocolSession(
     const gateway = getGateway();
     const hexModelId = await resolveModelId();
 
-    const gatewayBaseUrl = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+    const gatewayBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL ?? "";
+    const apiBaseUrl = gatewayBaseUrl.replace(TRAILING_SLASHES_REGEX, "");
     const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
     const aiConfigAddress = config.aiConfigAddress[protocolChainId];
 
@@ -129,9 +132,49 @@ export function useProtocolSession(
       publicClient,
       jobRegistryAddress,
       aiConfigAddress,
+      persistence: {
+        apiBaseUrl,
+        getAuthToken: () =>
+          localStorage.getItem("user-token") ?? localStorage.getItem("token"),
+        persistUserMessage: async ({
+          chatId,
+          message,
+          selectedVisibilityType,
+          systemPrompt,
+        }) => {
+          const token =
+            localStorage.getItem("user-token") ?? localStorage.getItem("token");
+          if (!token) {
+            throw new Error("Missing auth token for protocol persistence");
+          }
+
+          const response = await fetch(`${apiBaseUrl}/api/chat/${chatId}/messages`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              id: message.id,
+              role: "user",
+              parts: message.parts ?? [],
+              attachments: [],
+              selectedVisibilityType,
+              systemPrompt,
+              completionState: "completed",
+              relaySource: "protocol-user",
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to persist user message: ${response.status} ${response.statusText}`
+            );
+          }
+        },
+      },
       relayUrl:
-        // biome-ignore lint/performance/useTopLevelRegex: regex is used for path joining
-        process.env.NEXT_PUBLIC_RELAY_URL ?? gatewayBaseUrl.replace(/\/+$/, ""),
+        process.env.NEXT_PUBLIC_RELAY_URL ?? apiBaseUrl,
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { resolveApiUrl } from "@/lib/utils";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -33,7 +34,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
 
     setIsRestoring(true);
     try {
-      const response = await fetch("/api/chat/restore", {
+      const response = await fetch(resolveApiUrl("/api/chat/restore"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -48,7 +49,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
       }
 
       toast.custom((id) => (
-      <AlertSuccess id={id} title='Chat restored successfully!' />
+        <AlertSuccess id={id} title="Chat restored successfully!" />
       ));
       props.onOpenChange?.(false);
       setCid("");
@@ -56,8 +57,13 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
       router.refresh();
     } catch (error) {
       toast.custom((id) => (
-        <AlertError id={id} title={error instanceof Error ? error.message : "Failed to restore chat"} />
-        ));
+        <AlertError
+          id={id}
+          title={
+            error instanceof Error ? error.message : "Failed to restore chat"
+          }
+        />
+      ));
     } finally {
       setIsRestoring(false);
     }
@@ -65,16 +71,18 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="sm:max-w-lg rounded-lg sm:rounded-3xl">
+      <DialogContent className="rounded-lg sm:max-w-lg sm:rounded-3xl">
         <DialogHeader>
           <DialogTitle>Restore Chat from IPFS</DialogTitle>
           <DialogDescription>
             Enter the IPFS CID (Content Identifier) to restore a chat backup.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 mt-6">
+        <div className="mt-6 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="cid" className="font-medium">IPFS CID</Label>
+            <Label className="font-medium" htmlFor="cid">
+              IPFS CID
+            </Label>
             <Input
               disabled={isRestoring}
               id="cid"
@@ -83,8 +91,10 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
               value={cid}
             />
           </div>
-          <div className="bg-surface-base-light p-3 rounded-xl border border-bdr-soft">
-            <h6 className="font-medium text-base flex items-center gap-1.5 text-content-strong"><Info size={16} /> Note:</h6>
+          <div className="rounded-xl border border-bdr-soft bg-surface-base-light p-3">
+            <h6 className="flex items-center gap-1.5 font-medium text-base text-content-strong">
+              <Info size={16} /> Note:
+            </h6>
             <ul className="mt-1 list-inside list-disc space-y-1 text-content-medium text-sm">
               <li>Restored chats will be marked as private</li>
               <li>A new chat ID will be assigned</li>
@@ -93,7 +103,7 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
             </ul>
           </div>
         </div>
-        <div className="flex gap-2 justify-end mt-6">
+        <div className="mt-6 flex justify-end gap-2">
           <Button
             disabled={isRestoring}
             onClick={() => props.onOpenChange?.(false)}

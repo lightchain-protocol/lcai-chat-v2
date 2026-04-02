@@ -5,8 +5,9 @@ import {
   type SIWESession,
   type SIWEVerifyMessageArgs,
 } from "@reown/appkit-siwe";
-import { getCsrfToken, getSession, signIn, signOut } from "next-auth/react";
+import { getSession, signIn, signOut } from "next-auth/react";
 import config from "@/config";
+import { resolveApiUrl } from "../utils";
 
 /**
  * Custom DOM event dispatched after SIWE sign-in or sign-out completes.
@@ -29,13 +30,26 @@ export const siweConfig = createSIWEConfig({
   createMessage: ({ address, ...args }: SIWECreateMessageArgs) =>
     formatMessage(args, address),
 
-  getNonce: async () => {
-    const nonce = await getCsrfToken();
-    if (!nonce) {
+  getNonce: async (address) => {
+    const response = await fetch(
+      `${resolveApiUrl("/api/auth/challenge")}?address=${address}`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to get challenge!");
+    }
+    const data = await response.json();
+
+    if (!data.nonce) {
       throw new Error("Failed to get nonce!");
     }
 
-    return nonce;
+    return data.nonce;
   },
 
   getSession: async () => {
@@ -43,6 +57,8 @@ export const siweConfig = createSIWEConfig({
     if (!session?.user?.id) {
       return null;
     }
+
+    localStorage.setItem("user-token", session.user.token);
 
     return {
       address: session.user.walletAddress,

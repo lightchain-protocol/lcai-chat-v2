@@ -2,7 +2,7 @@
  * Typed HTTP client for the LightChain Gateway API.
  *
  * All methods throw on non-2xx responses with the error body included.
- * Base URL comes from NEXT_PUBLIC_GATEWAY_URL env var.
+ * Base URL comes from NEXT_PUBLIC_CONSUMER_API_URL env var.
  */
 
 export type ModelInfo = {
@@ -60,10 +60,10 @@ export class GatewayClient {
   private readonly auth?: AuthProvider;
 
   constructor(baseUrl?: string, auth?: AuthProvider) {
-    const url = baseUrl ?? process.env.NEXT_PUBLIC_GATEWAY_URL;
+    const url = baseUrl ?? process.env.NEXT_PUBLIC_CONSUMER_API_URL;
     if (!url) {
       throw new Error(
-        "Gateway URL not configured: set NEXT_PUBLIC_GATEWAY_URL or pass baseUrl"
+        "Gateway URL not configured: set NEXT_PUBLIC_CONSUMER_API_URL or pass baseUrl"
       );
     }
     // Strip trailing slash for consistent path joining

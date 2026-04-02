@@ -13,6 +13,7 @@ import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
+import { resolveApiUrl } from "@/lib/utils";
 import { Action, Actions } from "./elements/actions";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -92,7 +93,7 @@ export function PureMessageActions({
       <Action
         data-testid="message-upvote"
         onClick={() => {
-          const upvote = fetch("/api/vote", {
+          const upvote = fetch(resolveApiUrl("/api/vote"), {
             method: "PATCH",
             body: JSON.stringify({
               chatId,
@@ -181,7 +182,7 @@ export function PureMessageActions({
         data-testid="message-downvote"
         disabled={vote && !vote.isUpvoted}
         onClick={() => {
-          const downvote = fetch("/api/vote", {
+          const downvote = fetch(resolveApiUrl("/api/vote"), {
             method: "PATCH",
             body: JSON.stringify({
               chatId,

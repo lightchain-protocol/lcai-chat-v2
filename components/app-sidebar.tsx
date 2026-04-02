@@ -31,7 +31,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import useSubscription from "@/hooks/use-subscription";
-import { formatDate } from "@/lib/utils";
+import { formatDate, resolveApiUrl } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,7 +62,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const { hasActiveSubscription, activeSubscription } = useSubscription();
 
   const handleDeleteAll = () => {
-    const deletePromise = fetch("/api/history", {
+    const deletePromise = fetch(resolveApiUrl("/api/history"), {
       method: "DELETE",
     });
 

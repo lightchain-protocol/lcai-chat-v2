@@ -5,17 +5,13 @@ import { auth } from "@/app/(auth)/auth";
 import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
-import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
 import { convertToUIMessages } from "@/lib/utils";
+
+const TRAILING_SLASHES_REGEX = /\/+$/;
 
 export default async function Page(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const { id } = params;
-  const chat = await getChatById({ id });
-
-  if (!chat) {
-    notFound();
-  }
 
   const session = await auth();
 
@@ -23,19 +19,50 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     redirect("/api/auth/guest");
   }
 
+  const consumerApiBaseUrl = (
+    process.env.CONSUMER_API_URL ?? process.env.NEXT_PUBLIC_CONSUMER_API_URL
+  )?.replace(TRAILING_SLASHES_REGEX, "");
+  if (!consumerApiBaseUrl) {
+    notFound();
+  }
+
+  const chatResponse = await fetch(`${consumerApiBaseUrl}/api/chat/${id}`, {
+    cache: "no-store",
+  });
+  if (!chatResponse.ok) {
+    notFound();
+  }
+  const chat = await chatResponse.json();
+
+  if (!chat) {
+    notFound();
+  }
+
+  console.log(chat, session.user.walletAddress, chat.owner);
+
   if (chat.visibility === "private") {
     if (!session.user) {
       return notFound();
     }
 
-    if (session.user.id !== chat.userId) {
+    if (
+      (session.user.walletAddress ?? "").toLowerCase() !==
+      (chat.owner ?? "").toLowerCase()
+    ) {
       return notFound();
     }
   }
 
-  const messagesFromDb = await getMessagesByChatId({
-    id,
-  });
+  const messagesResponse = await fetch(
+    `${consumerApiBaseUrl}/api/chat/${id}/messages`,
+    {
+      cache: "no-store",
+    }
+  );
+  if (!messagesResponse.ok) {
+    notFound();
+  }
+  const messagesFromDb = await messagesResponse.json();
 
   const uiMessages = convertToUIMessages(messagesFromDb);
 
@@ -53,7 +80,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
           initialMessages={uiMessages}
           initialSystemPrompt={chat.systemPrompt ?? null}
           initialVisibilityType={chat.visibility}
-          isReadonly={session?.user?.id !== chat.userId}
+          isReadonly={session?.user?.walletAddress !== chat.owner}
         />
         <DataStreamHandler />
       </>
@@ -70,7 +97,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
         initialMessages={uiMessages}
         initialSystemPrompt={chat.systemPrompt ?? null}
         initialVisibilityType={chat.visibility}
-        isReadonly={session?.user?.id !== chat.userId}
+        isReadonly={session?.user?.walletAddress !== chat.owner}
       />
       <DataStreamHandler />
     </>

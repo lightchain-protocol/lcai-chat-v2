@@ -1,38 +1,26 @@
 import NextAuth, { type DefaultSession } from "next-auth";
 import type { DefaultJWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
-import { SiweMessage } from "siwe";
-import { createUser, getUserByWallet } from "@/lib/db/queries";
 import { authConfig } from "./auth.config";
 
-export type UserType = "regular";
+type UserType = {
+  id: string;
+  username?: string | null;
+  walletAddress: `0x${string}`;
+  type: "regular";
+  token: string;
+};
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
-    user: {
-      id: string;
-      type: UserType;
-      walletAddress?: `0x${string}` | null;
-      username?: string | null;
-    } & DefaultSession["user"];
+    user: UserType & DefaultSession["user"];
   }
 
-  // biome-ignore lint/nursery/useConsistentTypeDefinitions: "Required"
-  interface User {
-    id?: string;
-    username?: string | null;
-    walletAddress?: `0x${string}` | null;
-    type: UserType;
-  }
+  interface User extends UserType {}
 }
 
 declare module "next-auth/jwt" {
-  interface JWT extends DefaultJWT {
-    id: string;
-    type: UserType;
-    walletAddress?: `0x${string}` | null;
-    username?: string | null;
-  }
+  interface JWT extends DefaultJWT, UserType {}
 }
 
 export const {
@@ -58,47 +46,56 @@ export const {
           placeholder: "0x0",
         },
       },
-      async authorize(credentials: any) {
+      async authorize(credentials) {
         try {
           if (!credentials?.message || !credentials?.signature) {
             console.error("Missing message or signature");
             return null;
           }
 
-          const siweMessage = new SiweMessage(credentials.message);
-          const { data: fields } = await siweMessage.verify({
-            signature: credentials.signature,
-          });
-
-          console.log("SIWE verification result:", fields);
-
-          if (!fields) {
-            console.error("SIWE verification failed");
+          const consumerApiBaseUrl =
+            process.env.CONSUMER_API_URL ??
+            process.env.NEXT_PUBLIC_CONSUMER_API_URL;
+          if (!consumerApiBaseUrl) {
+            console.error("Consumer API URL is not configured");
             return null;
           }
 
-          const { address } = fields;
+          const response = await fetch(
+            `${consumerApiBaseUrl}/api/auth/verify`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                message: credentials.message,
+                signature: credentials.signature,
+              }),
+            }
+          );
 
-          // Get or create user
-          const [existingUser] = await getUserByWallet(address);
-
-          if (existingUser) {
-            return {
-              id: existingUser.id,
-              username: existingUser.username,
-              walletAddress: existingUser.wallet_address as `0x${string}`,
-              type: "regular",
-            };
+          if (!response.ok) {
+            throw new Error("Consumer auth verify failed");
           }
 
-          // Create new user
-          const [newUser] = await createUser(address);
+          const payload = (await response.json()) as {
+            success: boolean;
+            address?: string;
+            token?: string;
+            user?: UserType;
+          };
+
+          if (!payload.success || !payload.user || !payload.token) {
+            throw new Error("Failed to verify message!");
+          }
 
           return {
-            id: newUser.id,
-            username: newUser.username,
-            walletAddress: newUser.wallet_address as `0x${string}`,
-            type: "regular",
+            id: payload.user.id,
+            username: payload.user.username ?? null,
+            walletAddress: payload.user.walletAddress,
+            type: payload.user.type,
+            token: payload.token,
           };
         } catch (error) {
           console.error("SIWE authorization error:", error);
@@ -113,6 +110,7 @@ export const {
         token.id = user.id as string;
         token.walletAddress = user.walletAddress as `0x${string}`;
         token.username = user.username as string;
+        token.token = user.token as string;
         token.type = user.type;
       }
 
@@ -124,6 +122,7 @@ export const {
         session.user.walletAddress = token.walletAddress;
         session.user.username = token.username;
         session.user.type = token.type;
+        session.user.token = token.token;
       }
 
       return session;

@@ -13,7 +13,7 @@ export function exportToJSON(chat: Chat, messages: DBMessage[]): string {
         title: chat.title,
         createdAt: chat.createdAt,
         visibility: chat.visibility,
-        userId: chat.userId,
+        owner: chat.owner,
       },
       messages: messages.map((msg) => ({
         id: msg.id,

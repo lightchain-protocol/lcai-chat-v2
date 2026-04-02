@@ -38,6 +38,18 @@ export type FrameCallback = (frame: WSFrame | WSErrorFrame) => void;
 
 export type RelayStatus = "disconnected" | "connecting" | "connected" | "error";
 
+type RelayPersistenceConfig = {
+  apiBaseUrl: string;
+  getAuthToken: () => string | null;
+};
+
+type PendingAssistantMessage = {
+  chatId: string;
+  messageId: string;
+  text: string;
+  protocolMeta: Record<string, unknown>;
+};
+
 /**
  * RelayClient manages a WebSocket connection to the relay server.
  * Consumers register per-job callbacks to receive encrypted frames.
@@ -52,10 +64,20 @@ export class RelayClient {
   private reconnectAttempt = 0;
   private readonly relayUrl: string;
   private token: string;
+  private readonly persistence: RelayPersistenceConfig | null;
+  private readonly pendingAssistantMessages = new Map<
+    number,
+    PendingAssistantMessage
+  >();
 
-  constructor(relayUrl: string, token: string) {
+  constructor(
+    relayUrl: string,
+    token: string,
+    persistence?: RelayPersistenceConfig
+  ) {
     this.relayUrl = relayUrl;
     this.token = token;
+    this.persistence = persistence ?? null;
   }
 
   setOnStatusChange(cb: (status: RelayStatus) => void) {
@@ -144,6 +166,68 @@ export class RelayClient {
       this.ws = null;
     }
     this.setStatus("disconnected");
+  }
+
+  beginAssistantMessage(args: {
+    jobId: number;
+    chatId: string;
+    messageId: string;
+    protocolMeta: Record<string, unknown>;
+  }) {
+    this.pendingAssistantMessages.set(args.jobId, {
+      chatId: args.chatId,
+      messageId: args.messageId,
+      text: "",
+      protocolMeta: args.protocolMeta,
+    });
+  }
+
+  appendAssistantDelta(jobId: number, delta: string) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.text += delta;
+  }
+
+  discardAssistantMessage(jobId: number) {
+    this.pendingAssistantMessages.delete(jobId);
+  }
+
+  async completeAssistantMessage(jobId: number) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    this.pendingAssistantMessages.delete(jobId);
+    if (!pending || !this.persistence) return;
+    if (!pending.text.trim()) return;
+
+    const token = this.persistence.getAuthToken();
+    if (!token) {
+      throw new Error("Missing auth token for assistant message persistence");
+    }
+
+    const response = await fetch(
+      `${this.persistence.apiBaseUrl}/api/chat/${pending.chatId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          id: pending.messageId,
+          role: "assistant",
+          parts: [{ type: "text", text: pending.text }],
+          attachments: [],
+          completionState: "completed",
+          relaySource: "websocket",
+          protocolMeta: pending.protocolMeta,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to persist assistant message: ${response.status} ${response.statusText}`
+      );
+    }
   }
 
   private handleMessage(data: unknown) {

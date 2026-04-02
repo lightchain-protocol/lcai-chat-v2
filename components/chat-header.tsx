@@ -29,6 +29,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { resolveApiUrl } from "@/lib/utils";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import AlertError from "./ui/toast/AlertError";
@@ -56,7 +57,6 @@ function PureChatHeader({
   const { open } = useSidebar();
 
   const { width: windowWidth } = useWindowSize();
-
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const [editorDialogOpen, setEditorDialogOpen] = useState(false);
 
@@ -66,14 +66,19 @@ function PureChatHeader({
     cid: string | null;
     encrypted: boolean;
   }>(chatId ? `/api/chat/${chatId}/backup` : null, async (url: string) => {
-    const response = await fetch(url);
+    const response = await fetch(resolveApiUrl(url), {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("user-token")}`,
+      },
+    });
     if (!response.ok) return null;
     return response.json();
   });
 
   const handleExportChat = async () => {
     try {
-      const response = await fetch(`/api/chat/${chatId}/export`);
+      const response = await fetch(resolveApiUrl(`/api/chat/${chatId}/export`));
 
       if (!response.ok) {
         throw new Error("Failed to export chat");
@@ -108,9 +113,16 @@ function PureChatHeader({
 
   const handleBackup = () => {
     try {
-      const responsePromise = fetch(`/api/chat/${chatId}/backup`, {
-        method: "POST",
-      });
+      const responsePromise = fetch(
+        resolveApiUrl(`/api/chat/${chatId}/backup`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("user-token")}`,
+          },
+        }
+      );
 
       toast.promise(responsePromise, {
         loading: (

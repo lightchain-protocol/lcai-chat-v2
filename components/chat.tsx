@@ -15,10 +15,14 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
-import { ChatSDKError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import {
+  fetcher,
+  fetchWithErrorHandlers,
+  generateUUID,
+  resolveApiUrl,
+} from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
@@ -90,9 +94,14 @@ export function Chat({
         async fetch(_url, init) {
           const t = await getProtocolTransport();
           const body = JSON.parse((init?.body as string) ?? "{}");
+          const protocolBody = {
+            ...body,
+            selectedVisibilityType: visibilityType,
+            systemPrompt: systemPromptRef.current,
+          };
           const { response } = await t.sendMessages({
-            messages: body.messages ?? [],
-            body,
+            messages: protocolBody.messages ?? [],
+            body: protocolBody,
             signal: init?.signal ?? undefined,
           });
 
@@ -101,8 +110,15 @@ export function Chat({
       });
     }
     return new DefaultChatTransport({
-      api: "/api/chat",
-      fetch: fetchWithErrorHandlers,
+      api: resolveApiUrl("/api/chat"),
+      fetch: (url, init) =>
+        fetchWithErrorHandlers(url, {
+          ...init,
+          headers: {
+            ...init?.headers,
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        }),
       prepareSendMessagesRequest(request) {
         return {
           body: {

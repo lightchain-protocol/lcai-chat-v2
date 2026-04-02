@@ -11,12 +11,33 @@ import type { DBMessage } from '@/lib/db/schema';
 import { ChatSDKError, type ErrorCode } from './errors';
 import type { ChatMessage, ChatTools, CustomUIDataTypes } from './types';
 
+const consumerApiBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL?.replace(/\/+$/, '');
+
+export function resolveApiUrl(url: string): string {
+  if (!consumerApiBaseUrl) {
+    return url;
+  }
+
+  if (url.startsWith('/api/')) {
+    return `${consumerApiBaseUrl}${url}`;
+  }
+
+  return url;
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 export const fetcher = async (url: string) => {
-  const response = await fetch(url);
+  const headers = new Headers();
+
+  headers.set('Content-Type', 'application/json');
+  headers.set('Authorization', `Bearer ${localStorage.getItem("user-token")}`);
+
+  const response = await fetch(resolveApiUrl(url), {
+    headers,
+  });
 
   if (!response.ok) {
     const { code, cause } = await response.json();
@@ -31,7 +52,15 @@ export async function fetchWithErrorHandlers(
   init?: RequestInit,
 ) {
   try {
-    const response = await fetch(input, init);
+    const resolvedInput =
+      typeof input === 'string' ? resolveApiUrl(input) : input;
+    const response = await fetch(resolvedInput, {
+      ...init,
+      headers: {
+        ...init?.headers,
+        Authorization: `Bearer ${localStorage.getItem("user-token")}`,
+      },
+    });
 
     if (!response.ok) {
       const { code, cause } = await response.json();

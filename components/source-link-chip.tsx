@@ -7,7 +7,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { cn } from "@/lib/utils";
+import { cn, resolveApiUrl } from "@/lib/utils";
 
 const WWW_PREFIX = /^www\./;
 const DEFAULT_FAVICON = "/images/logo/favicon.png";
@@ -30,7 +30,9 @@ async function fetchMetaData(url: string): Promise<{
   description: string;
 }> {
   try {
-    const res = await fetch(`/api/metadata?url=${encodeURIComponent(url)}`);
+    const res = await fetch(
+      resolveApiUrl(`/api/metadata?url=${encodeURIComponent(url)}`)
+    );
     if (!res.ok) throw new Error("Failed to fetch metadata");
     return res.json();
   } catch {

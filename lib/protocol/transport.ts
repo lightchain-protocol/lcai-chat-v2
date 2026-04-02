@@ -19,6 +19,23 @@ import { RelayClient } from "./relay-client";
 import type { SessionManagerConfig } from "./session";
 import { SessionManager } from "./session";
 
+type ProtocolTransportConfig = SessionManagerConfig & {
+  persistence: {
+    apiBaseUrl: string;
+    getAuthToken: () => string | null;
+    persistUserMessage: (args: {
+      chatId: string;
+      message: {
+        id?: string;
+        role: string;
+        parts?: Array<{ type: string; text?: string }>;
+      };
+      selectedVisibilityType?: string;
+      systemPrompt?: string | null;
+    }) => Promise<void>;
+  };
+};
+
 /**
  * ProtocolTransport wraps session management, encryption, and relay delivery
  * into a ChatTransport-compatible interface for AI SDK's useChat hook.
@@ -29,9 +46,11 @@ import { SessionManager } from "./session";
 export class ProtocolTransport {
   private readonly sessionMgr: SessionManager;
   private relayClient: RelayClient | null = null;
+  private readonly persistence: ProtocolTransportConfig["persistence"];
 
-  constructor(config: SessionManagerConfig) {
+  constructor(config: ProtocolTransportConfig) {
     this.sessionMgr = new SessionManager(config);
+    this.persistence = config.persistence;
   }
 
   setOnSessionStatus(cb: (status: string) => void) {
@@ -74,11 +93,30 @@ export class ProtocolTransport {
       throw new Error("No text content in last message");
     }
 
+    const chatId = getChatId(options.body);
+    if (!chatId) {
+      throw new Error("Chat ID is required for protocol message persistence");
+    }
+
+    await this.persistence.persistUserMessage({
+      chatId,
+      message: lastMessage,
+      selectedVisibilityType:
+        typeof options.body?.selectedVisibilityType === "string"
+          ? options.body.selectedVisibilityType
+          : undefined,
+      systemPrompt:
+        typeof options.body?.systemPrompt === "string" ||
+        options.body?.systemPrompt === null
+          ? (options.body.systemPrompt as string | null)
+          : undefined,
+    });
+
     // Submit job: encrypt → blob upload → on-chain TX via user's wallet
     const { jobId } = await this.sessionMgr.submitJob(plaintext);
 
     // Create a streaming response from relay WebSocket frames
-    const stream = this.createResponseStream(jobId, options.signal);
+    const stream = this.createResponseStream(jobId, chatId, options.signal);
 
     return {
       response: new Response(stream, {
@@ -113,7 +151,10 @@ export class ProtocolTransport {
       this.relayClient = null;
     }
 
-    this.relayClient = new RelayClient(relayUrl, relayToken);
+    this.relayClient = new RelayClient(relayUrl, relayToken, {
+      apiBaseUrl: this.persistence.apiBaseUrl,
+      getAuthToken: this.persistence.getAuthToken,
+    });
     this.relayClient.connect();
   }
 
@@ -124,12 +165,14 @@ export class ProtocolTransport {
    */
   private createResponseStream(
     jobId: number,
+    chatId: string,
     signal?: AbortSignal
   ): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
     const sessionMgr = this.sessionMgr;
     const relayClient = this.relayClient;
     const partId = `text-${jobId}`;
+    const assistantMessageId = crypto.randomUUID();
     let started = false;
 
     const sse = (obj: Record<string, unknown>): Uint8Array =>
@@ -160,6 +203,17 @@ export class ProtocolTransport {
 
               if (wsFrame.payload && !started) {
                 started = true;
+                relayClient.beginAssistantMessage({
+                  jobId,
+                  chatId,
+                  messageId: assistantMessageId,
+                  protocolMeta: {
+                    jobId: wsFrame.jobId,
+                    sessionId: wsFrame.sessionId,
+                    correlationId: wsFrame.correlationId,
+                    completedAt: new Date().toISOString(),
+                  },
+                });
                 controller.enqueue(sse({ type: "text-start", id: partId }));
               }
 
@@ -167,6 +221,7 @@ export class ProtocolTransport {
                 const decrypted = await sessionMgr.decryptResponse(
                   wsFrame.payload
                 );
+                relayClient.appendAssistantDelta(jobId, decrypted);
                 controller.enqueue(
                   sse({ type: "text-delta", id: partId, delta: decrypted })
                 );
@@ -175,6 +230,7 @@ export class ProtocolTransport {
               if (wsFrame.type === "complete") {
                 if (started) {
                   controller.enqueue(sse({ type: "text-end", id: partId }));
+                  await relayClient.completeAssistantMessage(jobId);
                 }
                 controller.close();
                 unsubscribe();
@@ -183,6 +239,7 @@ export class ProtocolTransport {
               const msg =
                 err instanceof Error ? err.message : "decryption failed";
               controller.enqueue(sse({ type: "error", errorText: msg }));
+              relayClient.discardAssistantMessage(jobId);
               controller.close();
               unsubscribe();
             }
@@ -190,12 +247,19 @@ export class ProtocolTransport {
         );
 
         signal?.addEventListener("abort", () => {
+          relayClient.discardAssistantMessage(jobId);
           unsubscribe();
           controller.close();
         });
       },
     });
   }
+}
+
+function getChatId(body?: Record<string, unknown>): string | null {
+  if (!body) return null;
+  const value = body.id;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function extractTextFromMessage(message: {

@@ -26,7 +26,7 @@ import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { cn } from "@/lib/utils";
+import { cn, resolveApiUrl } from "@/lib/utils";
 import {
   PromptInput,
   PromptInputModelSelect,
@@ -183,7 +183,7 @@ function PureMultimodalInput({
     formData.append("file", file);
 
     try {
-      const response = await fetch("/api/files/upload", {
+      const response = await fetch(resolveApiUrl("/api/files/upload"), {
         method: "POST",
         body: formData,
       });

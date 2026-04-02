@@ -26,7 +26,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { Chat } from "@/lib/db/schema";
-import { fetcher } from "@/lib/utils";
+import { fetcher, resolveApiUrl } from "@/lib/utils";
 import { ChatItem } from "./sidebar-history-item";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -140,7 +140,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
   };
 
   const handleDelete = () => {
-    const deletePromise = fetch(`/api/chat?id=${deleteId}`, {
+    const deletePromise = fetch(resolveApiUrl(`/api/chat?id=${deleteId}`), {
       method: "DELETE",
     });
 

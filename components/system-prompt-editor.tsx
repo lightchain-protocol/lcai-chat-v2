@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { resolveApiUrl } from "@/lib/utils";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -34,14 +35,14 @@ export function SystemPromptEditor({
   const handleSave = async () => {
     if (!name.trim() || !prompt.trim()) {
       toast.custom((id) => (
-        <AlertError id={id} title='Please fill in all fields' />
-        ));
+        <AlertError id={id} title="Please fill in all fields" />
+      ));
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch("/api/prompts", {
+      const response = await fetch(resolveApiUrl("/api/prompts"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -55,7 +56,7 @@ export function SystemPromptEditor({
       }
 
       toast.custom((id) => (
-      <AlertSuccess id={id} title='Custom prompt saved successfully' />
+        <AlertSuccess id={id} title="Custom prompt saved successfully" />
       ));
       setName("");
       setPrompt("");
@@ -64,7 +65,12 @@ export function SystemPromptEditor({
     } catch (error) {
       console.error("Error saving prompt:", error);
       toast.custom((id) => (
-        <AlertError id={id} title={error instanceof Error ? error.message : "Failed to save prompt"} />
+        <AlertError
+          id={id}
+          title={
+            error instanceof Error ? error.message : "Failed to save prompt"
+          }
+        />
       ));
     } finally {
       setLoading(false);
@@ -82,16 +88,20 @@ export function SystemPromptEditor({
       <DialogContent className="sm:max-w-xl sm:rounded-3xl">
         <DialogHeader>
           <DialogTitle asChild>
-            <h4 className="text-xl font-semibold text-content-strong -tracking-[0.2px] leading-[1.2]">Create Custom Prompt</h4>
+            <h4 className="-tracking-[0.2px] font-semibold text-content-strong text-xl leading-[1.2]">
+              Create Custom Prompt
+            </h4>
           </DialogTitle>
-          <DialogDescription className="text-content-default -tracking-[0.16px] text-base mt-1">
+          <DialogDescription className="-tracking-[0.16px] mt-1 text-base text-content-default">
             Create a custom system prompt for personalized AI behavior.
           </DialogDescription>
         </DialogHeader>
-        <div className="w-full h-px bg-bdr-light my-6"></div>
+        <div className="my-6 h-px w-full bg-bdr-light" />
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="name" className="font-medium">Name</Label>
+            <Label className="font-medium" htmlFor="name">
+              Name
+            </Label>
             <Input
               disabled={loading}
               id="name"
@@ -103,7 +113,9 @@ export function SystemPromptEditor({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="prompt" className="font-medium">System Prompt</Label>
+            <Label className="font-medium" htmlFor="prompt">
+              System Prompt
+            </Label>
             <Textarea
               className="resize-none rounded-[10px] border-bdr-light bg-surface-base-subtle focus:bg-surface-base-faint"
               disabled={loading}
@@ -113,18 +125,23 @@ export function SystemPromptEditor({
               rows={10}
               value={prompt}
             />
-            <p className="text-content-light text-[15px]">
+            <p className="text-[15px] text-content-light">
               This prompt will define the AI's personality and behavior for this
               chat.
             </p>
           </div>
         </div>
-        <div className="w-full h-px bg-bdr-light my-6"></div>
+        <div className="my-6 h-px w-full bg-bdr-light" />
         <div className="flex justify-end gap-2">
           <Button disabled={loading} onClick={handleCancel} variant="outline">
             Cancel
           </Button>
-          <Button disabled={loading} onClick={handleSave} variant="gradient" className="text-sm">
+          <Button
+            className="text-sm"
+            disabled={loading}
+            onClick={handleSave}
+            variant="gradient"
+          >
             {loading ? "Saving..." : "Save Prompt"}
           </Button>
         </div>
