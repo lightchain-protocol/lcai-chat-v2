@@ -49,6 +49,7 @@ export async function exportPublicKey(key: CryptoKey): Promise<Uint8Array> {
 export async function importPublicKey(raw: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
+    // @ts-ignore
     raw,
     { name: "ECDH", namedCurve: "P-256" },
     true,
@@ -91,6 +92,7 @@ export async function encrypt(
 
   const aesKey = await crypto.subtle.importKey(
     "raw",
+    // @ts-ignore
     key,
     "AES-GCM",
     false,
@@ -104,6 +106,7 @@ export async function encrypt(
   const ciphertextWithTag = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: nonce },
     aesKey,
+    // @ts-ignore
     plaintext,
   );
 
@@ -140,6 +143,7 @@ export async function decrypt(
 
   const aesKey = await crypto.subtle.importKey(
     "raw",
+    // @ts-ignore
     key,
     "AES-GCM",
     false,

@@ -86,7 +86,7 @@ export async function saveChat({
     return await db.insert(chat).values({
       id,
       createdAt: new Date(),
-      userId,
+      owner: userId,
       title,
       visibility,
       systemPrompt: systemPrompt || null,
@@ -137,7 +137,7 @@ export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
     const userChats = await db
       .select({ id: chat.id })
       .from(chat)
-      .where(eq(chat.userId, userId));
+      .where(eq(chat.owner, userId));
 
     if (userChats.length === 0) {
       return { deletedCount: 0 };
@@ -151,7 +151,7 @@ export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
 
     const deletedChats = await db
       .delete(chat)
-      .where(eq(chat.userId, userId))
+      .where(eq(chat.owner, userId))
       .returning();
 
     return { deletedCount: deletedChats.length };
@@ -183,8 +183,8 @@ export async function getChatsByUserId({
         .from(chat)
         .where(
           whereCondition
-            ? and(whereCondition, eq(chat.userId, id))
-            : eq(chat.userId, id)
+            ? and(whereCondition, eq(chat.owner, id))
+            : eq(chat.owner, id)
         )
         .orderBy(desc(chat.createdAt))
         .limit(extendedLimit);
@@ -440,7 +440,7 @@ export async function getMessageCountByUserId({
       .innerJoin(chat, eq(message.chatId, chat.id))
       .where(
         and(
-          eq(chat.userId, id),
+            eq(chat.owner, id),
           gte(message.createdAt, twentyFourHoursAgo),
           eq(message.role, "user")
         )
@@ -611,7 +611,7 @@ export async function searchMessages({
       .innerJoin(chat, eq(message.chatId, chat.id))
       .where(
         and(
-          eq(chat.userId, userId),
+          eq(chat.owner, userId),
           sql`"Message"."search_vector" @@ to_tsquery('english', ${sanitizedQuery})`
         )
       )

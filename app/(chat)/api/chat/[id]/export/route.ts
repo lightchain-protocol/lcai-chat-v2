@@ -27,7 +27,7 @@ export async function GET(
   }
 
   // Verify user owns this chat
-  if (chat.userId !== session.user.id) {
+  if (chat.owner !== session.user.id) {
     return new ChatSDKError(
       "unauthorized:chat",
       "You don't have permission to export this chat"

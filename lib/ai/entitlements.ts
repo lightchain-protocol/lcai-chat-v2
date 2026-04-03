@@ -7,7 +7,7 @@ type Entitlements = {
   maxTokens: number;
 };
 
-export const entitlementsByUserType: Record<UserType, Entitlements> = {
+export const entitlementsByUserType: Record<UserType["type"], Entitlements> = {
   /*
    * For users with a connected wallet
    */

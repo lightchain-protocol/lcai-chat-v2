@@ -10,7 +10,7 @@ import { unstable_cache as cache } from "next/cache";
 import type { ModelCatalog } from "tokenlens/core";
 import { fetchModels } from "tokenlens/fetch";
 import { getUsage } from "tokenlens/helpers";
-import { auth, type UserType } from "@/app/(auth)/auth";
+import { auth, UserType } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/visibility-selector";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import type { ChatModel } from "@/lib/ai/models";
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       return new ChatSDKError("unauthorized:chat").toResponse();
     }
 
-    const userType: UserType = session.user.type;
+    const userType: UserType["type"] = session.user.type;
 
     const messageCount = await getMessageCountByUserId({
       id: session.user.id,
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     const chat = await getChatById({ id });
 
     if (chat) {
-      if (chat.userId !== session.user.id) {
+      if (chat.owner !== session.user.id) {
         return new ChatSDKError("forbidden:chat").toResponse();
       }
 
@@ -292,7 +292,7 @@ export async function DELETE(request: Request) {
 
   const chat = await getChatById({ id });
 
-  if (chat?.userId !== session.user.id) {
+  if (chat?.owner !== session.user.id) {
     return new ChatSDKError("forbidden:chat").toResponse();
   }
 
@@ -321,7 +321,7 @@ export async function PATCH(request: Request) {
     return new ChatSDKError("not_found:chat").toResponse();
   }
 
-  if (chat.userId !== session.user.id) {
+  if (chat.owner !== session.user.id) {
     return new ChatSDKError("forbidden:chat").toResponse();
   }
 

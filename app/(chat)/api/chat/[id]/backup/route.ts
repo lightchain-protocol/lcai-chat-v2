@@ -33,7 +33,7 @@ export async function POST(
       ).toResponse();
     }
 
-    if (chat.userId !== session.user.id) {
+    if (chat.owner !== session.user.id) {
       return new ChatSDKError(
         "unauthorized:chat",
         "You don't have permission to backup this chat"
@@ -119,7 +119,7 @@ export async function GET(
       ).toResponse();
     }
 
-    if (chat.userId !== session.user.id) {
+    if (chat.owner !== session.user.id) {
       return new ChatSDKError(
         "unauthorized:chat",
         "You don't have permission to view this chat's backup status"

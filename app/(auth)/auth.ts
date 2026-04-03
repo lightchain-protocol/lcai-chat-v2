@@ -3,7 +3,7 @@ import type { DefaultJWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import { authConfig } from "./auth.config";
 
-type UserType = {
+export type UserType = {
   id: string;
   username?: string | null;
   walletAddress: `0x${string}`;
