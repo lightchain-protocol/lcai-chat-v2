@@ -54,7 +54,6 @@ export const {
           }
 
           const consumerApiBaseUrl =
-            process.env.CONSUMER_API_URL ??
             process.env.NEXT_PUBLIC_CONSUMER_API_URL;
           if (!consumerApiBaseUrl) {
             console.error("Consumer API URL is not configured");

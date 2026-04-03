@@ -10,7 +10,8 @@ export const lcaiDevnet: Chain = {
   },
   rpcUrls: {
     default: {
-      http: ["http://localhost:8545"],
+      http: ["https://lightchain-devnet-rpc-proxy-698792729874.us-central1.run.app", "http://localhost:8545"],
+      // http: ["http://localhost:8545"],
     },
   },
   blockExplorers: {

@@ -6,8 +6,7 @@ import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { convertToUIMessages } from "@/lib/utils";
-
-const TRAILING_SLASHES_REGEX = /\/+$/;
+import { $http } from "@/lib/http";
 
 export default async function Page(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -19,14 +18,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     redirect("/api/auth/guest");
   }
 
-  const consumerApiBaseUrl = (
-    process.env.CONSUMER_API_URL ?? process.env.NEXT_PUBLIC_CONSUMER_API_URL
-  )?.replace(TRAILING_SLASHES_REGEX, "");
-  if (!consumerApiBaseUrl) {
-    notFound();
-  }
-
-  const chatResponse = await fetch(`${consumerApiBaseUrl}/api/chat/${id}`, {
+  const chatResponse = await $http.get(`/api/chat/${id}`, {
     cache: "no-store",
   });
   if (!chatResponse.ok) {
@@ -37,8 +29,6 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
   if (!chat) {
     notFound();
   }
-
-  console.log(chat, session.user.walletAddress, chat.owner);
 
   if (chat.visibility === "private") {
     if (!session.user) {
@@ -53,8 +43,8 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     }
   }
 
-  const messagesResponse = await fetch(
-    `${consumerApiBaseUrl}/api/chat/${id}/messages`,
+  const messagesResponse = await $http.get(
+    `/api/chat/${id}/messages`,
     {
       cache: "no-store",
     }
@@ -62,9 +52,9 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
   if (!messagesResponse.ok) {
     notFound();
   }
-  const messagesFromDb = await messagesResponse.json();
+  const messages = await messagesResponse.json();
 
-  const uiMessages = convertToUIMessages(messagesFromDb);
+  const uiMessages = convertToUIMessages(messages);
 
   const cookieStore = await cookies();
   const chatModelFromCookie = cookieStore.get("chat-model");

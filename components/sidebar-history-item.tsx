@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { useCopyToClipboard } from "usehooks-ts";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Chat } from "@/lib/db/schema";
-import { resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
 import { MoreHorizontalIcon } from "./icons";
 import { Button } from "./ui/button";
 import {
@@ -79,12 +79,8 @@ const PureChatItem = ({
     }
 
     setIsRenaming(true);
-    const renamePromise = fetch(resolveApiUrl(`/api/chat?id=${chat.id}`), {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ title: newTitle.trim() }),
+    const renamePromise = $http.patch(`/api/chat?id=${chat.id}`, {
+      title: newTitle.trim(),
     });
 
     toast.promise(renamePromise, {

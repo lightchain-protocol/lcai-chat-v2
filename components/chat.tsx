@@ -2,6 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -59,6 +60,7 @@ export function Chat({
 
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
+  const { status: sessionStatus } = useSession();
 
   const [input, setInput] = useState<string>("");
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
@@ -137,7 +139,7 @@ export function Chat({
 
   // Fetch prompt templates to match initial prompt
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
-    "/api/prompts",
+    sessionStatus === "authenticated" ? "/api/prompts" : null,
     fetcher
   );
 

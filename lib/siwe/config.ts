@@ -7,7 +7,7 @@ import {
 } from "@reown/appkit-siwe";
 import { getSession, signIn, signOut } from "next-auth/react";
 import config from "@/config";
-import { resolveApiUrl } from "../utils";
+import { $http, clearAuthToken, setAuthToken } from "@/lib/http";
 
 /**
  * Custom DOM event dispatched after SIWE sign-in or sign-out completes.
@@ -17,6 +17,21 @@ function dispatchSessionChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("siwe-session-changed"));
   }
+}
+
+async function syncAuthTokenFromSession(): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const session = await getSession();
+    const token = session?.user?.token;
+    if (token) {
+      setAuthToken(token);
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return false;
 }
 
 export const siweConfig = createSIWEConfig({
@@ -31,14 +46,11 @@ export const siweConfig = createSIWEConfig({
     formatMessage(args, address),
 
   getNonce: async (address) => {
-    const response = await fetch(
-      `${resolveApiUrl("/api/auth/challenge")}?address=${address}`,
-      {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        credentials: "include",
-      }
-    );
+    const response = await $http.get(`/api/auth/challenge?address=${address}`, {
+      auth: false,
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
 
     if (!response.ok) {
       throw new Error("Failed to get challenge!");
@@ -58,7 +70,7 @@ export const siweConfig = createSIWEConfig({
       return null;
     }
 
-    localStorage.setItem("user-token", session.user.token);
+    setAuthToken(session.user.token);
 
     return {
       address: session.user.walletAddress,
@@ -76,6 +88,7 @@ export const siweConfig = createSIWEConfig({
       });
 
       if (success?.ok) {
+        await syncAuthTokenFromSession();
         dispatchSessionChanged();
         return true;
       }
@@ -88,6 +101,7 @@ export const siweConfig = createSIWEConfig({
   signOut: async () => {
     try {
       await signOut({ redirect: false });
+      clearAuthToken();
       dispatchSessionChanged();
       return true;
     } catch (_error) {

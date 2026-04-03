@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -34,12 +34,8 @@ export function RestoreFromIPFSDialog(props: DialogProps) {
 
     setIsRestoring(true);
     try {
-      const response = await fetch(resolveApiUrl("/api/chat/restore"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ cid: cid.trim() }),
+      const response = await $http.post("/api/chat/restore", {
+        cid: cid.trim(),
       });
 
       const data = await response.json();

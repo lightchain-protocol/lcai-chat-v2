@@ -29,13 +29,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
+import { useSession } from "next-auth/react";
 
 const FILENAME_REGEX = /filename="(.+)"/;
 
@@ -55,6 +56,7 @@ function PureChatHeader({
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { open } = useSidebar();
+  const { status: sessionStatus } = useSession();
 
   const { width: windowWidth } = useWindowSize();
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -65,20 +67,15 @@ function PureChatHeader({
     backedUp: boolean;
     cid: string | null;
     encrypted: boolean;
-  }>(chatId ? `/api/chat/${chatId}/backup` : null, async (url: string) => {
-    const response = await fetch(resolveApiUrl(url), {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("user-token")}`,
-      },
-    });
+  }>(params.id && sessionStatus === "authenticated" ? `/api/chat/${chatId}/backup` : null, async (url: string) => {
+    const response = await $http.get(url);
     if (!response.ok) return null;
     return response.json();
   });
 
   const handleExportChat = async () => {
     try {
-      const response = await fetch(resolveApiUrl(`/api/chat/${chatId}/export`));
+      const response = await $http.get(`/api/chat/${chatId}/export`);
 
       if (!response.ok) {
         throw new Error("Failed to export chat");
@@ -113,16 +110,7 @@ function PureChatHeader({
 
   const handleBackup = () => {
     try {
-      const responsePromise = fetch(
-        resolveApiUrl(`/api/chat/${chatId}/backup`),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("user-token")}`,
-          },
-        }
-      );
+      const responsePromise = $http.post(`/api/chat/${chatId}/backup`);
 
       toast.promise(responsePromise, {
         loading: (

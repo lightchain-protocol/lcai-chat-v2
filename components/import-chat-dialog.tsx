@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -53,13 +53,7 @@ export function ImportChatDialog(props: DialogProps) {
       const data = JSON.parse(fileContent);
 
       // Send to import API
-      const response = await fetch(resolveApiUrl("/api/chat/import"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
+      const response = await $http.post("/api/chat/import", data);
 
       if (!response.ok) {
         const error = await response.json();

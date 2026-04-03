@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -42,12 +42,9 @@ export function SystemPromptEditor({
 
     setLoading(true);
     try {
-      const response = await fetch(resolveApiUrl("/api/prompts"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: name.trim(), prompt: prompt.trim() }),
+      const response = await $http.post("/api/prompts", {
+        name: name.trim(),
+        prompt: prompt.trim(),
       });
 
       if (!response.ok) {

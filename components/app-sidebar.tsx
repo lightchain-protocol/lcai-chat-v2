@@ -31,7 +31,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import useSubscription from "@/hooks/use-subscription";
-import { formatDate, resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
+import { formatDate } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,9 +63,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const { hasActiveSubscription, activeSubscription } = useSubscription();
 
   const handleDeleteAll = () => {
-    const deletePromise = fetch(resolveApiUrl("/api/history"), {
-      method: "DELETE",
-    });
+    const deletePromise = $http.delete("/api/history");
 
     toast.promise(deletePromise, {
       loading: (

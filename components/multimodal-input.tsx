@@ -24,9 +24,10 @@ import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
+import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { cn, resolveApiUrl } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   PromptInput,
   PromptInputModelSelect,
@@ -183,7 +184,7 @@ function PureMultimodalInput({
     formData.append("file", file);
 
     try {
-      const response = await fetch(resolveApiUrl("/api/files/upload"), {
+      const response = await $http.request("/api/files/upload", {
         method: "POST",
         body: formData,
       });

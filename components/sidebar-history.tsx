@@ -26,7 +26,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { Chat } from "@/lib/db/schema";
-import { fetcher, resolveApiUrl } from "@/lib/utils";
+import { $http } from "@/lib/http";
+import { fetcher } from "@/lib/utils";
 import { ChatItem } from "./sidebar-history-item";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -110,9 +111,13 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
     isValidating,
     isLoading,
     mutate,
-  } = useSWRInfinite<ChatHistory>(getChatHistoryPaginationKey, fetcher, {
-    fallbackData: [],
-  });
+  } = useSWRInfinite<ChatHistory>(
+    user ? getChatHistoryPaginationKey : () => null,
+    fetcher,
+    {
+      fallbackData: [],
+    }
+  );
 
   const router = useRouter();
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -140,9 +145,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
   };
 
   const handleDelete = () => {
-    const deletePromise = fetch(resolveApiUrl(`/api/chat?id=${deleteId}`), {
-      method: "DELETE",
-    });
+    const deletePromise = $http.delete(`/api/chat?id=${deleteId}`);
 
     toast.promise(deletePromise, {
       loading: (
