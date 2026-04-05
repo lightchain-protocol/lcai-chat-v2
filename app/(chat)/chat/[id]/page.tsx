@@ -5,8 +5,8 @@ import { auth } from "@/app/(auth)/auth";
 import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
-import { convertToUIMessages } from "@/lib/utils";
 import { $http } from "@/lib/http";
+import { convertToUIMessages } from "@/lib/utils";
 
 export default async function Page(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -19,6 +19,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
   }
 
   const chatResponse = await $http.get(`/api/chat/${id}`, {
+    bearerToken: session.user?.token,
     cache: "no-store",
   });
   if (!chatResponse.ok) {
@@ -43,12 +44,10 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     }
   }
 
-  const messagesResponse = await $http.get(
-    `/api/chat/${id}/messages`,
-    {
-      cache: "no-store",
-    }
-  );
+  const messagesResponse = await $http.get(`/api/chat/${id}/messages`, {
+    cache: "no-store",
+    bearerToken: session.user?.token,
+  });
   if (!messagesResponse.ok) {
     notFound();
   }

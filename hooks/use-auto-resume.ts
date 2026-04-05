@@ -2,6 +2,7 @@
 
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useEffect } from "react";
+import type { WalletClient } from "viem";
 import { useDataStream } from "@/components/data-stream-provider";
 import type { ChatMessage } from "@/lib/types";
 
@@ -10,6 +11,7 @@ export type UseAutoResumeParams = {
   initialMessages: ChatMessage[];
   resumeStream: UseChatHelpers<ChatMessage>["resumeStream"];
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
+  walletClient: WalletClient | undefined;
 };
 
 export function useAutoResume({
@@ -17,11 +19,16 @@ export function useAutoResume({
   initialMessages,
   resumeStream,
   setMessages,
+  walletClient,
 }: UseAutoResumeParams) {
   const { dataStream } = useDataStream();
 
   useEffect(() => {
     if (!autoResume) {
+      return;
+    }
+
+    if (!walletClient) {
       return;
     }
 
@@ -33,7 +40,7 @@ export function useAutoResume({
 
     // we intentionally run this once
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoResume, initialMessages.at, resumeStream]);
+  }, [autoResume, initialMessages.at, resumeStream, walletClient]);
 
   useEffect(() => {
     if (!dataStream) {

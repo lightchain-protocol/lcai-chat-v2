@@ -2,8 +2,8 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
@@ -16,14 +16,10 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
+import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import {
-  fetcher,
-  fetchWithErrorHandlers,
-  generateUUID,
-  resolveApiUrl,
-} from "@/lib/utils";
+import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
@@ -112,14 +108,10 @@ export function Chat({
       });
     }
     return new DefaultChatTransport({
-      api: resolveApiUrl("/api/chat"),
+      api: `${$http.baseUrl}/api/chat`,
       fetch: (url, init) =>
         fetchWithErrorHandlers(url, {
           ...init,
-          headers: {
-            ...init?.headers,
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
         }),
       prepareSendMessagesRequest(request) {
         return {
@@ -190,10 +182,17 @@ export function Chat({
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
-    onError: (error) => {
-      // biome-ignore lint/nursery/noShadow: this is a toast error
-      toast.custom((id) => (
-        <AlertError id={id} title={error.message || "Something went wrong"} />
+    onError: (error: any) => {
+      toast.custom((errorId) => (
+        <AlertError
+          id={errorId}
+          title={
+            error.walk?.()?.shortMessage ||
+            error.walk?.()?.message ||
+            error.message ||
+            "Something went wrong"
+          }
+        />
       ));
     },
   });
@@ -227,6 +226,7 @@ export function Chat({
     initialMessages,
     resumeStream,
     setMessages,
+    walletClient,
   });
 
   return (

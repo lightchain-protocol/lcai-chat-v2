@@ -11,6 +11,8 @@
  *   { type: "error", code, jobId, sessionId, droppedSeq, message, ts }
  */
 
+import { $http } from "../http";
+
 export type WSFrame = {
   type: "chunk" | "complete" | "error";
   jobId: number;
@@ -38,11 +40,6 @@ export type FrameCallback = (frame: WSFrame | WSErrorFrame) => void;
 
 export type RelayStatus = "disconnected" | "connecting" | "connected" | "error";
 
-type RelayPersistenceConfig = {
-  apiBaseUrl: string;
-  getAuthToken: () => string | null;
-};
-
 type PendingAssistantMessage = {
   chatId: string;
   messageId: string;
@@ -64,20 +61,14 @@ export class RelayClient {
   private reconnectAttempt = 0;
   private readonly relayUrl: string;
   private token: string;
-  private readonly persistence: RelayPersistenceConfig | null;
   private readonly pendingAssistantMessages = new Map<
     number,
     PendingAssistantMessage
   >();
 
-  constructor(
-    relayUrl: string,
-    token: string,
-    persistence?: RelayPersistenceConfig
-  ) {
+  constructor(relayUrl: string, token: string) {
     this.relayUrl = relayUrl;
     this.token = token;
-    this.persistence = persistence ?? null;
   }
 
   setOnStatusChange(cb: (status: RelayStatus) => void) {
@@ -195,33 +186,18 @@ export class RelayClient {
   async completeAssistantMessage(jobId: number) {
     const pending = this.pendingAssistantMessages.get(jobId);
     this.pendingAssistantMessages.delete(jobId);
-    if (!pending || !this.persistence) return;
+    if (!pending) return;
     if (!pending.text.trim()) return;
 
-    const token = this.persistence.getAuthToken();
-    if (!token) {
-      throw new Error("Missing auth token for assistant message persistence");
-    }
-
-    const response = await fetch(
-      `${this.persistence.apiBaseUrl}/api/chat/${pending.chatId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          id: pending.messageId,
-          role: "assistant",
-          parts: [{ type: "text", text: pending.text }],
-          attachments: [],
-          completionState: "completed",
-          relaySource: "websocket",
-          protocolMeta: pending.protocolMeta,
-        }),
-      }
-    );
+    const response = await $http.post(`/api/chat/${pending.chatId}/messages`, {
+      id: pending.messageId,
+      role: "assistant",
+      parts: [{ type: "text", text: pending.text }],
+      attachments: [],
+      completionState: "completed",
+      relaySource: "websocket",
+      protocolMeta: pending.protocolMeta,
+    });
 
     if (!response.ok) {
       throw new Error(

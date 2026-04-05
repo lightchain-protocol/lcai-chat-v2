@@ -100,8 +100,8 @@ export const siweConfig = createSIWEConfig({
   },
   signOut: async () => {
     try {
-      await signOut({ redirect: false });
       clearAuthToken();
+      await signOut({ redirectTo: "/" });
       dispatchSessionChanged();
       return true;
     } catch (_error) {

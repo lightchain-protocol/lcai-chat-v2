@@ -5,12 +5,11 @@ import type { WalletClient } from "viem";
 
 import config from "@/config";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
 import { ProtocolTransport } from "@/lib/protocol/transport";
-
-const TRAILING_SLASHES_REGEX = /\/+$/;
 
 /**
  * React hook that manages a LightChain protocol session.
@@ -99,6 +98,7 @@ export function useProtocolSession(
   const getTransport = useCallback(async () => {
     if (transportRef.current) return transportRef.current;
 
+    console.log("getTransport", walletClientRef.current);
     const client = walletClientRef.current;
     if (!client?.account) {
       throw new Error(
@@ -109,8 +109,6 @@ export function useProtocolSession(
     const gateway = getGateway();
     const hexModelId = await resolveModelId();
 
-    const gatewayBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL ?? "";
-    const apiBaseUrl = gatewayBaseUrl.replace(TRAILING_SLASHES_REGEX, "");
     const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
     const aiConfigAddress = config.aiConfigAddress[protocolChainId];
 
@@ -133,37 +131,21 @@ export function useProtocolSession(
       jobRegistryAddress,
       aiConfigAddress,
       persistence: {
-        apiBaseUrl,
-        getAuthToken: () =>
-          localStorage.getItem("user-token") ?? localStorage.getItem("token"),
         persistUserMessage: async ({
           chatId,
           message,
           selectedVisibilityType,
           systemPrompt,
         }) => {
-          const token =
-            localStorage.getItem("user-token") ?? localStorage.getItem("token");
-          if (!token) {
-            throw new Error("Missing auth token for protocol persistence");
-          }
-
-          const response = await fetch(`${apiBaseUrl}/api/chat/${chatId}/messages`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              id: message.id,
-              role: "user",
-              parts: message.parts ?? [],
-              attachments: [],
-              selectedVisibilityType,
-              systemPrompt,
-              completionState: "completed",
-              relaySource: "protocol-user",
-            }),
+          const response = await $http.post(`/api/chat/${chatId}/messages`, {
+            id: message.id,
+            role: "user",
+            parts: message.parts ?? [],
+            attachments: [],
+            selectedVisibilityType,
+            systemPrompt,
+            completionState: "completed",
+            relaySource: "protocol-user",
           });
 
           if (!response.ok) {
@@ -173,8 +155,7 @@ export function useProtocolSession(
           }
         },
       },
-      relayUrl:
-        process.env.NEXT_PUBLIC_RELAY_URL ?? apiBaseUrl,
+      relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);

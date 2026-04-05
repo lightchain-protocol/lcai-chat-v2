@@ -21,8 +21,6 @@ import { SessionManager } from "./session";
 
 type ProtocolTransportConfig = SessionManagerConfig & {
   persistence: {
-    apiBaseUrl: string;
-    getAuthToken: () => string | null;
     persistUserMessage: (args: {
       chatId: string;
       message: {
@@ -98,6 +96,10 @@ export class ProtocolTransport {
       throw new Error("Chat ID is required for protocol message persistence");
     }
 
+    // Submit job: encrypt → blob upload → on-chain TX via user's wallet
+    const { jobId } = await this.sessionMgr.submitJob(plaintext);
+
+    // We persist the user message after the job is submitted to ensure the job ID is available for the assistant message.
     await this.persistence.persistUserMessage({
       chatId,
       message: lastMessage,
@@ -111,9 +113,6 @@ export class ProtocolTransport {
           ? (options.body.systemPrompt as string | null)
           : undefined,
     });
-
-    // Submit job: encrypt → blob upload → on-chain TX via user's wallet
-    const { jobId } = await this.sessionMgr.submitJob(plaintext);
 
     // Create a streaming response from relay WebSocket frames
     const stream = this.createResponseStream(jobId, chatId, options.signal);
@@ -151,10 +150,7 @@ export class ProtocolTransport {
       this.relayClient = null;
     }
 
-    this.relayClient = new RelayClient(relayUrl, relayToken, {
-      apiBaseUrl: this.persistence.apiBaseUrl,
-      getAuthToken: this.persistence.getAuthToken,
-    });
+    this.relayClient = new RelayClient(relayUrl, relayToken);
     this.relayClient.connect();
   }
 

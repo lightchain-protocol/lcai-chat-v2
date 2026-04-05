@@ -1,12 +1,16 @@
-import { resolveApiUrl } from '@/lib/utils';
+import { auth as authSession } from "@/app/(auth)/auth";
 
-const AUTH_TOKEN_KEYS = ['user-token', 'token'] as const;
+const AUTH_TOKEN_KEYS = ["user-token"] as const;
 let authTokenCache: string | null = null;
+const apiBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL?.replace(
+  /\/+$/,
+  ""
+);
 
 export function setAuthToken(token: string): void {
   authTokenCache = token;
 
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -18,7 +22,7 @@ export function setAuthToken(token: string): void {
 export function clearAuthToken(): void {
   authTokenCache = null;
 
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -27,13 +31,14 @@ export function clearAuthToken(): void {
   }
 }
 
-function getAuthToken(): string | null {
+async function getAuthToken(): Promise<string | null> {
   if (authTokenCache) {
     return authTokenCache;
   }
 
-  if (typeof window === 'undefined') {
-    return null;
+  if (typeof window === "undefined") {
+    const session = await authSession();
+    return session?.user?.token ?? null;
   }
 
   for (const key of AUTH_TOKEN_KEYS) {
@@ -47,45 +52,57 @@ function getAuthToken(): string | null {
   return null;
 }
 
-interface RequestOptions extends Omit<RequestInit, 'headers'> {
+interface RequestOptions extends Omit<RequestInit, "headers"> {
   headers?: HeadersInit;
   auth?: boolean;
+  bearerToken?: string;
 }
 
-interface JsonRequestOptions extends Omit<RequestOptions, 'body'> {}
+interface JsonRequestOptions extends Omit<RequestOptions, "body"> {}
 
-function buildHeaders(headers?: HeadersInit, auth = true): Headers {
+async function buildHeaders(
+  headers?: HeadersInit,
+  auth = true,
+  bearerToken?: string
+): Promise<Headers> {
   const resolvedHeaders = new Headers(headers);
 
-  if (auth && !resolvedHeaders.has('Authorization')) {
-    const token = getAuthToken();
+  if (auth && !resolvedHeaders.has("Authorization")) {
+    const token = bearerToken ?? (await getAuthToken());
     if (token) {
-      resolvedHeaders.set('Authorization', `Bearer ${token}`);
+      resolvedHeaders.set("Authorization", `Bearer ${token}`);
     }
   }
 
   return resolvedHeaders;
 }
 
-export function request(path: string, options: RequestOptions = {}): Promise<Response> {
+export async function request(
+  path: string | URL | Request,
+  options: RequestOptions = {}
+): Promise<Response> {
   const { auth = true, headers, ...rest } = options;
 
-  return fetch(resolveApiUrl(path), {
+  return fetch(`${apiBaseUrl}${path}`, {
     ...rest,
-    headers: buildHeaders(headers, auth),
+    headers: await buildHeaders(headers, auth),
   });
 }
 
-function jsonRequest(
-  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+async function jsonRequest(
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {},
+  options: JsonRequestOptions = {}
 ): Promise<Response> {
-  const headers = buildHeaders(options.headers, options.auth ?? true);
+  const headers = await buildHeaders(
+    options.headers,
+    options.auth ?? true,
+    options.bearerToken
+  );
 
-  if (body !== undefined && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
+  if (body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
 
   return request(path, {
@@ -96,27 +113,47 @@ function jsonRequest(
   });
 }
 
-export function getRequest(path: string, options: RequestOptions = {}): Promise<Response> {
-  return request(path, { ...options, method: 'GET' });
+export function getRequest(
+  path: string,
+  options: RequestOptions = {}
+): Promise<Response> {
+  return request(path, { ...options, method: "GET" });
 }
 
-export function postRequest(path: string, body?: unknown, options: JsonRequestOptions = {}): Promise<Response> {
-  return jsonRequest('POST', path, body, options);
+export function postRequest(
+  path: string,
+  body?: unknown,
+  options: JsonRequestOptions = {}
+): Promise<Response> {
+  return jsonRequest("POST", path, body, options);
 }
 
-export function putRequest(path: string, body?: unknown, options: JsonRequestOptions = {}): Promise<Response> {
-  return jsonRequest('PUT', path, body, options);
+export function putRequest(
+  path: string,
+  body?: unknown,
+  options: JsonRequestOptions = {}
+): Promise<Response> {
+  return jsonRequest("PUT", path, body, options);
 }
 
-export function patchRequest(path: string, body?: unknown, options: JsonRequestOptions = {}): Promise<Response> {
-  return jsonRequest('PATCH', path, body, options);
+export function patchRequest(
+  path: string,
+  body?: unknown,
+  options: JsonRequestOptions = {}
+): Promise<Response> {
+  return jsonRequest("PATCH", path, body, options);
 }
 
-export function deleteRequest(path: string, body?: unknown, options: JsonRequestOptions = {}): Promise<Response> {
-  return jsonRequest('DELETE', path, body, options);
+export function deleteRequest(
+  path: string,
+  body?: unknown,
+  options: JsonRequestOptions = {}
+): Promise<Response> {
+  return jsonRequest("DELETE", path, body, options);
 }
 
 export const $http = {
+  baseUrl: apiBaseUrl,
   request,
   get: getRequest,
   post: postRequest,

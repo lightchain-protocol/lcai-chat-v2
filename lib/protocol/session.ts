@@ -229,29 +229,37 @@ export class SessionManager {
       args: [this.modelIdBytes32 ?? padHexTo32Bytes(this.modelId), dataLength],
     });
 
-    // 4. Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
-    // (TSTORE reset) is underestimated by the default gas estimator on Anvil,
-    // causing a ReentrancySentryOOG revert despite the main logic completing.
-    const gasEstimate = await this.publicClient.estimateContractGas({
-      account,
-      address: this.jobRegistryAddress,
-      abi: jobRegistryAbi,
-      functionName: "submitJob",
-      args: [BigInt(this.state.sessionId), blobHashes, dataLength],
-      value: fee,
+    // 4. Check if the user has enough balance
+    const balance = await this.publicClient.getBalance({
+      address: account.address,
     });
 
-    // 5. Submit job on-chain as a regular type-2 TX
-    const hash = await this.walletClient.writeContract({
+    if (balance < fee) {
+      throw new Error("Insufficient balance");
+    }
+
+    const callParams = {
       account,
-      chain: this.walletClient.chain,
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "submitJob",
       args: [BigInt(this.state.sessionId), blobHashes, dataLength],
       value: fee,
+    } as const;
+
+    // 5. Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
+    // (TSTORE reset) is underestimated by the default gas estimator on Anvil,
+    // causing a ReentrancySentryOOG revert despite the main logic completing.
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+
+    // 6. Simulate the transaction
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
       gas: (gasEstimate * 120n) / 100n,
     });
+
+    // 7. Submit job on-chain as a regular type-2 TX
+    const hash = await this.walletClient.writeContract(request);
 
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
@@ -329,24 +337,16 @@ export class SessionManager {
       ? toHex(base64ToUint8(keyExchange.encDisputerKey))
       : ("0x" as `0x${string}`);
 
-    const gasEstimate = await this.publicClient.estimateContractGas({
-      account,
-      address: this.jobRegistryAddress,
-      abi: jobRegistryAbi,
-      functionName: "createSession",
-      args: [
-        modelIdBytes32,
-        prepared.worker as `0x${string}`,
-        encWorkerKeyHex,
-        encDisputerKeyHex,
-        prepared.signature as `0x${string}`,
-        BigInt(prepared.expiry),
-      ],
+    const balance = await this.publicClient.getBalance({
+      address: account.address,
     });
 
-    const hash = await this.walletClient.writeContract({
+    if (balance === 0n) {
+      throw new Error("Wallet has no balance");
+    }
+
+    const callParams = {
       account,
-      chain: this.walletClient.chain,
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "createSession",
@@ -358,8 +358,16 @@ export class SessionManager {
         prepared.signature as `0x${string}`,
         BigInt(prepared.expiry),
       ],
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
       gas: (gasEstimate * 120n) / 100n,
     });
+
+    const hash = await this.walletClient.writeContract(request);
 
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
