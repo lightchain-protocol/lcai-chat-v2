@@ -67,6 +67,16 @@ export const siweConfig = createSIWEConfig({
   getSession: async () => {
     const session = await getSession();
     if (!session?.user?.id) {
+      clearAuthToken();
+      return null;
+    }
+
+    // verify if token is valid
+    const response = await $http.get("/api/auth/session");
+
+    const data = await response.json();
+    if (!data.user) {
+      clearAuthToken();
       return null;
     }
 

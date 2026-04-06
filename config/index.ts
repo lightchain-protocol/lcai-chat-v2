@@ -1,7 +1,7 @@
 import { type Chain, mainnet } from "viem/chains";
 
 export const lcaiDevnet: Chain = {
-  id: 31337,
+  id: 31_337,
   name: "LCAI Devnet",
   nativeCurrency: {
     name: "LCAI",
@@ -10,7 +10,7 @@ export const lcaiDevnet: Chain = {
   },
   rpcUrls: {
     default: {
-      http: ["https://lightchain-devnet-rpc-proxy-698792729874.us-central1.run.app", "http://localhost:8545"],
+      http: ["https://rpc.devnet.lightchain.ai", "http://localhost:8545"],
       // http: ["http://localhost:8545"],
     },
   },
@@ -61,11 +61,13 @@ const config = {
 
   // Transitional: contract addresses from env vars until GET /api/system/config exists
   jobRegistryAddress: {
-    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_JOB_REGISTRY_ADDRESS ?? "0x") as `0x${string}`,
+    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_JOB_REGISTRY_ADDRESS ??
+      "0x") as `0x${string}`,
   } as Record<number, `0x${string}`>,
 
   aiConfigAddress: {
-    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_AI_CONFIG_ADDRESS ?? "0x") as `0x${string}`,
+    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_AI_CONFIG_ADDRESS ??
+      "0x") as `0x${string}`,
   } as Record<number, `0x${string}`>,
 
   lcaiToken: {
