@@ -45,14 +45,13 @@ export type ProtocolSession = {
 export type SessionManagerConfig = {
   gateway: GatewayClient;
   modelId: string;
+  sessionStorageKey?: string;
   walletClient: WalletClient;
   publicClient: PublicClient;
   jobRegistryAddress: `0x${string}`;
   aiConfigAddress: `0x${string}`;
   relayUrl: string;
 };
-
-const SESSION_STORAGE_KEY = "lc-protocol-session";
 
 /**
  * SessionManager handles the full session creation flow:
@@ -83,6 +82,7 @@ export class SessionManager {
   private readonly jobRegistryAddress: `0x${string}`;
   private readonly aiConfigAddress: `0x${string}`;
   private readonly relayUrl: string;
+  private readonly sessionStorageKey: string;
 
   constructor(config: SessionManagerConfig) {
     this.gateway = config.gateway;
@@ -92,6 +92,7 @@ export class SessionManager {
     this.jobRegistryAddress = config.jobRegistryAddress;
     this.aiConfigAddress = config.aiConfigAddress;
     this.relayUrl = config.relayUrl;
+    this.sessionStorageKey = config.sessionStorageKey ?? "lc-protocol-session";
     this.tryRestore();
   }
 
@@ -128,6 +129,18 @@ export class SessionManager {
     }
     if (this.state.status !== "idle" && this.state.status !== "error") {
       return; // Already in progress
+    }
+
+    // Check if the wallet has enough balance before preparing the session to avoid misleading errors
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const balance = await this.publicClient.getBalance({
+      address: account.address,
+    });
+
+    if (balance === 0n) {
+      throw new Error("Wallet has no balance");
     }
 
     try {
@@ -318,7 +331,7 @@ export class SessionManager {
     };
     this.onStatusChange?.("idle");
     try {
-      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      sessionStorage.removeItem(this.sessionStorageKey);
     } catch {
       // sessionStorage unavailable (SSR)
     }
@@ -330,20 +343,11 @@ export class SessionManager {
     keyExchange: { encWorkerKey: string; encDisputerKey: string }
   ): Promise<number> {
     const account = this.walletClient.account;
-    if (!account) throw new Error("Wallet account not available");
 
     const encWorkerKeyHex = toHex(base64ToUint8(keyExchange.encWorkerKey));
     const encDisputerKeyHex = keyExchange.encDisputerKey
       ? toHex(base64ToUint8(keyExchange.encDisputerKey))
       : ("0x" as `0x${string}`);
-
-    const balance = await this.publicClient.getBalance({
-      address: account.address,
-    });
-
-    if (balance === 0n) {
-      throw new Error("Wallet has no balance");
-    }
 
     const callParams = {
       account,
@@ -439,7 +443,7 @@ export class SessionManager {
         modelId: this.modelId,
         sessionKey: this.sessionKey ? uint8ToBase64(this.sessionKey) : null,
       };
-      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
+      sessionStorage.setItem(this.sessionStorageKey, JSON.stringify(data));
     } catch {
       // sessionStorage unavailable (SSR)
     }
@@ -472,7 +476,7 @@ export class SessionManager {
 
   private tryRestore() {
     try {
-      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      const raw = sessionStorage.getItem(this.sessionStorageKey);
       if (!raw) return;
 
       const data = JSON.parse(raw);

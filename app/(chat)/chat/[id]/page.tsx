@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 
 import { auth } from "@/app/(auth)/auth";
 import { Chat } from "@/components/chat";
@@ -23,24 +23,24 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     cache: "no-store",
   });
   if (!chatResponse.ok) {
-    redirect('/');
+    redirect("/");
   }
   const chat = await chatResponse.json();
 
   if (!chat) {
-    redirect('/');
+    redirect("/");
   }
 
   if (chat.visibility === "private") {
     if (!session.user) {
-      return redirect('/');
+      return redirect("/");
     }
 
     if (
       (session.user.walletAddress ?? "").toLowerCase() !==
       (chat.owner ?? "").toLowerCase()
     ) {
-      return redirect('/');
+      return redirect("/");
     }
   }
 
@@ -49,7 +49,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     bearerToken: session.user?.token,
   });
   if (!messagesResponse.ok) {
-    redirect('/');
+    redirect("/");
   }
   const messages = await messagesResponse.json();
 

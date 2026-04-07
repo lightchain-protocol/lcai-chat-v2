@@ -23,7 +23,8 @@ import { ProtocolTransport } from "@/lib/protocol/transport";
 export function useProtocolSession(
   modelId: string,
   walletClient: WalletClient | undefined,
-  address: string | undefined
+  address: string | undefined,
+  chatId: string
 ) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -125,18 +126,21 @@ export function useProtocolSession(
     const transport = new ProtocolTransport({
       gateway,
       modelId: hexModelId,
+      sessionStorageKey: `lc-protocol-session:${chatId}`,
       walletClient: client,
       publicClient,
       jobRegistryAddress,
       aiConfigAddress,
       persistence: {
         persistUserMessage: async ({
-          chatId,
+          chatId: messageChatId,
           message,
           selectedVisibilityType,
           systemPrompt,
         }) => {
-          const response = await $http.post(`/api/chat/${chatId}/messages`, {
+          const response = await $http.post(
+            `/api/chat/${messageChatId}/messages`,
+            {
             id: message.id,
             role: "user",
             parts: message.parts ?? [],
@@ -145,7 +149,8 @@ export function useProtocolSession(
             systemPrompt,
             completionState: "completed",
             relaySource: "protocol-user",
-          });
+            }
+          );
 
           if (!response.ok) {
             throw new Error(
@@ -166,7 +171,7 @@ export function useProtocolSession(
     });
     transportRef.current = transport;
     return transport;
-  }, [getGateway, resolveModelId, protocolChainId, publicClient]);
+  }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -200,6 +205,11 @@ export function useProtocolSession(
 
     lastWalletAddressRef.current = walletAddress;
   }, [reset, walletAddress]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    reset();
+  }, [chatId, reset]);
 
   return {
     status,

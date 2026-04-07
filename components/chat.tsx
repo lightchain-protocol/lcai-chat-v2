@@ -59,7 +59,7 @@ export function Chat({
   const { status: sessionStatus } = useSession();
 
   const [input, setInput] = useState<string>("");
-  const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
+  const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
 
@@ -78,7 +78,8 @@ export function Chat({
   const { getTransport: getProtocolTransport } = useProtocolSession(
     currentModelId,
     walletClient,
-    address
+    address,
+    id
   );
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
@@ -94,6 +95,7 @@ export function Chat({
           const body = JSON.parse((init?.body as string) ?? "{}");
           const protocolBody = {
             ...body,
+            id,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
           };
@@ -127,7 +129,7 @@ export function Chat({
         };
       },
     });
-  }, [visibilityType, getProtocolTransport]);
+  }, [id, visibilityType, getProtocolTransport]);
 
   // Fetch prompt templates to match initial prompt
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
@@ -175,9 +177,9 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
-      if (dataPart.type === "data-usage") {
-        setUsage(dataPart.data);
-      }
+      // if (dataPart.type === "data-usage") {
+      //   setUsage(dataPart.data);
+      // }
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
