@@ -23,24 +23,24 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     cache: "no-store",
   });
   if (!chatResponse.ok) {
-    notFound();
+    redirect('/');
   }
   const chat = await chatResponse.json();
 
   if (!chat) {
-    notFound();
+    redirect('/');
   }
 
   if (chat.visibility === "private") {
     if (!session.user) {
-      return notFound();
+      return redirect('/');
     }
 
     if (
       (session.user.walletAddress ?? "").toLowerCase() !==
       (chat.owner ?? "").toLowerCase()
     ) {
-      return notFound();
+      return redirect('/');
     }
   }
 
@@ -49,7 +49,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     bearerToken: session.user?.token,
   });
   if (!messagesResponse.ok) {
-    notFound();
+    redirect('/');
   }
   const messages = await messagesResponse.json();
 
