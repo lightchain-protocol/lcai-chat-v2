@@ -143,6 +143,10 @@ function PureMultimodalInput({
   const submitForm = useCallback(() => {
     window.history.replaceState({}, "", `/chat/${chatId}`);
 
+    if (status === "error") {
+      setMessages((messages) => messages.slice(0, -1)); // remove last message if error
+    }
+
     sendMessage({
       role: "user",
       parts: [
@@ -273,7 +277,7 @@ function PureMultimodalInput({
         className="border border-bdr-light p-3 transition-all duration-200 sm:p-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (status !== "ready") {
+          if (status === "submitted") {
             toast.custom((id) => (
               <AlertError
                 id={id}
