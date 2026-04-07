@@ -53,7 +53,7 @@ const customMainnet: Chain = {
 };
 
 const config = {
-  chains: [lcaiDevnet, customMainnet] as [Chain, ...Chain[]],
+  chains: [lcaiDevnet] as [Chain, ...Chain[]],
   subscriptionContractAddress: {
     // [lcaiTestnet.id]: "0x0670662b75f92D14A645545bf3B0eDdfd5E299bd",
     [mainnet.id]: "0x535AE6B51742df53c1d5C4Ae6496cAd935615E3b",

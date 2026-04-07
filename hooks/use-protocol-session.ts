@@ -98,7 +98,6 @@ export function useProtocolSession(
   const getTransport = useCallback(async () => {
     if (transportRef.current) return transportRef.current;
 
-    console.log("getTransport", walletClientRef.current);
     const client = walletClientRef.current;
     if (!client?.account) {
       throw new Error(

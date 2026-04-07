@@ -208,9 +208,9 @@ function PureMultimodalInput({
     }
   }, []);
 
-  const _modelResolver = useMemo(() => {
-    return myProvider.languageModel(selectedModelId);
-  }, [selectedModelId]);
+  // const _modelResolver = useMemo(() => {
+  //   return myProvider.languageModel(selectedModelId);
+  // }, [selectedModelId]);
 
   // const contextProps = useMemo(
   //   () => ({
@@ -350,14 +350,14 @@ function PureMultimodalInput({
               selectedModelId={selectedModelId}
               status={status}
             /> */}
-            <div className="flex items-center gap-2 px-1 py-1">
+            {/* <div className="flex items-center gap-2 px-1 py-1">
               <Switch
                 checked={enableWebSearch ?? false}
                 className="rounded-full!"
                 onCheckedChange={onWebSearchToggle}
               />
               <span className="text-content-secondary text-sm">Web Search</span>
-            </div>
+            </div> */}
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
