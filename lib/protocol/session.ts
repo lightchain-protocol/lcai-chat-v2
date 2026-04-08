@@ -96,6 +96,11 @@ export class SessionManager {
     this.tryRestore();
   }
 
+  /** Gateway hex model id (same id used in sessionStorage snapshot). */
+  get resolvedModelId(): string {
+    return this.modelId;
+  }
+
   get status(): SessionStatus {
     return this.state.status;
   }
@@ -123,7 +128,9 @@ export class SessionManager {
   async initialize(): Promise<void> {
     if (this.state.status === "ready") {
       const valid = await this.validateRestoredSession();
-      if (valid) return;
+      if (valid) {
+        return;
+      }
       // Stale session — reset and fall through to create a new one
       this.reset();
     }
@@ -251,6 +258,12 @@ export class SessionManager {
       throw new Error("Insufficient balance");
     }
 
+    console.log("----------------------------------------");
+    console.log("Prompt", plaintext);
+    console.log("Session ID", this.state.sessionId);
+    console.log("Model ID", this.modelId);
+    console.log("----------------------------------------");
+
     const callParams = {
       account,
       address: this.jobRegistryAddress,
@@ -317,9 +330,11 @@ export class SessionManager {
   }
 
   /**
-   * Resets the session to idle state.
+   * Clears in-memory session material and notifies idle.
+   * Does not remove the persisted snapshot in sessionStorage — use when
+   * tearing down the transport so returning to this chat can tryRestore().
    */
-  reset() {
+  release() {
     this.sessionKey = null;
     this.modelIdBytes32 = null;
     this.state = {
@@ -330,6 +345,13 @@ export class SessionManager {
       error: null,
     };
     this.onStatusChange?.("idle");
+  }
+
+  /**
+   * Resets the session and removes the persisted tab snapshot (wallet change).
+   */
+  reset() {
+    this.release();
     try {
       sessionStorage.removeItem(this.sessionStorageKey);
     } catch {

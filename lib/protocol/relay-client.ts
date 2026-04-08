@@ -191,9 +191,11 @@ export class RelayClient {
 
     const response = await $http.post(`/api/chat/${pending.chatId}/messages`, {
       id: pending.messageId,
+      sessionId: pending.protocolMeta?.sessionId ?? null,
       role: "assistant",
       parts: [{ type: "text", text: pending.text }],
       attachments: [],
+      jobId,
       completionState: "completed",
       relaySource: "websocket",
       protocolMeta: pending.protocolMeta,

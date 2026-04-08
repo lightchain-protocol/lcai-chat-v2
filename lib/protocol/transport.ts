@@ -23,6 +23,7 @@ type ProtocolTransportConfig = SessionManagerConfig & {
   persistence: {
     persistUserMessage: (args: {
       chatId: string;
+      sessionId: number | null;
       message: {
         id?: string;
         role: string;
@@ -32,6 +33,12 @@ type ProtocolTransportConfig = SessionManagerConfig & {
       systemPrompt?: string | null;
     }) => Promise<void>;
   };
+  /** Called after the user message is stored so the chat row exists in the API. */
+  registerProtocolSession?: (args: {
+    chatId: string;
+    sessionId: number;
+    modelId: string;
+  }) => Promise<void>;
 };
 
 /**
@@ -45,10 +52,15 @@ export class ProtocolTransport {
   private readonly sessionMgr: SessionManager;
   private relayClient: RelayClient | null = null;
   private readonly persistence: ProtocolTransportConfig["persistence"];
+  private readonly registerProtocolSession?: ProtocolTransportConfig["registerProtocolSession"];
+  /** Dedupes Consumer API PUTs for the same on-chain session id. */
+  private lastRegisteredApiSessionId: number | null = null;
 
   constructor(config: ProtocolTransportConfig) {
-    this.sessionMgr = new SessionManager(config);
-    this.persistence = config.persistence;
+    const { persistence, registerProtocolSession, ...sessionConfig } = config;
+    this.sessionMgr = new SessionManager(sessionConfig);
+    this.persistence = persistence;
+    this.registerProtocolSession = registerProtocolSession;
   }
 
   setOnSessionStatus(cb: (status: string) => void) {
@@ -102,6 +114,7 @@ export class ProtocolTransport {
     // We persist the user message after the job is submitted to ensure the job ID is available for the assistant message.
     await this.persistence.persistUserMessage({
       chatId,
+      sessionId: this.sessionMgr.sessionId,
       message: lastMessage,
       selectedVisibilityType:
         typeof options.body?.selectedVisibilityType === "string"
@@ -114,6 +127,8 @@ export class ProtocolTransport {
           : undefined,
     });
 
+    await this.registerProtocolSessionWithServerIfNeeded(chatId);
+
     // Create a streaming response from relay WebSocket frames
     const stream = this.createResponseStream(jobId, chatId, options.signal);
 
@@ -125,12 +140,39 @@ export class ProtocolTransport {
   }
 
   /**
-   * Disconnects relay and resets session.
+   * Disconnects relay and clears in-memory session state without removing
+   * sessionStorage — use when switching chats or unmounting the composer.
+   */
+  release() {
+    this.relayClient?.disconnect();
+    this.relayClient = null;
+    this.lastRegisteredApiSessionId = null;
+    this.sessionMgr.release();
+  }
+
+  /**
+   * Disconnects relay and clears persisted protocol state (wallet disconnect).
    */
   destroy() {
     this.relayClient?.disconnect();
     this.relayClient = null;
+    this.lastRegisteredApiSessionId = null;
     this.sessionMgr.reset();
+  }
+
+  private async registerProtocolSessionWithServerIfNeeded(
+    chatId: string
+  ): Promise<void> {
+    if (!this.registerProtocolSession) return;
+    const sessionId = this.sessionMgr.sessionId;
+    if (sessionId === null) return;
+    if (this.lastRegisteredApiSessionId === sessionId) return;
+    await this.registerProtocolSession({
+      chatId,
+      sessionId,
+      modelId: this.sessionMgr.resolvedModelId,
+    });
+    this.lastRegisteredApiSessionId = sessionId;
   }
 
   private ensureRelayConnected() {

@@ -131,24 +131,45 @@ export function useProtocolSession(
       publicClient,
       jobRegistryAddress,
       aiConfigAddress,
+      relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
+      registerProtocolSession: async ({
+        chatId: targetChatId,
+        sessionId,
+        modelId: modelIdHex,
+      }) => {
+        const response = await $http.put(
+          `/api/chat/${targetChatId}/protocol-session`,
+          {
+            sessionId,
+            modelId: modelIdHex,
+          }
+        );
+        if (!response.ok) {
+          throw new Error(
+            `Failed to register protocol session: ${response.status} ${response.statusText}`
+          );
+        }
+      },
       persistence: {
         persistUserMessage: async ({
           chatId: messageChatId,
           message,
           selectedVisibilityType,
           systemPrompt,
+          sessionId,
         }) => {
           const response = await $http.post(
             `/api/chat/${messageChatId}/messages`,
             {
-            id: message.id,
-            role: "user",
-            parts: message.parts ?? [],
-            attachments: [],
-            selectedVisibilityType,
-            systemPrompt,
-            completionState: "completed",
-            relaySource: "protocol-user",
+              id: message.id,
+              sessionId,
+              role: "user",
+              parts: message.parts ?? [],
+              attachments: [],
+              selectedVisibilityType,
+              systemPrompt,
+              completionState: "completed",
+              relaySource: "protocol-user",
             }
           );
 
@@ -159,7 +180,6 @@ export function useProtocolSession(
           }
         },
       },
-      relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);
@@ -173,15 +193,18 @@ export function useProtocolSession(
     return transport;
   }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      transportRef.current?.destroy();
-      transportRef.current = null;
-    };
+  /** Drop relay + in-memory state; keep sessionStorage for this chat. */
+  const releaseTransport = useCallback(() => {
+    transportRef.current?.release();
+    transportRef.current = null;
+    gatewayRef.current = null;
+    resolvedModelIdRef.current = null;
+    setStatus("idle");
+    setError(null);
   }, []);
 
-  const reset = useCallback(() => {
+  /** Full teardown including persisted tab session (wallet change / disconnect). */
+  const resetForWallet = useCallback(() => {
     transportRef.current?.destroy();
     transportRef.current = null;
     gatewayRef.current = null;
@@ -190,31 +213,39 @@ export function useProtocolSession(
     setError(null);
   }, []);
 
+  // Cleanup on unmount — preserve per-chat sessionStorage so revisiting the chat restores the session
+  useEffect(() => {
+    return () => {
+      transportRef.current?.release();
+      transportRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     if (
       lastWalletAddressRef.current &&
       walletAddress &&
       lastWalletAddressRef.current !== walletAddress
     ) {
-      reset();
+      resetForWallet();
     }
 
     if (lastWalletAddressRef.current && !walletAddress) {
-      reset();
+      resetForWallet();
     }
 
     lastWalletAddressRef.current = walletAddress;
-  }, [reset, walletAddress]);
+  }, [resetForWallet, walletAddress]);
 
   useEffect(() => {
     if (!chatId) return;
-    reset();
-  }, [chatId, reset]);
+    releaseTransport();
+  }, [chatId, releaseTransport]);
 
   return {
     status,
     error,
     getTransport,
-    reset,
+    reset: resetForWallet,
   };
 }
