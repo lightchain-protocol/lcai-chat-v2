@@ -4,6 +4,7 @@ import { ChevronsUpDown, LogOut } from "lucide-react";
 import Image from "next/image";
 import type { User } from "next-auth";
 import { signOut, useSession } from "next-auth/react";
+import { toast } from "sonner";
 import { useDisconnect } from "wagmi";
 import {
   DropdownMenu,
@@ -11,12 +12,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-} from "@/components/ui/sidebar";
+import { SidebarMenu, SidebarMenuButton } from "@/components/ui/sidebar";
 import { LoaderIcon } from "./icons";
-import { toast } from 'sonner'
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -24,9 +21,11 @@ export function SidebarUserNav({ user }: { user: User }) {
   const { status } = useSession();
   const { disconnectAsync } = useDisconnect();
 
-  const formattedUsername = user.username
-    ? `${user.username.slice(0, 6)}...${user.username.slice(-4)}`
-    : "Guest";
+  const displayIdentity = user.walletAddress ?? user.username ?? "Guest";
+  const formattedIdentity =
+    displayIdentity.length > 12
+      ? `${displayIdentity.slice(0, 6)}...${displayIdentity.slice(-4)}`
+      : displayIdentity;
 
   const handleSignOut = async () => {
     try {
@@ -41,14 +40,14 @@ export function SidebarUserNav({ user }: { user: User }) {
       // Show success message
 
       toast.custom((id) => (
-      <AlertSuccess id={id} title='Successfully signed out!' />
+        <AlertSuccess id={id} title="Successfully signed out!" />
       ));
 
       // Refresh page to show greeting/connect button
       window.location.reload();
     } catch (_error) {
       toast.custom((id) => (
-      <AlertError id={id} title='Failed to sign out. Please try again.' />
+        <AlertError id={id} title="Failed to sign out. Please try again." />
       ));
     }
   };
@@ -76,14 +75,14 @@ export function SidebarUserNav({ user }: { user: User }) {
                 data-testid="user-nav-button"
               >
                 <Image
-                  alt={formattedUsername ?? "User Avatar"}
+                  alt={formattedIdentity ?? "User Avatar"}
                   className="rounded-full"
                   height={24}
-                  src={`https://avatar.vercel.sh/${user.username}`}
+                  src={`https://avatar.vercel.sh/${displayIdentity}`}
                   width={24}
                 />
                 <span className="truncate" data-testid="user-username">
-                  {formattedUsername}
+                  {formattedIdentity}
                 </span>
                 <ChevronsUpDown className="ml-auto" />
               </SidebarMenuButton>

@@ -14,6 +14,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { formatEther } from "viem";
 import { ChatSearch } from "@/components/chat-search";
 import { MoreHorizontalIcon } from "@/components/icons";
 import { ImportChatDialog } from "@/components/import-chat-dialog";
@@ -30,8 +31,10 @@ import {
   SidebarMenu,
   useSidebar,
 } from "@/components/ui/sidebar";
+import config from "@/config";
+import useCurrentChain from "@/hooks/use-current-chain";
 import useSubscription from "@/hooks/use-subscription";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatNumber } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,10 +59,13 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
   const { setOpenMobile } = useSidebar();
   const { mutate } = useSWRConfig();
+  const chain = useCurrentChain();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
-  const { hasActiveSubscription, activeSubscription } = useSubscription();
+  const { hasActiveSubscription, activeSubscription, lcaiBalance } =
+    useSubscription();
+  const tokenSymbol = config.lcaiToken[chain.id]?.symbol ?? "LCAI";
 
   const handleDeleteAll = () => {
     const deletePromise = fetch("/api/history", {
@@ -187,6 +193,17 @@ export function AppSidebar({ user }: { user: User | undefined }) {
 
         {user && (
           <div className="flex flex-col gap-2 border-bdr-light border-t px-4 py-4">
+            <div
+              className="px-2 text-content-soft text-sm"
+              data-testid="wallet-balance"
+            >
+              Wallet Balance :{" "}
+              {lcaiBalance.isLoading
+                ? "Loading..."
+                : lcaiBalance.isError
+                  ? "Unavailable"
+                  : `${formatNumber(+formatEther(lcaiBalance.data ?? 0n))} ${tokenSymbol}`}
+            </div>
             {user &&
               !hasActiveSubscription.isLoading &&
               hasActiveSubscription.data && (
