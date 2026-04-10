@@ -120,3 +120,11 @@ export function formatNumber(number?: string | number) {
   if (!number) return "0";
   return Number(number).toLocaleString();
 }
+
+export function compactNumber(number?: string | number) {
+  if (!number) return "0";
+  return Number(number).toLocaleString("en-US", {
+    maximumFractionDigits: 2,
+    notation: "compact",
+  });
+}

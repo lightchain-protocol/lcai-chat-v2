@@ -53,8 +53,7 @@ export const {
             return null;
           }
 
-          const consumerApiBaseUrl =
-            process.env.NEXT_PUBLIC_CONSUMER_API_URL;
+          const consumerApiBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL;
           if (!consumerApiBaseUrl) {
             console.error("Consumer API URL is not configured");
             return null;
@@ -119,7 +118,7 @@ export const {
       if (session.user) {
         session.user.id = token.id;
         session.user.walletAddress = token.walletAddress;
-        session.user.username = token.username;
+        session.user.username = token.username || token.walletAddress;
         session.user.type = token.type;
         session.user.token = token.token;
       }
