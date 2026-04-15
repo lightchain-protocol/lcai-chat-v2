@@ -130,6 +130,7 @@ export default function useSubscription() {
 
   return {
     contract,
+    lcaiBalance,
     subscribe,
     hasActiveSubscription,
     activeSubscription,
