@@ -40,6 +40,20 @@ export type FrameCallback = (frame: WSFrame | WSErrorFrame) => void;
 
 export type RelayStatus = "disconnected" | "connecting" | "connected" | "error";
 
+export type LifecycleEvent = {
+  type: "reassignment_required" | "reassigned" | "closed";
+  sessionId: number;
+  reason?: string;
+  newWorker?: string;
+  ts: number;
+};
+
+const LIFECYCLE_TYPES = new Set([
+  "reassignment_required",
+  "reassigned",
+  "closed",
+]);
+
 type PendingAssistantMessage = {
   chatId: string;
   messageId: string;
@@ -54,6 +68,8 @@ type PendingAssistantMessage = {
 export class RelayClient {
   private ws: WebSocket | null = null;
   private readonly jobCallbacks = new Map<number, FrameCallback>();
+  private lifecycleCallback?: (event: LifecycleEvent) => void;
+  private reconnectCallback?: () => void;
   private status: RelayStatus = "disconnected";
   private onStatusChange?: (status: RelayStatus) => void;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,8 +122,12 @@ export class RelayClient {
     const ws = new WebSocket(url.toString());
 
     ws.onopen = () => {
+      const wasReconnect = this.reconnectAttempt > 0;
       this.reconnectAttempt = 0;
       this.setStatus("connected");
+      if (wasReconnect) {
+        this.reconnectCallback?.();
+      }
     };
 
     ws.onmessage = (event) => {
@@ -141,6 +161,26 @@ export class RelayClient {
     return () => {
       this.jobCallbacks.delete(jobId);
     };
+  }
+
+  /**
+   * Registers a callback for session lifecycle events
+   * (reassignment_required, reassigned, closed).
+   * Returns an unsubscribe function.
+   */
+  onLifecycle(callback: (event: LifecycleEvent) => void): () => void {
+    this.lifecycleCallback = callback;
+    return () => {
+      this.lifecycleCallback = undefined;
+    };
+  }
+
+  /**
+   * Registers a callback that fires after a successful WebSocket reconnect
+   * (not on the initial connection).
+   */
+  onReconnect(callback: () => void) {
+    this.reconnectCallback = callback;
   }
 
   /**
@@ -211,13 +251,21 @@ export class RelayClient {
   private handleMessage(data: unknown) {
     if (typeof data !== "string") return;
 
-    let frame: WSFrame | WSErrorFrame;
+    let parsed: Record<string, unknown>;
     try {
-      frame = JSON.parse(data);
+      parsed = JSON.parse(data);
     } catch {
       return; // Ignore malformed frames
     }
 
+    // Lifecycle events (reassignment_required, reassigned, closed) are
+    // dispatched separately from job response frames.
+    if (typeof parsed.type === "string" && LIFECYCLE_TYPES.has(parsed.type)) {
+      this.lifecycleCallback?.(parsed as unknown as LifecycleEvent);
+      return;
+    }
+
+    const frame = parsed as unknown as WSFrame | WSErrorFrame;
     const callback = this.jobCallbacks.get(frame.jobId);
     if (callback) {
       callback(frame);

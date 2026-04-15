@@ -82,6 +82,45 @@ export const jobRegistryAbi = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [
+      { internalType: "uint256", name: "sessionId", type: "uint256" },
+    ],
+    name: "reassignSession",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "sessionId", type: "uint256" },
+      { internalType: "bytes", name: "encWorkerKey", type: "bytes" },
+      { internalType: "bytes", name: "encDisputerKey", type: "bytes" },
+    ],
+    name: "updateSessionKey",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "uint256", name: "sessionId", type: "uint256" },
+      { indexed: false, internalType: "address", name: "newWorker", type: "address" },
+    ],
+    name: "SessionReassigned",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "uint256", name: "sessionId", type: "uint256" },
+      { indexed: false, internalType: "bytes", name: "encWorkerKey", type: "bytes" },
+      { indexed: false, internalType: "bytes", name: "encDisputerKey", type: "bytes" },
+    ],
+    name: "SessionKeyUpdated",
+    type: "event",
+  },
   { inputs: [], name: "InvalidDispatcherSignature", type: "error" },
   {
     inputs: [
@@ -89,6 +128,14 @@ export const jobRegistryAbi = [
       { internalType: "uint256", name: "currentTime", type: "uint256" },
     ],
     name: "SignatureExpired",
+    type: "error",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "sessionId", type: "uint256" },
+      { internalType: "uint256", name: "max", type: "uint256" },
+    ],
+    name: "MaxReassignmentsExceeded",
     type: "error",
   },
 ] as const;

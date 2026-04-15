@@ -9,6 +9,7 @@ import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
+import type { FailoverStatus } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
 
 /**
@@ -28,6 +29,7 @@ export function useProtocolSession(
 ) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [failoverStatus, setFailoverStatus] = useState<FailoverStatus>("none");
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
   const resolvedModelIdRef = useRef<string | null>(null);
@@ -123,6 +125,13 @@ export function useProtocolSession(
       );
     }
 
+    const workerRegistryAddress = config.workerRegistryAddress[protocolChainId];
+    if (!workerRegistryAddress || workerRegistryAddress === "0x") {
+      throw new Error(
+        `WorkerRegistry address not configured for chain ${protocolChainId}`
+      );
+    }
+
     const transport = new ProtocolTransport({
       gateway,
       modelId: hexModelId,
@@ -131,6 +140,7 @@ export function useProtocolSession(
       publicClient,
       jobRegistryAddress,
       aiConfigAddress,
+      workerRegistryAddress,
       relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
       registerProtocolSession: async ({
         chatId: targetChatId,
@@ -189,6 +199,7 @@ export function useProtocolSession(
         setError(null);
       }
     });
+    transport.setOnFailoverStatus(setFailoverStatus);
     transportRef.current = transport;
     return transport;
   }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
@@ -211,6 +222,7 @@ export function useProtocolSession(
     resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
+    setFailoverStatus("none");
   }, []);
 
   // Cleanup on unmount — preserve per-chat sessionStorage so revisiting the chat restores the session
@@ -220,6 +232,15 @@ export function useProtocolSession(
       transportRef.current = null;
     };
   }, []);
+
+  const retryFailover = useCallback(async () => {
+    await transportRef.current?.retryFailover();
+  }, []);
+
+  const startNewSession = useCallback(() => {
+    transportRef.current?.startNewSession();
+    resetForWallet();
+  }, [resetForWallet]);
 
   useEffect(() => {
     if (
@@ -245,7 +266,10 @@ export function useProtocolSession(
   return {
     status,
     error,
+    failoverStatus,
     getTransport,
     reset: resetForWallet,
+    retryFailover,
+    startNewSession,
   };
 }

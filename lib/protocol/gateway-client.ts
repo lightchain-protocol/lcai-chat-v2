@@ -37,6 +37,10 @@ export type PendingTokenResponse = {
   message: string;
 };
 
+export type SessionStatusResponse = {
+  sessionStatus: string; // "active" | "awaiting_reassignment" | "reassigning" | "closed" | "unknown"
+};
+
 export type AuthProvider = {
   buildProtectedHeaders(): Promise<Record<string, string>>;
   buildBearerOnlyHeaders?(): Promise<Record<string, string>>;
@@ -112,6 +116,46 @@ export class GatewayClient {
     }
 
     return this.handleResponse<TokenResponse>(res);
+  }
+
+  /**
+   * Checks dispatcher-local session status for recovery-on-reconnect.
+   * Piggybacks on the token endpoint which will include sessionStatus
+   * once the companion dispatcher change ships. Returns "unknown" on
+   * any error so reconnect recovery falls through to the on-chain check.
+   */
+  async getSessionStatus(sessionId: number): Promise<SessionStatusResponse> {
+    let res: Response;
+    try {
+      res = await this.getResponse(`/api/sessions/${sessionId}/token`, {
+        protected: true,
+      });
+    } catch {
+      return { sessionStatus: "unknown" };
+    }
+
+    // 401: retry with fresh auth (same pattern as getSessionToken)
+    if (res.status === 401 && this.auth?.clearToken) {
+      this.auth.clearToken();
+      try {
+        res = await this.getResponse(`/api/sessions/${sessionId}/token`, {
+          protected: true,
+        });
+      } catch {
+        return { sessionStatus: "unknown" };
+      }
+    }
+
+    if (res.status === 202 || res.status === 404 || !res.ok) {
+      return { sessionStatus: "unknown" };
+    }
+
+    try {
+      const data = await res.json();
+      return { sessionStatus: data.sessionStatus ?? "active" };
+    } catch {
+      return { sessionStatus: "unknown" };
+    }
   }
 
   private async get<T>(

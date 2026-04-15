@@ -14,10 +14,22 @@
  * doesn't support custom headers.
  */
 
-import type { WSErrorFrame, WSFrame } from "./relay-client";
+import type { GatewayClient } from "./gateway-client";
+import type { LifecycleEvent, WSErrorFrame, WSFrame } from "./relay-client";
 import { RelayClient } from "./relay-client";
 import type { SessionManagerConfig } from "./session";
-import { SessionManager } from "./session";
+import {
+  MaxReassignmentsError,
+  MissingDisputerKeyError,
+  SessionManager,
+} from "./session";
+
+export type FailoverStatus =
+  | "none"
+  | "reassigning"
+  | "rewrapping"
+  | "failed"
+  | "rollover_required";
 
 type ProtocolTransportConfig = SessionManagerConfig & {
   persistence: {
@@ -50,25 +62,77 @@ type ProtocolTransportConfig = SessionManagerConfig & {
  */
 export class ProtocolTransport {
   private readonly sessionMgr: SessionManager;
+  private readonly gateway: GatewayClient;
   private relayClient: RelayClient | null = null;
   private readonly persistence: ProtocolTransportConfig["persistence"];
   private readonly registerProtocolSession?: ProtocolTransportConfig["registerProtocolSession"];
   /** Dedupes Consumer API PUTs for the same on-chain session id. */
   private lastRegisteredApiSessionId: number | null = null;
+  private onSessionStatus?: (status: string) => void;
+  private onFailoverStatusChange?: (status: FailoverStatus) => void;
+  private failoverPromise: Promise<void> | null = null;
 
   constructor(config: ProtocolTransportConfig) {
     const { persistence, registerProtocolSession, ...sessionConfig } = config;
     this.sessionMgr = new SessionManager(sessionConfig);
+    this.gateway = sessionConfig.gateway;
     this.persistence = persistence;
     this.registerProtocolSession = registerProtocolSession;
   }
 
   setOnSessionStatus(cb: (status: string) => void) {
+    this.onSessionStatus = cb;
     this.sessionMgr.setOnStatusChange(cb);
+  }
+
+  setOnFailoverStatus(cb: (status: FailoverStatus) => void) {
+    this.onFailoverStatusChange = cb;
   }
 
   get sessionStatus() {
     return this.sessionMgr.status;
+  }
+
+  /**
+   * Public retry entry point for the UI banner.
+   * Checks on-chain state first to resume partial failover correctly:
+   * if reassignSession() already succeeded, skips straight to rewrap.
+   */
+  async retryFailover(): Promise<void> {
+    this.failoverPromise = null;
+    this.setFailoverStatus("none");
+
+    // Check if a previous attempt already moved the contract to Reassigning
+    try {
+      const state = await this.sessionMgr.getOnChainSessionState();
+      if (state.status === 1) {
+        // Already reassigned on-chain — skip to rewrap
+        this.failoverPromise = this.performFailover({
+          skipReassign: true,
+          newWorker: state.worker,
+        }).finally(() => {
+          this.failoverPromise = null;
+        });
+        await this.failoverPromise;
+        return;
+      }
+    } catch {
+      // Can't read chain state — fall through to full failover
+    }
+
+    await this.handleFailover();
+  }
+
+  /**
+   * Resets session and relay for "Start New Session" action.
+   */
+  startNewSession() {
+    this.failoverPromise = null;
+    this.setFailoverStatus("none");
+    this.relayClient?.disconnect();
+    this.relayClient = null;
+    this.sessionMgr.reset();
+    this.onSessionStatus?.("idle");
   }
 
   /**
@@ -106,6 +170,18 @@ export class ProtocolTransport {
     const chatId = getChatId(options.body);
     if (!chatId) {
       throw new Error("Chat ID is required for protocol message persistence");
+    }
+
+    // Wait for any in-progress failover to complete before submitting.
+    // If failover failed terminally, the rejection propagates to the caller.
+    if (this.failoverPromise) {
+      await this.failoverPromise;
+    }
+
+    // Guard: if session is not ready after failover (e.g. terminal failure
+    // was caught elsewhere), don't attempt to submit a job.
+    if (this.sessionMgr.status !== "ready") {
+      throw new Error("Session is not ready — recovery may be required");
     }
 
     // Submit job: encrypt → blob upload → on-chain TX via user's wallet
@@ -147,6 +223,8 @@ export class ProtocolTransport {
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.lastRegisteredApiSessionId = null;
+    this.failoverPromise = null;
+    this.setFailoverStatus("none");
     this.sessionMgr.release();
   }
 
@@ -157,6 +235,8 @@ export class ProtocolTransport {
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.lastRegisteredApiSessionId = null;
+    this.failoverPromise = null;
+    this.setFailoverStatus("none");
     this.sessionMgr.reset();
   }
 
@@ -193,7 +273,120 @@ export class ProtocolTransport {
     }
 
     this.relayClient = new RelayClient(relayUrl, relayToken);
+    this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
+    this.relayClient.onReconnect(() => this.handleReconnect());
     this.relayClient.connect();
+  }
+
+  private setFailoverStatus(status: FailoverStatus) {
+    this.onFailoverStatusChange?.(status);
+  }
+
+  private handleLifecycleEvent(event: LifecycleEvent) {
+    switch (event.type) {
+      case "reassignment_required":
+        this.handleFailover().catch((err) => {
+          console.warn("Lifecycle-triggered failover failed", err);
+        });
+        break;
+      case "reassigned":
+        // Informational — client verifies from contract during failover
+        break;
+      case "closed":
+        this.sessionMgr.reset();
+        this.relayClient?.disconnect();
+        this.relayClient = null;
+        this.onSessionStatus?.("idle");
+        break;
+      default:
+        // Unknown lifecycle event — ignore rather than crash.
+        break;
+    }
+  }
+
+  private handleFailover(): Promise<void> {
+    if (this.failoverPromise) return this.failoverPromise;
+    this.failoverPromise = this.performFailover().finally(() => {
+      this.failoverPromise = null;
+    });
+    return this.failoverPromise;
+  }
+
+  private async performFailover(opts?: {
+    skipReassign?: boolean;
+    newWorker?: string;
+  }): Promise<void> {
+    let newWorker = opts?.newWorker;
+
+    try {
+      if (!opts?.skipReassign) {
+        // Preflight: verify rewrap prerequisites BEFORE mutating contract state.
+        if (!this.sessionMgr.canRewrap()) {
+          this.setFailoverStatus("rollover_required");
+          throw new MissingDisputerKeyError();
+        }
+
+        this.setFailoverStatus("reassigning");
+        const result = await this.sessionMgr.reassignSession();
+        newWorker = result.newWorker;
+      }
+
+      if (!newWorker) {
+        throw new Error("No new worker address available for key rewrap");
+      }
+
+      this.setFailoverStatus("rewrapping");
+      await this.sessionMgr.rewrapAndUpdateKey(newWorker);
+      this.setFailoverStatus("none");
+    } catch (err) {
+      if (
+        err instanceof MaxReassignmentsError ||
+        err instanceof MissingDisputerKeyError
+      ) {
+        this.setFailoverStatus("rollover_required");
+      } else {
+        this.setFailoverStatus("failed");
+      }
+      // Always rethrow — callers (sendMessages, lifecycle handler) must
+      // know the failover did not succeed.
+      throw err;
+    }
+  }
+
+  private async handleReconnect(): Promise<void> {
+    if (this.sessionMgr.status !== "ready" && !this.failoverPromise) return;
+    if (this.failoverPromise) return;
+    if (this.sessionMgr.sessionId === null) return;
+
+    try {
+      // Tier 1: Dispatcher status (catches awaiting_reassignment)
+      const resp = await this.gateway.getSessionStatus(
+        this.sessionMgr.sessionId
+      );
+      if (resp.sessionStatus === "awaiting_reassignment") {
+        await this.handleFailover();
+        return;
+      }
+
+      // Tier 2: On-chain state (catches partial failover / closed)
+      if (resp.sessionStatus === "unknown" || resp.sessionStatus === "active") {
+        const state = await this.sessionMgr.getOnChainSessionState();
+        if (state.status === 1) {
+          this.failoverPromise = this.performFailover({
+            skipReassign: true,
+            newWorker: state.worker,
+          }).finally(() => {
+            this.failoverPromise = null;
+          });
+          await this.failoverPromise;
+        } else if (state.status === 2) {
+          this.sessionMgr.reset();
+          this.onSessionStatus?.("idle");
+        }
+      }
+    } catch {
+      // Recovery check failed — don't block normal operation.
+    }
   }
 
   /**
