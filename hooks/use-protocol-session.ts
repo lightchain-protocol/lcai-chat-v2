@@ -127,7 +127,9 @@ export function useProtocolSession(
 
     const workerRegistryAddress = config.workerRegistryAddress[protocolChainId];
     if (!workerRegistryAddress || workerRegistryAddress === "0x") {
-      throw new Error(`WorkerRegistry address not configured for chain ${protocolChainId}`);
+      throw new Error(
+        `WorkerRegistry address not configured for chain ${protocolChainId}`
+      );
     }
 
     const transport = new ProtocolTransport({
@@ -239,7 +241,6 @@ export function useProtocolSession(
     transportRef.current?.startNewSession();
     resetForWallet();
   }, [resetForWallet]);
-
 
   useEffect(() => {
     if (

@@ -37,10 +37,10 @@ export type SessionStatus =
   | "rewrapping"
   | "error";
 
-export interface OnChainSessionState {
+export type OnChainSessionState = {
   status: number;
   worker: string;
-}
+};
 
 export class MaxReassignmentsError extends Error {
   constructor(sessionId: number, max: number) {
@@ -51,18 +51,20 @@ export class MaxReassignmentsError extends Error {
 
 export class MissingDisputerKeyError extends Error {
   constructor() {
-    super("Disputer encryption key not available — session cannot be recovered");
+    super(
+      "Disputer encryption key not available — session cannot be recovered"
+    );
     this.name = "MissingDisputerKeyError";
   }
 }
 
-export interface ProtocolSession {
+export type ProtocolSession = {
   status: SessionStatus;
   sessionId: number | null;
   relayUrl: string | null;
   relayToken: string | null;
   error: string | null;
-}
+};
 
 export type SessionManagerConfig = {
   gateway: GatewayClient;
@@ -396,7 +398,9 @@ export class SessionManager {
         args: [sessionIdBig],
         gas: (gasEstimate * 120n) / 100n,
       });
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await this.publicClient.waitForTransactionReceipt({
+        hash,
+      });
       if (receipt.status !== "success") {
         throw new Error(`reassignSession TX reverted (tx ${hash})`);
       }
@@ -405,14 +409,18 @@ export class SessionManager {
     } catch (err) {
       this.failoverInProgress = false;
       if (isMaxReassignmentsError(err)) {
-        throw new MaxReassignmentsError(this.state.sessionId, extractMaxFromError(err));
+        throw new MaxReassignmentsError(
+          this.state.sessionId,
+          extractMaxFromError(err)
+        );
       }
       throw err;
     }
   }
 
   async rewrapAndUpdateKey(newWorkerAddress: string): Promise<void> {
-    if (!this.sessionKey) throw new Error("Session not initialized — no session key");
+    if (!this.sessionKey)
+      throw new Error("Session not initialized — no session key");
     if (this.state.sessionId === null) throw new Error("No active session");
     const account = this.walletClient.account;
     if (!account) throw new Error("Wallet account not available");
@@ -428,12 +436,18 @@ export class SessionManager {
       });
       const workerPubRaw = hexToUint8(workerPubKeyHex as string);
       const workerPub = await importPublicKey(workerPubRaw);
-      const encWorkerKeyBytes = await encryptSessionKey(this.sessionKey, workerPub);
+      const encWorkerKeyBytes = await encryptSessionKey(
+        this.sessionKey,
+        workerPub
+      );
 
       if (!this.disputerEncryptionKey) throw new MissingDisputerKeyError();
       const disputerPubRaw = hexToUint8(this.disputerEncryptionKey);
       const disputerPub = await importPublicKey(disputerPubRaw);
-      const encDisputerKeyBytes = await encryptSessionKey(this.sessionKey, disputerPub);
+      const encDisputerKeyBytes = await encryptSessionKey(
+        this.sessionKey,
+        disputerPub
+      );
 
       const encWorkerKeyHex = toHex(encWorkerKeyBytes);
       const encDisputerKeyHex = toHex(encDisputerKeyBytes);
@@ -455,7 +469,9 @@ export class SessionManager {
         args: [sessionIdBig, encWorkerKeyHex, encDisputerKeyHex],
         gas: (gasEstimate * 120n) / 100n,
       });
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await this.publicClient.waitForTransactionReceipt({
+        hash,
+      });
       if (receipt.status !== "success") {
         throw new Error(`updateSessionKey TX reverted (tx ${hash})`);
       }
@@ -726,14 +742,23 @@ function parseJobSubmittedEvent(logs: Log[], abi: Abi) {
 function parseSessionReassignedEvent(logs: Log[], abi: Abi) {
   for (const log of logs) {
     try {
-      const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
-      if (decoded.eventName === "SessionReassigned") return decoded as typeof decoded & {
-        args: { sessionId: bigint; newWorker: `0x${string}` };
-      };
-    } catch { continue; }
+      const decoded = decodeEventLog({
+        abi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === "SessionReassigned")
+        return decoded as typeof decoded & {
+          args: { sessionId: bigint; newWorker: `0x${string}` };
+        };
+    } catch {
+      // Not every log is a SessionReassigned event — skip decode failures.
+    }
   }
   throw new Error("SessionReassigned event not found in receipt");
 }
+
+const MAX_REASSIGNMENTS_PATTERN = /MaxReassignmentsExceeded\([^,]+,\s*(\d+)\)/i;
 
 function isMaxReassignmentsError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -747,7 +772,7 @@ function isMaxReassignmentsError(err: unknown): boolean {
 
 function extractMaxFromError(err: unknown): number {
   if (!(err instanceof Error)) return 0;
-  const match = err.message.match(/MaxReassignmentsExceeded\([^,]+,\s*(\d+)\)/i);
+  const match = err.message.match(MAX_REASSIGNMENTS_PATTERN);
   return match ? Number(match[1]) : 0;
 }
 

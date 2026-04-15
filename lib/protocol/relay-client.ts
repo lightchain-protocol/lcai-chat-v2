@@ -40,15 +40,19 @@ export type FrameCallback = (frame: WSFrame | WSErrorFrame) => void;
 
 export type RelayStatus = "disconnected" | "connecting" | "connected" | "error";
 
-export interface LifecycleEvent {
+export type LifecycleEvent = {
   type: "reassignment_required" | "reassigned" | "closed";
   sessionId: number;
   reason?: string;
   newWorker?: string;
   ts: number;
-}
+};
 
-const LIFECYCLE_TYPES = new Set(["reassignment_required", "reassigned", "closed"]);
+const LIFECYCLE_TYPES = new Set([
+  "reassignment_required",
+  "reassigned",
+  "closed",
+]);
 
 type PendingAssistantMessage = {
   chatId: string;

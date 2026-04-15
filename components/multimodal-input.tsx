@@ -14,7 +14,6 @@ import {
   startTransition,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -23,7 +22,6 @@ import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
 import { chatModels } from "@/lib/ai/models";
-import { myProvider } from "@/lib/ai/providers";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
@@ -47,7 +45,6 @@ import {
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
 import AlertError from "./ui/toast/AlertError";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -185,6 +182,8 @@ function PureMultimodalInput({
     width,
     chatId,
     resetHeight,
+    setMessages,
+    status,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -344,7 +343,11 @@ function PureMultimodalInput({
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder={disabled && disabledPlaceholder ? disabledPlaceholder : "Send a message..."}
+            placeholder={
+              disabled && disabledPlaceholder
+                ? disabledPlaceholder
+                : "Send a message..."
+            }
             ref={textareaRef}
             rows={1}
             value={input}

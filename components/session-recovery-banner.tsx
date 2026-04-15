@@ -52,7 +52,7 @@ export function SessionRecoveryBanner({
     <div
       className={cn(
         "mx-auto flex w-full max-w-3xl items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900 dark:bg-amber-950/50",
-        className,
+        className
       )}
     >
       {config.showSpinner ? (
@@ -67,20 +67,12 @@ export function SessionRecoveryBanner({
 
       <div className="flex shrink-0 gap-2">
         {config.actions.includes("retry") && onRetry && (
-          <Button
-            onClick={onRetry}
-            size="sm"
-            variant="outline"
-          >
+          <Button onClick={onRetry} size="sm" variant="outline">
             Retry
           </Button>
         )}
         {config.actions.includes("newSession") && onNewSession && (
-          <Button
-            onClick={onNewSession}
-            size="sm"
-            variant="outline"
-          >
+          <Button onClick={onNewSession} size="sm" variant="outline">
             New Session
           </Button>
         )}

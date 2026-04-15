@@ -14,14 +14,14 @@
  * doesn't support custom headers.
  */
 
-import type { WSErrorFrame, WSFrame, LifecycleEvent } from "./relay-client";
-import { RelayClient } from "./relay-client";
 import type { GatewayClient } from "./gateway-client";
+import type { LifecycleEvent, WSErrorFrame, WSFrame } from "./relay-client";
+import { RelayClient } from "./relay-client";
 import type { SessionManagerConfig } from "./session";
 import {
-  SessionManager,
   MaxReassignmentsError,
   MissingDisputerKeyError,
+  SessionManager,
 } from "./session";
 
 export type FailoverStatus =
@@ -110,7 +110,9 @@ export class ProtocolTransport {
         this.failoverPromise = this.performFailover({
           skipReassign: true,
           newWorker: state.worker,
-        }).finally(() => { this.failoverPromise = null; });
+        }).finally(() => {
+          this.failoverPromise = null;
+        });
         await this.failoverPromise;
         return;
       }
@@ -296,13 +298,17 @@ export class ProtocolTransport {
         this.relayClient = null;
         this.onSessionStatus?.("idle");
         break;
+      default:
+        // Unknown lifecycle event — ignore rather than crash.
+        break;
     }
   }
 
   private handleFailover(): Promise<void> {
     if (this.failoverPromise) return this.failoverPromise;
-    this.failoverPromise = this.performFailover()
-      .finally(() => { this.failoverPromise = null; });
+    this.failoverPromise = this.performFailover().finally(() => {
+      this.failoverPromise = null;
+    });
     return this.failoverPromise;
   }
 
@@ -333,7 +339,10 @@ export class ProtocolTransport {
       await this.sessionMgr.rewrapAndUpdateKey(newWorker);
       this.setFailoverStatus("none");
     } catch (err) {
-      if (err instanceof MaxReassignmentsError || err instanceof MissingDisputerKeyError) {
+      if (
+        err instanceof MaxReassignmentsError ||
+        err instanceof MissingDisputerKeyError
+      ) {
         this.setFailoverStatus("rollover_required");
       } else {
         this.setFailoverStatus("failed");
@@ -351,7 +360,9 @@ export class ProtocolTransport {
 
     try {
       // Tier 1: Dispatcher status (catches awaiting_reassignment)
-      const resp = await this.gateway.getSessionStatus(this.sessionMgr.sessionId);
+      const resp = await this.gateway.getSessionStatus(
+        this.sessionMgr.sessionId
+      );
       if (resp.sessionStatus === "awaiting_reassignment") {
         await this.handleFailover();
         return;
@@ -364,7 +375,9 @@ export class ProtocolTransport {
           this.failoverPromise = this.performFailover({
             skipReassign: true,
             newWorker: state.worker,
-          }).finally(() => { this.failoverPromise = null; });
+          }).finally(() => {
+            this.failoverPromise = null;
+          });
           await this.failoverPromise;
         } else if (state.status === 2) {
           this.sessionMgr.reset();

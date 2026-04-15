@@ -37,15 +37,15 @@ export type PendingTokenResponse = {
   message: string;
 };
 
-export interface SessionStatusResponse {
+export type SessionStatusResponse = {
   sessionStatus: string; // "active" | "awaiting_reassignment" | "reassigning" | "closed" | "unknown"
-}
+};
 
-export interface AuthProvider {
+export type AuthProvider = {
   buildProtectedHeaders(): Promise<Record<string, string>>;
   buildBearerOnlyHeaders?(): Promise<Record<string, string>>;
   clearToken?(): void;
-}
+};
 
 export class GatewayClientError extends Error {
   readonly status: number;
@@ -124,9 +124,7 @@ export class GatewayClient {
    * once the companion dispatcher change ships. Returns "unknown" on
    * any error so reconnect recovery falls through to the on-chain check.
    */
-  async getSessionStatus(
-    sessionId: number,
-  ): Promise<SessionStatusResponse> {
+  async getSessionStatus(sessionId: number): Promise<SessionStatusResponse> {
     let res: Response;
     try {
       res = await this.getResponse(`/api/sessions/${sessionId}/token`, {
