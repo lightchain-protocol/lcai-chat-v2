@@ -24,6 +24,7 @@ import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
+import { SessionRecoveryBanner } from "./session-recovery-banner";
 import AlertError from "./ui/toast/AlertError";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
@@ -75,12 +76,14 @@ export function Chat({
   const { address } = useAccount();
 
   // Protocol mode: session management for on-chain encrypted chat
-  const { getTransport: getProtocolTransport } = useProtocolSession(
-    currentModelId,
-    walletClient,
-    address,
-    id
-  );
+  const {
+    getTransport: getProtocolTransport,
+    failoverStatus,
+    retryFailover,
+    startNewSession,
+  } = useProtocolSession(currentModelId, walletClient, address, id);
+
+  const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
   // fetch that routes through ProtocolTransport (encrypt → gateway → relay).
@@ -251,6 +254,15 @@ export function Chat({
           totalTokens={usage?.totalTokens ?? 0}
         />
 
+        {sessionRecovering && (
+          <SessionRecoveryBanner
+            className="mb-2"
+            failoverStatus={failoverStatus}
+            onNewSession={startNewSession}
+            onRetry={retryFailover}
+          />
+        )}
+
         <Messages
           chatId={id}
           isArtifactVisible={false}
@@ -272,6 +284,8 @@ export function Chat({
             <MultimodalInput
               attachments={attachments}
               chatId={id}
+              disabled={sessionRecovering}
+              disabledPlaceholder="Session recovering..."
               enableWebSearch={enableWebSearch}
               input={input}
               messages={messages}

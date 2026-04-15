@@ -11,6 +11,7 @@ import type { Abi, Log, PublicClient, WalletClient } from "viem";
 import { decodeEventLog, toHex } from "viem";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
+import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 
 import {
   decrypt,
@@ -32,15 +33,36 @@ export type SessionStatus =
   | "key_exchange"
   | "creating"
   | "ready"
+  | "reassigning"
+  | "rewrapping"
   | "error";
 
-export type ProtocolSession = {
+export interface OnChainSessionState {
+  status: number;
+  worker: string;
+}
+
+export class MaxReassignmentsError extends Error {
+  constructor(sessionId: number, max: number) {
+    super(`Session ${sessionId} exceeded max reassignments (${max})`);
+    this.name = "MaxReassignmentsError";
+  }
+}
+
+export class MissingDisputerKeyError extends Error {
+  constructor() {
+    super("Disputer encryption key not available — session cannot be recovered");
+    this.name = "MissingDisputerKeyError";
+  }
+}
+
+export interface ProtocolSession {
   status: SessionStatus;
   sessionId: number | null;
   relayUrl: string | null;
   relayToken: string | null;
   error: string | null;
-};
+}
 
 export type SessionManagerConfig = {
   gateway: GatewayClient;
@@ -50,6 +72,7 @@ export type SessionManagerConfig = {
   publicClient: PublicClient;
   jobRegistryAddress: `0x${string}`;
   aiConfigAddress: `0x${string}`;
+  workerRegistryAddress: `0x${string}`;
   relayUrl: string;
 };
 
@@ -66,6 +89,8 @@ export type SessionManagerConfig = {
 export class SessionManager {
   private sessionKey: Uint8Array | null = null;
   private modelIdBytes32: `0x${string}` | null = null;
+  private disputerEncryptionKey: string | null = null;
+  private failoverInProgress = false;
   private state: ProtocolSession = {
     status: "idle",
     sessionId: null,
@@ -81,6 +106,7 @@ export class SessionManager {
   private readonly publicClient: PublicClient;
   private readonly jobRegistryAddress: `0x${string}`;
   private readonly aiConfigAddress: `0x${string}`;
+  private readonly workerRegistryAddress: `0x${string}`;
   private readonly relayUrl: string;
   private readonly sessionStorageKey: string;
 
@@ -91,6 +117,7 @@ export class SessionManager {
     this.publicClient = config.publicClient;
     this.jobRegistryAddress = config.jobRegistryAddress;
     this.aiConfigAddress = config.aiConfigAddress;
+    this.workerRegistryAddress = config.workerRegistryAddress;
     this.relayUrl = config.relayUrl;
     this.sessionStorageKey = config.sessionStorageKey ?? "lc-protocol-session";
     this.tryRestore();
@@ -330,6 +357,129 @@ export class SessionManager {
   }
 
   /**
+   * Returns true if all prerequisites for rewrapping the session key are
+   * available (disputer encryption key cached). Call before reassignSession()
+   * to avoid stranding the on-chain session in Reassigning state.
+   */
+  canRewrap(): boolean {
+    return this.sessionKey !== null && this.disputerEncryptionKey !== null;
+  }
+
+  async reassignSession(): Promise<{ newWorker: string }> {
+    if (this.failoverInProgress) {
+      throw new Error("Failover already in progress");
+    }
+    if (this.state.sessionId === null) {
+      throw new Error("No active session to reassign");
+    }
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    this.failoverInProgress = true;
+    this.setState("reassigning");
+
+    try {
+      const sessionIdBig = BigInt(this.state.sessionId);
+      const gasEstimate = await this.publicClient.estimateContractGas({
+        account,
+        address: this.jobRegistryAddress,
+        abi: jobRegistryAbi,
+        functionName: "reassignSession",
+        args: [sessionIdBig],
+      });
+      const hash = await this.walletClient.writeContract({
+        account,
+        chain: this.walletClient.chain,
+        address: this.jobRegistryAddress,
+        abi: jobRegistryAbi,
+        functionName: "reassignSession",
+        args: [sessionIdBig],
+        gas: (gasEstimate * 120n) / 100n,
+      });
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error(`reassignSession TX reverted (tx ${hash})`);
+      }
+      const event = parseSessionReassignedEvent(receipt.logs, jobRegistryAbi);
+      return { newWorker: event.args.newWorker };
+    } catch (err) {
+      this.failoverInProgress = false;
+      if (isMaxReassignmentsError(err)) {
+        throw new MaxReassignmentsError(this.state.sessionId, extractMaxFromError(err));
+      }
+      throw err;
+    }
+  }
+
+  async rewrapAndUpdateKey(newWorkerAddress: string): Promise<void> {
+    if (!this.sessionKey) throw new Error("Session not initialized — no session key");
+    if (this.state.sessionId === null) throw new Error("No active session");
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    this.setState("rewrapping");
+
+    try {
+      const workerPubKeyHex = await this.publicClient.readContract({
+        address: this.workerRegistryAddress,
+        abi: workerRegistryAbi,
+        functionName: "getWorkerEncryptionKey",
+        args: [newWorkerAddress as `0x${string}`],
+      });
+      const workerPubRaw = hexToUint8(workerPubKeyHex as string);
+      const workerPub = await importPublicKey(workerPubRaw);
+      const encWorkerKeyBytes = await encryptSessionKey(this.sessionKey, workerPub);
+
+      if (!this.disputerEncryptionKey) throw new MissingDisputerKeyError();
+      const disputerPubRaw = hexToUint8(this.disputerEncryptionKey);
+      const disputerPub = await importPublicKey(disputerPubRaw);
+      const encDisputerKeyBytes = await encryptSessionKey(this.sessionKey, disputerPub);
+
+      const encWorkerKeyHex = toHex(encWorkerKeyBytes);
+      const encDisputerKeyHex = toHex(encDisputerKeyBytes);
+      const sessionIdBig = BigInt(this.state.sessionId);
+
+      const gasEstimate = await this.publicClient.estimateContractGas({
+        account,
+        address: this.jobRegistryAddress,
+        abi: jobRegistryAbi,
+        functionName: "updateSessionKey",
+        args: [sessionIdBig, encWorkerKeyHex, encDisputerKeyHex],
+      });
+      const hash = await this.walletClient.writeContract({
+        account,
+        chain: this.walletClient.chain,
+        address: this.jobRegistryAddress,
+        abi: jobRegistryAbi,
+        functionName: "updateSessionKey",
+        args: [sessionIdBig, encWorkerKeyHex, encDisputerKeyHex],
+        gas: (gasEstimate * 120n) / 100n,
+      });
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error(`updateSessionKey TX reverted (tx ${hash})`);
+      }
+      this.setState("ready");
+      this.failoverInProgress = false;
+      this.persist();
+    } catch (err) {
+      this.failoverInProgress = false;
+      throw err;
+    }
+  }
+
+  async getOnChainSessionState(): Promise<OnChainSessionState> {
+    if (this.state.sessionId === null) throw new Error("No active session");
+    const session = await this.publicClient.readContract({
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "getSession",
+      args: [BigInt(this.state.sessionId)],
+    });
+    return { status: Number(session.status), worker: session.worker };
+  }
+
+  /**
    * Clears in-memory session material and notifies idle.
    * Does not remove the persisted snapshot in sessionStorage — use when
    * tearing down the transport so returning to this chat can tryRestore().
@@ -337,6 +487,8 @@ export class SessionManager {
   release() {
     this.sessionKey = null;
     this.modelIdBytes32 = null;
+    this.disputerEncryptionKey = null;
+    this.failoverInProgress = false;
     this.state = {
       status: "idle",
       sessionId: null,
@@ -421,6 +573,7 @@ export class SessionManager {
 
     let encDisputerKey = "";
     if (prepared.disputerEncryptionKey) {
+      this.disputerEncryptionKey = prepared.disputerEncryptionKey;
       const disputerPubRaw = hexToUint8(prepared.disputerEncryptionKey);
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
@@ -459,11 +612,13 @@ export class SessionManager {
   private persist() {
     try {
       const data = {
+        version: 2,
         sessionId: this.state.sessionId,
         relayUrl: this.state.relayUrl,
         relayToken: this.state.relayToken,
         modelId: this.modelId,
         sessionKey: this.sessionKey ? uint8ToBase64(this.sessionKey) : null,
+        disputerEncryptionKey: this.disputerEncryptionKey,
       };
       sessionStorage.setItem(this.sessionStorageKey, JSON.stringify(data));
     } catch {
@@ -513,6 +668,8 @@ export class SessionManager {
           error: null,
         };
         this.sessionKey = base64ToUint8(data.sessionKey);
+        // v2 migration: restore disputerEncryptionKey (absent in v1 sessions)
+        this.disputerEncryptionKey = data.disputerEncryptionKey ?? null;
       }
     } catch {
       // sessionStorage unavailable or corrupt — start fresh
@@ -564,6 +721,34 @@ function parseJobSubmittedEvent(logs: Log[], abi: Abi) {
     }
   }
   throw new Error("JobSubmitted event not found in receipt");
+}
+
+function parseSessionReassignedEvent(logs: Log[], abi: Abi) {
+  for (const log of logs) {
+    try {
+      const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
+      if (decoded.eventName === "SessionReassigned") return decoded as typeof decoded & {
+        args: { sessionId: bigint; newWorker: `0x${string}` };
+      };
+    } catch { continue; }
+  }
+  throw new Error("SessionReassigned event not found in receipt");
+}
+
+function isMaxReassignmentsError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  if (msg.includes("maxreassignmentsexceeded")) return true;
+  if ("cause" in err && err.cause instanceof Error) {
+    return isMaxReassignmentsError(err.cause);
+  }
+  return false;
+}
+
+function extractMaxFromError(err: unknown): number {
+  if (!(err instanceof Error)) return 0;
+  const match = err.message.match(/MaxReassignmentsExceeded\([^,]+,\s*(\d+)\)/i);
+  return match ? Number(match[1]) : 0;
 }
 
 // ---------------------------------------------------------------------------

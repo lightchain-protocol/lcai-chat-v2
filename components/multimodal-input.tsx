@@ -69,6 +69,8 @@ function PureMultimodalInput({
   usage,
   enableWebSearch,
   onWebSearchToggle,
+  disabled,
+  disabledPlaceholder,
 }: {
   chatId: string;
   input: string;
@@ -87,6 +89,8 @@ function PureMultimodalInput({
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
+  disabled?: boolean;
+  disabledPlaceholder?: string;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -336,11 +340,11 @@ function PureMultimodalInput({
             className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
-            disabled={!canUseChat}
+            disabled={disabled || !canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder="Send a message..."
+            placeholder={disabled && disabledPlaceholder ? disabledPlaceholder : "Send a message..."}
             ref={textareaRef}
             rows={1}
             value={input}
@@ -373,7 +377,7 @@ function PureMultimodalInput({
           ) : (
             <PromptInputSubmit
               className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
-              disabled={!input.trim() || uploadQueue.length > 0}
+              disabled={disabled || !input.trim() || uploadQueue.length > 0}
               status={status}
             >
               <ArrowUpIcon size={14} />
@@ -385,7 +389,8 @@ function PureMultimodalInput({
       {messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 &&
-        canUseChat && (
+        canUseChat &&
+        !disabled && (
           <SuggestedActions
             chatId={chatId}
             selectedVisibilityType={selectedVisibilityType}
@@ -415,6 +420,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
+      return false;
+    }
+    if (prevProps.disabled !== nextProps.disabled) {
       return false;
     }
 

@@ -70,6 +70,10 @@ const config = {
       "0x") as `0x${string}`,
   } as Record<number, `0x${string}`>,
 
+  workerRegistryAddress: {
+    [lcaiDevnet.id]: (process.env.NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS ?? "0x") as `0x${string}`,
+  } as Record<number, `0x${string}`>,
+
   lcaiToken: {
     [lcaiDevnet.id]: {
       address: "0x0000000000000000000000000000000000000000",
