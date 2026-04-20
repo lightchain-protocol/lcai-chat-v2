@@ -24,8 +24,10 @@ import type {
   GatewayClient,
   PendingTokenResponse,
   PrepareSessionResponse,
+  SelectSessionResponse,
   TokenResponse,
 } from "./gateway-client";
+import { GatewayClientError } from "./gateway-client";
 
 export type SessionStatus =
   | "idle"
@@ -180,16 +182,28 @@ export class SessionManager {
     }
 
     try {
-      // Step 1: Prepare — get worker recommendation from dispatcher
+      // Step 1: Select — dispatcher picks a worker and commits (worker, nonce,
+      // expiry) to short-lived storage. We receive the worker's encryption key
+      // so we can encrypt the session key for it before returning in Step 3.
       this.setState("preparing");
-      let prepared = await this.gateway.prepareSession(this.modelId);
+      let selected = await this.gateway.selectSession(this.modelId);
 
-      // Step 2: ECDH key exchange
+      // Step 2: ECDH key exchange — encrypt the generated session key for the
+      // worker (and disputer, if provided).
       this.setState("key_exchange");
-      let keyExchange = await this.performKeyExchange(prepared);
+      let keyExchange = await this.performKeyExchange(selected);
       this.sessionKey = keyExchange.sessionKey;
 
-      // Step 3: Create session on-chain via user's wallet
+      // Step 3: Prepare — send the encrypted keys back; dispatcher signs the
+      // committed (worker, nonce, expiry) tuple with the keys bound into the
+      // EIP-712 domain (audit requirement).
+      let prepared = await this.gateway.prepareSession({
+        modelId: this.modelId,
+        encWorkerKey: keyExchange.encWorkerKey,
+        encDisputerKey: keyExchange.encDisputerKey,
+      });
+
+      // Step 4: Create session on-chain via user's wallet
       this.setState("creating");
       const modelIdBytes32 = padHexTo32Bytes(this.modelId);
       this.modelIdBytes32 = modelIdBytes32;
@@ -198,18 +212,25 @@ export class SessionManager {
       try {
         sessionId = await this.createSessionOnChain(
           modelIdBytes32,
-          prepared,
+          { ...selected, signature: prepared.signature },
           keyExchange
         );
       } catch (err) {
-        // Retry once on stale dispatcher signature (nonce already consumed)
-        if (isStaleSignatureError(err)) {
-          prepared = await this.gateway.prepareSession(this.modelId);
-          keyExchange = await this.performKeyExchange(prepared);
+        // Retry once on stale dispatcher signature (nonce consumed, or the
+        // pending selection TTL expired mid-flight — both signal a fresh
+        // select → prepare round is needed).
+        if (isStaleSignatureError(err) || isPendingSelectionMissing(err)) {
+          selected = await this.gateway.selectSession(this.modelId);
+          keyExchange = await this.performKeyExchange(selected);
           this.sessionKey = keyExchange.sessionKey;
+          prepared = await this.gateway.prepareSession({
+            modelId: this.modelId,
+            encWorkerKey: keyExchange.encWorkerKey,
+            encDisputerKey: keyExchange.encDisputerKey,
+          });
           sessionId = await this.createSessionOnChain(
             modelIdBytes32,
-            prepared,
+            { ...selected, signature: prepared.signature },
             keyExchange
           );
         } else {
@@ -264,18 +285,28 @@ export class SessionManager {
 
     // 1. Encrypt → base64
     const encryptedBase64 = await this.encryptPrompt(plaintext);
-    const dataLength = BigInt(base64ToUint8(encryptedBase64).length);
 
-    // 2. Upload to gateway — gateway submits the real blob TX
+    // 2. Upload to gateway — gateway submits the real blob TX. Post-audit the
+    // on-chain submitJob accepts a single blob hash per job; if the prompt spans
+    // multiple blobs we can't fit it in one job under the current contract.
     const blobResponse = await this.gateway.uploadBlob(encryptedBase64);
     const blobHashes = blobResponse.blobHashes as `0x${string}`[];
+    if (blobHashes.length === 0) {
+      throw new Error("Blob upload returned no hashes");
+    }
+    if (blobHashes.length > 1) {
+      throw new Error(
+        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`
+      );
+    }
+    const blobHash = blobHashes[0];
 
-    // 3. Calculate fee using encrypted size
+    // 3. Calculate flat per-model fee
     const fee = await this.publicClient.readContract({
       address: this.aiConfigAddress,
       abi: aiConfigAbi,
       functionName: "calculateJobFee",
-      args: [this.modelIdBytes32 ?? padHexTo32Bytes(this.modelId), dataLength],
+      args: [this.modelIdBytes32 ?? padHexTo32Bytes(this.modelId)],
     });
 
     // 4. Check if the user has enough balance
@@ -298,7 +329,7 @@ export class SessionManager {
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "submitJob",
-      args: [BigInt(this.state.sessionId), blobHashes, dataLength],
+      args: [BigInt(this.state.sessionId), blobHash],
       value: fee,
     } as const;
 
@@ -577,20 +608,20 @@ export class SessionManager {
     this.onStatusChange?.(status);
   }
 
-  private async performKeyExchange(prepared: PrepareSessionResponse): Promise<{
+  private async performKeyExchange(selected: SelectSessionResponse): Promise<{
     encWorkerKey: string;
     encDisputerKey: string;
     sessionKey: Uint8Array;
   }> {
-    const workerPubRaw = base64ToUint8(prepared.workerEncryptionKey);
+    const workerPubRaw = base64ToUint8(selected.workerEncryptionKey);
     const workerPub = await importPublicKey(workerPubRaw);
     const sessionKey = await generateSessionKey();
     const encWorkerKeyBytes = await encryptSessionKey(sessionKey, workerPub);
 
     let encDisputerKey = "";
-    if (prepared.disputerEncryptionKey) {
-      this.disputerEncryptionKey = prepared.disputerEncryptionKey;
-      const disputerPubRaw = hexToUint8(prepared.disputerEncryptionKey);
+    if (selected.disputerEncryptionKey) {
+      this.disputerEncryptionKey = selected.disputerEncryptionKey;
+      const disputerPubRaw = hexToUint8(selected.disputerEncryptionKey);
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         sessionKey,
@@ -790,6 +821,16 @@ function isStaleSignatureError(err: unknown): boolean {
     msg.includes("invalid dispatcher signature") ||
     msg.includes("signature expired")
   );
+}
+
+// Dispatcher returns 409 no_pending_selection when the prepare phase arrives
+// without a prior select (or after the select TTL expired). Re-running the
+// select → prepare pair is the correct recovery.
+function isPendingSelectionMissing(err: unknown): boolean {
+  if (err instanceof GatewayClientError) {
+    return err.status === 409 && err.body.includes("no_pending_selection");
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

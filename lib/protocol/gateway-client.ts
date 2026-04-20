@@ -14,10 +14,17 @@ export type ModelsResponse = {
   models: ModelInfo[];
 };
 
-export type PrepareSessionResponse = {
+export type SelectSessionResponse = {
   worker: string;
   workerEncryptionKey: string;
   disputerEncryptionKey?: string;
+  nonce: number;
+  expiry: number;
+};
+
+export type PrepareSessionResponse = {
+  worker: string;
+  workerEncryptionKey: string;
   signature: string;
   nonce: number;
   expiry: number;
@@ -80,10 +87,22 @@ export class GatewayClient {
     return await this.get<ModelsResponse>("/api/models");
   }
 
-  async prepareSession(modelId: string): Promise<PrepareSessionResponse> {
+  async selectSession(modelId: string): Promise<SelectSessionResponse> {
+    return await this.post<SelectSessionResponse>(
+      "/api/sessions/select",
+      { modelId },
+      { protected: true }
+    );
+  }
+
+  async prepareSession(input: {
+    modelId: string;
+    encWorkerKey: string;
+    encDisputerKey: string;
+  }): Promise<PrepareSessionResponse> {
     return await this.post<PrepareSessionResponse>(
       "/api/sessions/prepare",
-      { modelId },
+      input,
       { protected: true }
     );
   }
