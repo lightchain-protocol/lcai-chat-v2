@@ -48,32 +48,12 @@ export function useProtocolSession(
     addressRef.current = address;
   }, [address, walletClient]);
 
-  // Lazily create the gateway client — singleton per hook instance
+  // Lazily create the gateway client — singleton per hook instance.
+  // Auth piggybacks on the SIWE session token (lib/http.ts cache), so no
+  // wallet signature is required to authenticate gateway calls.
   const getGateway = useCallback(() => {
     if (!gatewayRef.current) {
-      const client = walletClientRef.current;
-      // biome-ignore lint/nursery/noShadow: walletAddress is shadowed to avoid confusion
-      const walletAddress = addressRef.current;
-      const account = client?.account;
-      if (client && walletAddress && account) {
-        const gatewayBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL;
-        if (!gatewayBaseUrl) {
-          throw new Error("Gateway URL not configured");
-        }
-
-        const auth = new GatewayAuth(
-          // biome-ignore lint/performance/useTopLevelRegex: regex is used for path joining
-          gatewayBaseUrl.replace(/\/+$/, ""),
-          async (message) =>
-            client.signMessage({
-              account: account.address,
-              message,
-            }) as Promise<`0x${string}`>
-        );
-        gatewayRef.current = new GatewayClient(undefined, auth);
-      } else {
-        gatewayRef.current = new GatewayClient();
-      }
+      gatewayRef.current = new GatewayClient(undefined, new GatewayAuth());
     }
     return gatewayRef.current;
   }, []);
