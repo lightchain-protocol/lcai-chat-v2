@@ -2,10 +2,23 @@ import { auth as authSession } from "@/app/(auth)/auth";
 
 const AUTH_TOKEN_KEYS = ["user-token"] as const;
 let authTokenCache: string | null = null;
-const apiBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL?.replace(
-  /\/+$/,
-  ""
-);
+// Browser: use the public URL (baked in at build time) so requests go through
+// the host's port mapping. Server (Node runtime inside the container): prefer
+// CONSUMER_API_INTERNAL_URL (compose DNS) because the container's own localhost
+// does not route to the consumer-api service.
+const apiBaseUrl = (() => {
+  const stripTrailingSlash = (value: string) => value.replace(/\/+$/, "");
+  const publicUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL
+    ? stripTrailingSlash(process.env.NEXT_PUBLIC_CONSUMER_API_URL)
+    : undefined;
+  if (typeof window !== "undefined") {
+    return publicUrl;
+  }
+  const internalUrl = process.env.CONSUMER_API_INTERNAL_URL
+    ? stripTrailingSlash(process.env.CONSUMER_API_INTERNAL_URL)
+    : undefined;
+  return internalUrl ?? publicUrl;
+})();
 
 export function setAuthToken(token: string): void {
   authTokenCache = token;

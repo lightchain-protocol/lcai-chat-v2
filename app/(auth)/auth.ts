@@ -53,7 +53,12 @@ export const {
             return null;
           }
 
-          const consumerApiBaseUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL;
+          // Server-side fetch from inside the Next.js container: prefer the
+          // internal compose-DNS URL. The public URL (localhost:8090) does not
+          // route to consumer-api from within the frontend container.
+          const consumerApiBaseUrl =
+            process.env.CONSUMER_API_INTERNAL_URL ??
+            process.env.NEXT_PUBLIC_CONSUMER_API_URL;
           if (!consumerApiBaseUrl) {
             console.error("Consumer API URL is not configured");
             return null;
