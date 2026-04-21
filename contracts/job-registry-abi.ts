@@ -24,8 +24,7 @@ export const jobRegistryAbi = [
   {
     inputs: [
       { internalType: "uint256", name: "sessionId", type: "uint256" },
-      { internalType: "bytes32[]", name: "blobHashes", type: "bytes32[]" },
-      { internalType: "uint256", name: "dataLength", type: "uint256" },
+      { internalType: "bytes32", name: "blobHash", type: "bytes32" },
     ],
     name: "submitJob",
     outputs: [{ internalType: "uint256", name: "jobId", type: "uint256" }],
