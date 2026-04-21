@@ -44,7 +44,7 @@ export function clearAuthToken(): void {
   }
 }
 
-async function getAuthToken(): Promise<string | null> {
+export async function getAuthToken(): Promise<string | null> {
   if (authTokenCache) {
     return authTokenCache;
   }
