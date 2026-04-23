@@ -65,6 +65,7 @@ export type ProtocolSession = {
   sessionId: number | null;
   relayUrl: string | null;
   relayToken: string | null;
+  relayTokenExpiresAt: number | null;
   error: string | null;
 };
 
@@ -100,8 +101,11 @@ export class SessionManager {
     sessionId: null,
     relayUrl: null,
     relayToken: null,
+    relayTokenExpiresAt: null,
     error: null,
   };
+  /** Refresh when token has less than this many ms remaining. Matches dispatcher's 20%-of-TTL refresh threshold for a 1h token. */
+  private readonly TOKEN_REFRESH_THRESHOLD_MS = 12 * 60 * 1000;
   private onStatusChange?: (status: SessionStatus) => void;
 
   private readonly gateway: GatewayClient;
@@ -148,6 +152,41 @@ export class SessionManager {
     return this.state.relayUrl;
   }
 
+  /** Epoch-ms expiry of the relay JWT, or null if no token is held. */
+  getRelayTokenExpiresAt(): number | null {
+    return this.state.relayTokenExpiresAt;
+  }
+
+  /** True when the token is absent, un-decodable, or within the refresh threshold of expiry. */
+  isRelayTokenStale(nowMs: number = Date.now()): boolean {
+    const exp = this.state.relayTokenExpiresAt;
+    if (exp === null) return true;
+    return exp - nowMs < this.TOKEN_REFRESH_THRESHOLD_MS;
+  }
+
+  /** Refresh the relay token if stale; returns a token safe to use now. */
+  async refreshRelayTokenIfNeeded(): Promise<string> {
+    if (!this.isRelayTokenStale() && this.state.relayToken) {
+      return this.state.relayToken;
+    }
+    return this.forceRefreshRelayToken();
+  }
+
+  /**
+   * Unconditionally fetch a fresh relay token for the current session.
+   * Reuses waitForRelayToken, which handles 202-pending with a deadline.
+   */
+  async forceRefreshRelayToken(): Promise<string> {
+    if (this.state.sessionId === null) {
+      throw new Error("Cannot refresh relay token — no active session");
+    }
+    const token = await this.waitForRelayToken(this.state.sessionId);
+    this.state.relayToken = token;
+    this.state.relayTokenExpiresAt = decodeJwtExpMs(token);
+    this.persist();
+    return token;
+  }
+
   setOnStatusChange(cb: (status: SessionStatus) => void) {
     this.onStatusChange = cb;
   }
@@ -159,11 +198,25 @@ export class SessionManager {
   async initialize(): Promise<void> {
     if (this.state.status === "ready") {
       const valid = await this.validateRestoredSession();
-      if (valid) {
+      if (!valid) {
+        // Stale session — reset and fall through to create a new one
+        this.reset();
+      } else {
+        // Valid restored session — refresh relay token if stale before handing
+        // it to the transport. Covers the common case of reopening an old chat
+        // after the 1h token TTL has elapsed.
+        if (this.isRelayTokenStale()) {
+          try {
+            await this.forceRefreshRelayToken();
+          } catch (err) {
+            // Refresh failed (dispatcher evicted session, etc.) — reset and
+            // recreate rather than leave the user with a dead session.
+            this.reset();
+            throw err;
+          }
+        }
         return;
       }
-      // Stale session — reset and fall through to create a new one
-      this.reset();
     }
     if (this.state.status !== "idle" && this.state.status !== "error") {
       return; // Already in progress
@@ -245,6 +298,7 @@ export class SessionManager {
         sessionId,
         relayUrl: this.relayUrl,
         relayToken,
+        relayTokenExpiresAt: decodeJwtExpMs(relayToken),
         error: null,
       };
       this.onStatusChange?.("ready");
@@ -382,10 +436,12 @@ export class SessionManager {
   }
 
   /**
-   * Updates the relay token (e.g. after refresh).
+   * Updates the relay token (e.g. after an out-of-band refresh).
+   * Internal callers should prefer forceRefreshRelayToken().
    */
   updateToken(token: string) {
     this.state.relayToken = token;
+    this.state.relayTokenExpiresAt = decodeJwtExpMs(token);
     this.persist();
   }
 
@@ -541,6 +597,7 @@ export class SessionManager {
       sessionId: null,
       relayUrl: null,
       relayToken: null,
+      relayTokenExpiresAt: null,
       error: null,
     };
     this.onStatusChange?.("idle");
@@ -659,10 +716,11 @@ export class SessionManager {
   private persist() {
     try {
       const data = {
-        version: 2,
+        version: 3,
         sessionId: this.state.sessionId,
         relayUrl: this.state.relayUrl,
         relayToken: this.state.relayToken,
+        relayTokenExpiresAt: this.state.relayTokenExpiresAt,
         modelId: this.modelId,
         sessionKey: this.sessionKey ? uint8ToBase64(this.sessionKey) : null,
         disputerEncryptionKey: this.disputerEncryptionKey,
@@ -707,11 +765,19 @@ export class SessionManager {
       if (data.modelId !== this.modelId) return;
 
       if (data.sessionId != null && data.sessionKey && data.relayToken) {
+        // v3 stores relayTokenExpiresAt; v2 snapshots derive it from the JWT's
+        // exp claim so existing open tabs aren't stranded on upgrade.
+        const relayTokenExpiresAt =
+          typeof data.relayTokenExpiresAt === "number"
+            ? data.relayTokenExpiresAt
+            : decodeJwtExpMs(data.relayToken);
+
         this.state = {
           status: "ready",
           sessionId: data.sessionId,
           relayUrl: this.relayUrl,
           relayToken: data.relayToken,
+          relayTokenExpiresAt,
           error: null,
         };
         this.sessionKey = base64ToUint8(data.sessionKey);
@@ -845,6 +911,24 @@ function isReadyTokenResponse(
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Returns the JWT's `exp` claim in ms-since-epoch, or null if the token is
+ * un-decodable. Browser-safe — uses atob() with base64url normalization.
+ */
+function decodeJwtExpMs(token: string): number | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2 || !parts[1]) return null;
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    // base64 requires length to be a multiple of 4 — pad if necessary.
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const json = JSON.parse(atob(padded)) as { exp?: unknown };
+    return typeof json.exp === "number" ? json.exp * 1000 : null;
+  } catch {
+    return null;
+  }
 }
 
 function padHexTo32Bytes(hex: string): `0x${string}` {

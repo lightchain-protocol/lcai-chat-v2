@@ -71,6 +71,10 @@ export class ProtocolTransport {
   private onSessionStatus?: (status: string) => void;
   private onFailoverStatusChange?: (status: FailoverStatus) => void;
   private failoverPromise: Promise<void> | null = null;
+  /** Timer that fires a proactive relay-token refresh shortly before expiry. */
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Refresh this many ms before the JWT's exp claim. */
+  private readonly PROACTIVE_REFRESH_LEAD_MS = 5 * 60 * 1000;
 
   constructor(config: ProtocolTransportConfig) {
     const { persistence, registerProtocolSession, ...sessionConfig } = config;
@@ -129,6 +133,7 @@ export class ProtocolTransport {
   startNewSession() {
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.clearRefreshTimer();
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.sessionMgr.reset();
@@ -154,8 +159,8 @@ export class ProtocolTransport {
     // Initialize session on first message
     await this.sessionMgr.initialize();
 
-    // Ensure relay is connected
-    this.ensureRelayConnected();
+    // Ensure relay is connected (may refresh an expired JWT before connecting)
+    await this.ensureRelayConnected();
 
     // Extract plaintext from the last user message
     const lastMessage = options.messages.at(-1);
@@ -220,6 +225,7 @@ export class ProtocolTransport {
    * sessionStorage — use when switching chats or unmounting the composer.
    */
   release() {
+    this.clearRefreshTimer();
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.lastRegisteredApiSessionId = null;
@@ -232,12 +238,20 @@ export class ProtocolTransport {
    * Disconnects relay and clears persisted protocol state (wallet disconnect).
    */
   destroy() {
+    this.clearRefreshTimer();
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.lastRegisteredApiSessionId = null;
     this.failoverPromise = null;
     this.setFailoverStatus("none");
     this.sessionMgr.reset();
+  }
+
+  private clearRefreshTimer(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
   }
 
   private async registerProtocolSessionWithServerIfNeeded(
@@ -255,12 +269,17 @@ export class ProtocolTransport {
     this.lastRegisteredApiSessionId = sessionId;
   }
 
-  private ensureRelayConnected() {
+  private async ensureRelayConnected(): Promise<void> {
     const relayUrl = this.sessionMgr.getRelayUrl();
-    const relayToken = this.sessionMgr.relayToken;
-    if (!relayUrl || !relayToken) {
-      throw new Error("Relay URL or token not available");
+    if (!relayUrl) {
+      throw new Error("Relay URL not available");
     }
+
+    // Always hand the RelayClient a non-stale token. This covers the
+    // common "reopen tab after >1h" case: the session is restored from
+    // sessionStorage with an expired JWT, and we mint a fresh one before
+    // the WS handshake rather than after a silent 401 rejection.
+    const relayToken = await this.sessionMgr.refreshRelayTokenIfNeeded();
 
     if (this.relayClient) {
       const status = this.relayClient.getStatus();
@@ -275,7 +294,47 @@ export class ProtocolTransport {
     this.relayClient = new RelayClient(relayUrl, relayToken);
     this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
     this.relayClient.onReconnect(() => this.handleReconnect());
+    // When the relay closes a handshake before onopen (heuristic for a 401),
+    // mint a fresh JWT and push it into the client — updateToken handles the
+    // reconnect and resets the backoff counter.
+    this.relayClient.onAuthFailure(() => this.handleAuthFailure());
     this.relayClient.connect();
+    this.scheduleProactiveRefresh();
+  }
+
+  private async handleAuthFailure(): Promise<void> {
+    const fresh = await this.sessionMgr.forceRefreshRelayToken();
+    this.relayClient?.updateToken(fresh);
+    this.scheduleProactiveRefresh();
+  }
+
+  /**
+   * Schedule a silent token refresh shortly before the current JWT expires.
+   * Using a leading window means the refresh completes while the WS is still
+   * valid — updateToken's close+reconnect is a very brief blip (one round-
+   * trip to the gateway + one WS open) rather than a visible reconnect.
+   */
+  private scheduleProactiveRefresh(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    const exp = this.sessionMgr.getRelayTokenExpiresAt();
+    if (exp === null) return;
+    const delay = Math.max(0, exp - Date.now() - this.PROACTIVE_REFRESH_LEAD_MS);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      this.proactiveRefresh().catch(() => {
+        // Swallow — the reactive auth-failure path will catch any residual
+        // problem when the WS actually dies. Logging would be noise here.
+      });
+    }, delay);
+  }
+
+  private async proactiveRefresh(): Promise<void> {
+    const fresh = await this.sessionMgr.forceRefreshRelayToken();
+    this.relayClient?.updateToken(fresh);
+    this.scheduleProactiveRefresh();
   }
 
   private setFailoverStatus(status: FailoverStatus) {

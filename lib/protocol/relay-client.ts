@@ -70,11 +70,15 @@ export class RelayClient {
   private readonly jobCallbacks = new Map<number, FrameCallback>();
   private lifecycleCallback?: (event: LifecycleEvent) => void;
   private reconnectCallback?: () => void;
+  private authFailureCallback?: () => Promise<void>;
   private status: RelayStatus = "disconnected";
   private onStatusChange?: (status: RelayStatus) => void;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly maxReconnectDelay = 30_000;
   private reconnectAttempt = 0;
+  private consecutiveAuthFailures = 0;
+  /** Stop invoking the auth-failure callback after this many consecutive failures to avoid wallet-popup loops on a structurally invalid session. */
+  private readonly MAX_AUTH_FAILURES = 3;
   private readonly relayUrl: string;
   private token: string;
   private readonly pendingAssistantMessages = new Map<
@@ -96,18 +100,43 @@ export class RelayClient {
   }
 
   /**
-   * Updates the JWT token. If already connected, reconnects with the new token.
+   * Updates the JWT token and forces a reconnect using it.
+   *
+   * Unlike the naive "only reconnect if OPEN" approach, this handles every
+   * lifecycle state: a pending reconnect timer is cancelled, an existing
+   * socket (OPEN/CONNECTING/CLOSING) is closed cleanly, and a fresh connect
+   * is kicked off with the backoff counter reset. The counter reset matters —
+   * after a successful token refresh we want the next WS open to be treated
+   * as a first attempt, not as attempt N of an exponential backoff.
    */
   updateToken(token: string) {
     this.token = token;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.disconnect();
-      this.connect();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+    if (this.ws) {
+      this.ws.onclose = null;
+      try {
+        this.ws.close(1000, "token refresh");
+      } catch {
+        // close() can throw on a socket that's already closed — ignore.
+      }
+      this.ws = null;
+    }
+    this.reconnectAttempt = 0;
+    this.connect();
   }
 
   /**
    * Establishes the WebSocket connection with JWT auth.
+   *
+   * Auth-failure detection: the browser WebSocket API hides pre-upgrade HTTP
+   * responses, so a 401 from the relay surfaces as a generic code-1006
+   * CloseEvent *before* onopen fires. We use the pattern "closed with 1006
+   * AND onopen never fired" as the canonical auth-failure heuristic (the
+   * same one libraries like reconnecting-websocket use), and delegate
+   * recovery to the transport via onAuthFailure.
    */
   connect() {
     if (this.ws) return;
@@ -120,8 +149,11 @@ export class RelayClient {
     url.searchParams.set("token", this.token);
 
     const ws = new WebSocket(url.toString());
+    let opened = false;
 
     ws.onopen = () => {
+      opened = true;
+      this.consecutiveAuthFailures = 0;
       const wasReconnect = this.reconnectAttempt > 0;
       this.reconnectAttempt = 0;
       this.setStatus("connected");
@@ -141,6 +173,30 @@ export class RelayClient {
         this.setStatus("disconnected");
         return;
       }
+
+      // Auth-failure heuristic: abnormal close before the handshake completes.
+      if (!opened && event.code === 1006) {
+        this.consecutiveAuthFailures++;
+        if (
+          this.consecutiveAuthFailures <= this.MAX_AUTH_FAILURES &&
+          this.authFailureCallback
+        ) {
+          this.setStatus("error");
+          // Transport refreshes the token and calls updateToken(), which
+          // cancels any pending reconnect and initiates a fresh connect.
+          this.authFailureCallback().catch(() => {
+            // Refresh itself failed — fall back to normal backoff so we
+            // don't leave the client in a permanent error state.
+            this.scheduleReconnect();
+          });
+          return;
+        }
+        // Exceeded the cap — stop retrying. Transport surfaces the error
+        // via status change; user must reload or start a new session.
+        this.setStatus("error");
+        return;
+      }
+
       this.setStatus("error");
       this.scheduleReconnect();
     };
@@ -181,6 +237,19 @@ export class RelayClient {
    */
   onReconnect(callback: () => void) {
     this.reconnectCallback = callback;
+  }
+
+  /**
+   * Registers a callback invoked when a WS handshake appears to have failed
+   * due to auth (close code 1006 before onopen). The callback is responsible
+   * for refreshing the JWT and calling updateToken() to retry the connect.
+   *
+   * The callback is throttled to MAX_AUTH_FAILURES consecutive failures so
+   * that a structurally invalid token doesn't produce an infinite refresh
+   * loop (and, if gateway-auth is also expired, infinite wallet popups).
+   */
+  onAuthFailure(callback: () => Promise<void>) {
+    this.authFailureCallback = callback;
   }
 
   /**
