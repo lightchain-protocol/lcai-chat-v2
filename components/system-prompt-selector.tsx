@@ -11,10 +11,11 @@ import {
   Settings,
   UserPen,
 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
-import { fetcher } from "@/lib/utils";
+import { $http } from "@/lib/http";
 import { DialogClose } from "./ui/dialog";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 
@@ -51,9 +52,15 @@ export function SystemPromptSelector({
   onCreateNew,
   disabled = false,
 }: SystemPromptSelectorProps) {
+  const { status: sessionStatus } = useSession();
+
   const { data: templates = [] } = useSWR<PromptTemplate[]>(
-    "/api/prompts",
-    fetcher
+    sessionStatus === "authenticated" ? "/api/prompts" : null,
+    async (url: string) => {
+      const response = await $http.get(url);
+      if (!response.ok) return null;
+      return response.json();
+    }
   );
 
   const [selectedId, setSelectedId] = useState<string | undefined>(value);

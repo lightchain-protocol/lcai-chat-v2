@@ -137,7 +137,11 @@ export function Chat({
   // Fetch prompt templates to match initial prompt
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
     sessionStatus === "authenticated" ? "/api/prompts" : null,
-    fetcher
+    async (url: string) => {
+      const response = await $http.get(url);
+      if (!response.ok) return null;
+      return response.json();
+    }
   );
 
   // Match initial system prompt to a template ID

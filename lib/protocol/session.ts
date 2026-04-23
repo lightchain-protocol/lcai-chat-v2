@@ -318,12 +318,6 @@ export class SessionManager {
       throw new Error("Insufficient balance");
     }
 
-    console.log("----------------------------------------");
-    console.log("Prompt", plaintext);
-    console.log("Session ID", this.state.sessionId);
-    console.log("Model ID", this.modelId);
-    console.log("----------------------------------------");
-
     const callParams = {
       account,
       address: this.jobRegistryAddress,

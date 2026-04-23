@@ -7,6 +7,7 @@ let authTokenCache: string | null = null;
 // CONSUMER_API_INTERNAL_URL (compose DNS) because the container's own localhost
 // does not route to the consumer-api service.
 const apiBaseUrl = (() => {
+  // biome-ignore lint/performance/useTopLevelRegex: This is a performance optimization
   const stripTrailingSlash = (value: string) => value.replace(/\/+$/, "");
   const publicUrl = process.env.NEXT_PUBLIC_CONSUMER_API_URL
     ? stripTrailingSlash(process.env.NEXT_PUBLIC_CONSUMER_API_URL)

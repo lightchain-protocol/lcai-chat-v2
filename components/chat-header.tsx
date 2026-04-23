@@ -8,6 +8,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
@@ -36,7 +37,6 @@ import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 import { VisibilitySelector, type VisibilityType } from "./visibility-selector";
-import { useSession } from "next-auth/react";
 
 const FILENAME_REGEX = /filename="(.+)"/;
 
@@ -67,11 +67,16 @@ function PureChatHeader({
     backedUp: boolean;
     cid: string | null;
     encrypted: boolean;
-  }>(params.id && sessionStatus === "authenticated" ? `/api/chat/${chatId}/backup` : null, async (url: string) => {
-    const response = await $http.get(url);
-    if (!response.ok) return null;
-    return response.json();
-  });
+  }>(
+    params.id && sessionStatus === "authenticated"
+      ? `/api/chat/${chatId}/backup`
+      : null,
+    async (url: string) => {
+      const response = await $http.get(url);
+      if (!response.ok) return null;
+      return response.json();
+    }
+  );
 
   const handleExportChat = async () => {
     try {
