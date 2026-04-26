@@ -15,7 +15,8 @@
     "db:check": "drizzle-kit check",
     "db:up": "drizzle-kit up",
     "db:reset": "rm -rf lib/db/migrations && mkdir -p lib/db/migrations/meta && echo '{\"version\":\"7\",\"dialect\":\"postgresql\",\"entries\":[]}' > lib/db/migrations/meta/_journal.json && drizzle-kit generate",
-    "test": "export PLAYWRIGHT=True && pnpm exec playwright test"
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^1.0.15",
