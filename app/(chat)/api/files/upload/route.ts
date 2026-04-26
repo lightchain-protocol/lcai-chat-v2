@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -17,10 +19,21 @@ const FileSchema = z.object({
     }),
 });
 
+const FILENAME_MAX_LEN = 128;
+const UNSAFE_FILENAME_CHARS = /[^\w.-]/g;
+
+function sanitizeFilename(rawFilename: string): string {
+  const safe = path
+    .basename(rawFilename)
+    .replace(UNSAFE_FILENAME_CHARS, "_")
+    .slice(0, FILENAME_MAX_LEN);
+  return safe || "file";
+}
+
 export async function POST(request: Request) {
   const session = await auth();
 
-  if (!session) {
+  if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -47,12 +60,17 @@ export async function POST(request: Request) {
     }
 
     // Get filename from formData since Blob doesn't have name property
-    const filename = (formData.get("file") as File).name;
+    const rawFilename = (formData.get("file") as File).name;
+    const safeFilename = sanitizeFilename(rawFilename);
+    // Per-user namespace + UUID — uniqueness comes from the UUID, so
+    // `addRandomSuffix: false` below is intentional, not a regression.
+    const blobKey = `uploads/${session.user.id}/${randomUUID()}-${safeFilename}`;
     const fileBuffer = await file.arrayBuffer();
 
     try {
-      const data = await put(`${filename}`, fileBuffer, {
+      const data = await put(blobKey, fileBuffer, {
         access: "public",
+        addRandomSuffix: false,
       });
 
       return NextResponse.json(data);
