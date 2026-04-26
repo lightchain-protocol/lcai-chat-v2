@@ -2,13 +2,16 @@
 
 import { generateText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
+import { auth } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/visibility-selector";
 import { myProvider } from "@/lib/ai/providers";
 import {
   deleteMessagesByChatIdAfterTimestamp,
+  getChatById,
   getMessageById,
   updateChatVisiblityById,
 } from "@/lib/db/queries";
+import { ChatSDKError } from "@/lib/errors";
 
 export async function saveChatModelAsCookie(model: string) {
   const cookieStore = await cookies();
@@ -20,6 +23,12 @@ export async function generateTitleFromUserMessage({
 }: {
   message: UIMessage;
 }) {
+  const session = await auth();
+
+  if (!session?.user) {
+    throw new ChatSDKError("unauthorized:chat");
+  }
+
   const { text: title } = await generateText({
     model: myProvider.languageModel("title-model"),
     system: `\n
@@ -37,7 +46,27 @@ export async function generateTitleFromUserMessage({
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
+  const session = await auth();
+
+  if (!session?.user) {
+    throw new ChatSDKError("unauthorized:chat");
+  }
+
   const [message] = await getMessageById({ id });
+
+  if (!message) {
+    throw new ChatSDKError("not_found:chat");
+  }
+
+  const chat = await getChatById({ id: message.chatId });
+
+  if (!chat) {
+    throw new ChatSDKError("not_found:chat");
+  }
+
+  if (chat.userId !== session.user.id) {
+    throw new ChatSDKError("forbidden:chat");
+  }
 
   await deleteMessagesByChatIdAfterTimestamp({
     chatId: message.chatId,
@@ -52,5 +81,21 @@ export async function updateChatVisibility({
   chatId: string;
   visibility: VisibilityType;
 }) {
+  const session = await auth();
+
+  if (!session?.user) {
+    throw new ChatSDKError("unauthorized:chat");
+  }
+
+  const chat = await getChatById({ id: chatId });
+
+  if (!chat) {
+    throw new ChatSDKError("not_found:chat");
+  }
+
+  if (chat.userId !== session.user.id) {
+    throw new ChatSDKError("forbidden:chat");
+  }
+
   await updateChatVisiblityById({ chatId, visibility });
 }
