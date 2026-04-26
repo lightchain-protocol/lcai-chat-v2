@@ -1,5 +1,10 @@
 import { auth } from "@/app/(auth)/auth";
-import { getChatById, getVotesByChatId, voteMessage } from "@/lib/db/queries";
+import {
+  getChatById,
+  getMessageById,
+  getVotesByChatId,
+  voteMessage,
+} from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 
 export async function GET(request: Request) {
@@ -62,6 +67,19 @@ export async function PATCH(request: Request) {
   }
 
   if (chat.userId !== session.user.id) {
+    return new ChatSDKError("forbidden:vote").toResponse();
+  }
+
+  const [message] = await getMessageById({ id: messageId });
+
+  if (!message) {
+    return new ChatSDKError("not_found:vote").toResponse();
+  }
+
+  // Refuse votes that pair a chatId with a messageId from a different
+  // chat — without this the vote table would accept rows referencing
+  // arbitrary message UUIDs from other users' chats.
+  if (message.chatId !== chatId) {
     return new ChatSDKError("forbidden:vote").toResponse();
   }
 
