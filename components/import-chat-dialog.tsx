@@ -2,6 +2,7 @@
 
 import type { DialogProps } from "@radix-ui/react-dialog";
 import { Info, Loader2Icon, UploadIcon } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -13,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import Image from "next/image";
+import { $http } from "@/lib/http";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -31,7 +32,7 @@ export function ImportChatDialog(props: DialogProps) {
     // Validate file type
     if (!file.name.endsWith(".json")) {
       toast.custom((id) => (
-        <AlertError id={id} title='Please select a JSON file' />
+        <AlertError id={id} title="Please select a JSON file" />
       ));
       return;
     }
@@ -39,7 +40,7 @@ export function ImportChatDialog(props: DialogProps) {
     // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       toast.custom((id) => (
-        <AlertError id={id} title='File size must be less than 10MB' />
+        <AlertError id={id} title="File size must be less than 10MB" />
       ));
       return;
     }
@@ -52,13 +53,7 @@ export function ImportChatDialog(props: DialogProps) {
       const data = JSON.parse(fileContent);
 
       // Send to import API
-      const response = await fetch("/api/chat/import", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
+      const response = await $http.post("/api/chat/import", data);
 
       if (!response.ok) {
         const error = await response.json();
@@ -68,7 +63,7 @@ export function ImportChatDialog(props: DialogProps) {
       const result = await response.json();
 
       toast.custom((id) => (
-      <AlertSuccess id={id} title='Chat imported successfully!' />
+        <AlertSuccess id={id} title="Chat imported successfully!" />
       ));
 
       // Close dialog
@@ -81,13 +76,18 @@ export function ImportChatDialog(props: DialogProps) {
       console.error("Import error:", error);
       if (error instanceof SyntaxError) {
         toast.custom((id) => (
-        <AlertError id={id} title='Invalid JSON file format' />
+          <AlertError id={id} title="Invalid JSON file format" />
         ));
       } else {
         toast.custom((id) => (
-        <AlertError id={id} title={ error instanceof Error
-            ? error.message
-            : "Failed to import chat. Please check the file format."} />
+          <AlertError
+            id={id}
+            title={
+              error instanceof Error
+                ? error.message
+                : "Failed to import chat. Please check the file format."
+            }
+          />
         ));
       }
     } finally {
@@ -105,7 +105,7 @@ export function ImportChatDialog(props: DialogProps) {
 
   return (
     <Dialog {...props}>
-      <DialogContent className="sm:max-w-xl rounded-lg sm:rounded-3xl">
+      <DialogContent className="rounded-lg sm:max-w-xl sm:rounded-3xl">
         <DialogHeader>
           <DialogTitle>Import Chat</DialogTitle>
           <DialogDescription>
@@ -114,10 +114,22 @@ export function ImportChatDialog(props: DialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 mt-4">
-          <div className="flex flex-col items-center gap-4 rounded-lg border-2 border-bdr-soft border-dashed p-8 bg-surface-base-subtle">
-            <Image className="dark:hidden" src="/images/icons/upload-file-light.png" width={162} height={135} alt="Upload Icon"></Image>
-            <Image className="hidden dark:block" src="/images/icons/upload-file-dark.png" width={162} height={135} alt="Upload Icon"></Image>
+        <div className="mt-4 flex flex-col gap-4">
+          <div className="flex flex-col items-center gap-4 rounded-lg border-2 border-bdr-soft border-dashed bg-surface-base-subtle p-8">
+            <Image
+              alt="Upload Icon"
+              className="dark:hidden"
+              height={135}
+              src="/images/icons/upload-file-light.png"
+              width={162}
+            />
+            <Image
+              alt="Upload Icon"
+              className="hidden dark:block"
+              height={135}
+              src="/images/icons/upload-file-dark.png"
+              width={162}
+            />
             <div className="text-center">
               <p className="mb-1 font-medium text-sm">
                 Click to upload or drag and drop
@@ -127,10 +139,10 @@ export function ImportChatDialog(props: DialogProps) {
               </p>
             </div>
             <Button
+              className="rounded-[10px]"
               disabled={isUploading}
               onClick={handleUploadClick}
               variant="outline"
-              className="rounded-[10px]"
             >
               {isUploading ? (
                 <>
@@ -155,8 +167,10 @@ export function ImportChatDialog(props: DialogProps) {
             type="file"
           />
 
-          <div className="bg-surface-base-light p-3 rounded-xl border border-bdr-soft">
-            <h6 className="font-medium text-base flex items-center gap-1.5 text-content-strong"><Info size={16} /> Note:</h6>
+          <div className="rounded-xl border border-bdr-soft bg-surface-base-light p-3">
+            <h6 className="flex items-center gap-1.5 font-medium text-base text-content-strong">
+              <Info size={16} /> Note:
+            </h6>
             <ul className="mt-1 list-inside list-disc space-y-1 text-content-medium text-sm">
               <li>Imported chats will be marked as private</li>
               <li>A new chat ID will be assigned</li>
@@ -165,7 +179,7 @@ export function ImportChatDialog(props: DialogProps) {
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 mt-6">
+        <div className="mt-6 flex justify-end gap-2">
           <Button
             disabled={isUploading}
             onClick={() => props.onOpenChange?.(false)}

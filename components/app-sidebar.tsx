@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { formatEther } from "viem";
+import { useBalance } from "wagmi";
 import { ChatSearch } from "@/components/chat-search";
 import { MoreHorizontalIcon } from "@/components/icons";
 import { ImportChatDialog } from "@/components/import-chat-dialog";
@@ -31,10 +32,9 @@ import {
   SidebarMenu,
   useSidebar,
 } from "@/components/ui/sidebar";
-import config from "@/config";
-import useCurrentChain from "@/hooks/use-current-chain";
 import useSubscription from "@/hooks/use-subscription";
-import { formatDate, formatNumber } from "@/lib/utils";
+import { $http } from "@/lib/http";
+import { compactNumber, formatDate } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,18 +59,16 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
   const { setOpenMobile } = useSidebar();
   const { mutate } = useSWRConfig();
-  const chain = useCurrentChain();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
-  const { hasActiveSubscription, activeSubscription, lcaiBalance } =
-    useSubscription();
-  const tokenSymbol = config.lcaiToken[chain.id]?.symbol ?? "LCAI";
+  const { hasActiveSubscription, activeSubscription } = useSubscription();
+  const balance = useBalance({
+    address: user?.walletAddress,
+  });
 
   const handleDeleteAll = () => {
-    const deletePromise = fetch("/api/history", {
-      method: "DELETE",
-    });
+    const deletePromise = $http.delete("/api/history");
 
     toast.promise(deletePromise, {
       loading: (
@@ -193,44 +191,48 @@ export function AppSidebar({ user }: { user: User | undefined }) {
 
         {user && (
           <div className="flex flex-col gap-2 border-bdr-light border-t px-4 py-4">
-            <div
-              className="px-2 text-content-soft text-sm"
-              data-testid="wallet-balance"
-            >
-              Wallet Balance :{" "}
-              {lcaiBalance.isLoading
-                ? "Loading..."
-                : lcaiBalance.isError
-                  ? "Unavailable"
-                  : `${formatNumber(+formatEther(lcaiBalance.data ?? 0n))} ${tokenSymbol}`}
-            </div>
-            {user &&
-              !hasActiveSubscription.isLoading &&
-              hasActiveSubscription.data && (
-                <button
-                  className="group relative flex w-full items-center justify-between rounded-xl border px-2 py-2 transition-colors"
-                  type="button"
-                >
-                  <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
-                  <div className="flex items-center gap-3">
-                    <div className="h-4 w-0.5 rounded-full bg-primary" />
-                    <div className="flex items-center divide-x">
-                      <h6 className="pr-2 font-semibold text-content-strong text-sm">
-                        Tier {activeSubscription.data?.tier || "Pro"}
-                      </h6>
-                      <div className="pl-2 text-left">
-                        <span className="mb-1 block text-content-strong text-xs">
-                          Subscription expires
-                        </span>
-                        <span className="block font-semibold text-content-default text-xs">
-                          {formatDate(activeSubscription.data?.expiryTimestamp)}
-                        </span>
-                      </div>
+            {!hasActiveSubscription.isLoading && hasActiveSubscription.data && (
+              <button
+                className="group relative flex w-full items-center justify-between rounded-xl border px-2 py-2 transition-colors"
+                type="button"
+              >
+                <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
+                <div className="flex items-center gap-3">
+                  <div className="h-4 w-0.5 rounded-full bg-primary" />
+                  <div className="flex items-center divide-x">
+                    <h6 className="pr-2 font-semibold text-content-strong text-sm">
+                      Tier {activeSubscription.data?.tier || "Pro"}
+                    </h6>
+                    <div className="pl-2 text-left">
+                      <span className="mb-1 block text-content-strong text-xs">
+                        Subscription expires
+                      </span>
+                      <span className="block font-semibold text-content-default text-xs">
+                        {formatDate(activeSubscription.data?.expiryTimestamp)}
+                      </span>
                     </div>
                   </div>
-                </button>
-              )}
-            {user && <SidebarUserNav user={user} />}
+                </div>
+              </button>
+            )}
+            <div className="group relative flex w-full items-center justify-between rounded-xl border px-2 py-3 transition-colors">
+              <div className="absolute top-0 left-0 h-full w-full rounded-xl bg-[linear-gradient(90deg,rgba(112,100,233,0.15)_0%,rgba(22,22,26,0)_17.36%)]" />
+              <div className="flex w-full items-center gap-3">
+                <div className="h-4 w-0.5 rounded-full bg-primary" />
+                <div className="flex w-full items-center divide-x">
+                  <h6 className="pr-2 font-semibold text-content-strong text-sm">
+                    Balance
+                  </h6>
+                  <div className="ml-auto pl-2">
+                    <span className="block font-semibold text-content-strong text-sm">
+                      {compactNumber(formatEther(balance.data?.value || 0n))}{" "}
+                      LCAI
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <SidebarUserNav user={user} />
           </div>
         )}
       </Sidebar>

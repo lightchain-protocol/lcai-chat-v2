@@ -25,7 +25,7 @@ export const chat = pgTable("Chat", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
   createdAt: timestamp("createdAt").notNull(),
   title: text("title").notNull(),
-  userId: uuid("userId")
+  owner: uuid("userId")
     .notNull()
     .references(() => user.id),
   visibility: varchar("visibility", { enum: ["public", "private"] })

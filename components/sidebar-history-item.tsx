@@ -1,14 +1,23 @@
 import { format } from "date-fns";
-import { CloudIcon, CopyIcon, ExternalLink, Globe, Loader, Lock, Pencil, ShieldCheckIcon, Trash } from "lucide-react";
+import {
+  CloudIcon,
+  CopyIcon,
+  ExternalLink,
+  Globe,
+  Loader,
+  Lock,
+  Pencil,
+  ShieldCheckIcon,
+  Trash,
+} from "lucide-react";
 import Link from "next/link";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import { useCopyToClipboard } from "usehooks-ts";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Chat } from "@/lib/db/schema";
-import {
-  MoreHorizontalIcon,
-} from "./icons";
+import { $http } from "@/lib/http";
+import { MoreHorizontalIcon } from "./icons";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -33,10 +42,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "./ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
 import AlertSuccess from "./ui/toast/AlertSuccess";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 const PureChatItem = ({
   chat,
@@ -52,7 +61,7 @@ const PureChatItem = ({
   onRename?: (chatId: string, newTitle: string) => void;
 }) => {
   const [, copyToClipboard] = useCopyToClipboard();
-  const { visibilityType, setVisibilityType } = useChatVisibility({
+  const { setVisibilityType } = useChatVisibility({
     chatId: chat.id,
     initialVisibilityType: chat.visibility,
   });
@@ -64,26 +73,23 @@ const PureChatItem = ({
   const handleRename = () => {
     if (!newTitle.trim()) {
       toast.custom((id) => (
-        <AlertError id={id} title='Title cannot be empty' />
+        <AlertError id={id} title="Title cannot be empty" />
       ));
       return;
     }
 
     setIsRenaming(true);
-    const renamePromise = fetch(`/api/chat?id=${chat.id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ title: newTitle.trim() }),
+    const renamePromise = $http.patch(`/api/chat?id=${chat.id}`, {
+      title: newTitle.trim(),
     });
 
     toast.promise(renamePromise, {
-      loading:
-      <AlertInfo
-        title="Renaming chat..."
-        icon={<Loader className="size-5 animate-spin text-white" />}
-      />,
+      loading: (
+        <AlertInfo
+          icon={<Loader className="size-5 animate-spin text-white" />}
+          title="Renaming chat..."
+        />
+      ),
 
       success: () => {
         setShowRenameDialog(false);
@@ -91,15 +97,11 @@ const PureChatItem = ({
         if (onRename) {
           onRename(chat.id, newTitle.trim());
         }
-        return <AlertInfo
-        title="Chat renamed successfully"
-      /> ;
+        return <AlertInfo title="Chat renamed successfully" />;
       },
       error: () => {
         setIsRenaming(false);
-        return <AlertError
-        title="Failed to rename chat"
-      />
+        return <AlertError title="Failed to rename chat" />;
       },
 
       style: {
@@ -108,7 +110,6 @@ const PureChatItem = ({
         border: "none",
         boxShadow: "none",
       },
-
     });
   };
 
@@ -147,7 +148,10 @@ const PureChatItem = ({
                             e.stopPropagation();
                             await copyToClipboard(chat.ipfsCid || "");
                             toast.custom((id) => (
-                            <AlertSuccess id={id} title='CID copied to clipboard!' />
+                              <AlertSuccess
+                                id={id}
+                                title="CID copied to clipboard!"
+                              />
                             ));
                           }}
                           type="button"
@@ -196,7 +200,7 @@ const PureChatItem = ({
             </SidebarMenuAction>
           </DropdownMenuTrigger>
 
-          <DropdownMenuContent align="end" side="bottom" className="space-y-1">
+          <DropdownMenuContent align="end" className="space-y-1" side="bottom">
             <DropdownMenuItem
               className="cursor-pointer"
               onSelect={() => {
@@ -214,7 +218,7 @@ const PureChatItem = ({
                 <span>Share</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuPortal>
-                <DropdownMenuSubContent sideOffset={10} className="spacey-y-1">
+                <DropdownMenuSubContent className="spacey-y-1" sideOffset={10}>
                   <DropdownMenuItem
                     className="cursor-pointer flex-row justify-between"
                     onClick={() => {
@@ -271,7 +275,7 @@ const PureChatItem = ({
             placeholder="Enter chat title"
             value={newTitle}
           />
-          <div className="flex justify-end gap-2 mt-4">
+          <div className="mt-4 flex justify-end gap-2">
             <Button
               disabled={isRenaming}
               onClick={() => setShowRenameDialog(false)}

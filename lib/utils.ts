@@ -1,6 +1,6 @@
 import type {
-  CoreAssistantMessage,
-  CoreToolMessage,
+  AssistantModelMessage,
+  ToolModelMessage,
   UIMessage,
   UIMessagePart,
 } from 'ai';
@@ -10,13 +10,14 @@ import { twMerge } from 'tailwind-merge';
 import type { DBMessage } from '@/lib/db/schema';
 import { ChatSDKError, type ErrorCode } from './errors';
 import type { ChatMessage, ChatTools, CustomUIDataTypes } from './types';
+import { $http } from './http';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 export const fetcher = async (url: string) => {
-  const response = await fetch(url);
+  const response = await $http.get(url);
 
   if (!response.ok) {
     const { code, cause } = await response.json();
@@ -31,7 +32,7 @@ export async function fetchWithErrorHandlers(
   init?: RequestInit,
 ) {
   try {
-    const response = await fetch(input, init);
+    const response = await $http.request(input, init);
 
     if (!response.ok) {
       const { code, cause } = await response.json();
@@ -63,7 +64,7 @@ export function generateUUID(): string {
   });
 }
 
-type ResponseMessageWithoutId = CoreToolMessage | CoreAssistantMessage;
+type ResponseMessageWithoutId = ToolModelMessage | AssistantModelMessage;
 type ResponseMessage = ResponseMessageWithoutId & { id: string };  
 
 export function getMostRecentUserMessage(messages: UIMessage[]) {
@@ -118,4 +119,12 @@ export function formatDate(timestamp: number | undefined) {
 export function formatNumber(number?: string | number) {
   if (!number) return "0";
   return Number(number).toLocaleString();
+}
+
+export function compactNumber(number?: string | number) {
+  if (!number) return "0";
+  return Number(number).toLocaleString("en-US", {
+    maximumFractionDigits: 2,
+    notation: "compact",
+  });
 }

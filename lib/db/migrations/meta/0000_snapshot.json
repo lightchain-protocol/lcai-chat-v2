@@ -1,5 +1,5 @@
 {
-  "id": "0388f6b8-7851-4f3c-9eb2-d667de48843f",
+  "id": "4bc78e72-28fb-4a42-850f-417d98b4b497",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -45,6 +45,31 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "systemPrompt": {
+          "name": "systemPrompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ipfsCid": {
+          "name": "ipfsCid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "backedUpAt": {
+          "name": "backedUpAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "backupEncrypted": {
+          "name": "backupEncrypted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
         }
       },
       "indexes": {},
@@ -121,6 +146,69 @@
             "id"
           ],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.PromptTemplate": {
+      "name": "PromptTemplate",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "userId": {
+          "name": "userId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "isDefault": {
+          "name": "isDefault",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "PromptTemplate_userId_User_id_fk": {
+          "name": "PromptTemplate_userId_User_id_fk",
+          "tableFrom": "PromptTemplate",
+          "tableTo": "User",
+          "columnsFrom": [
+            "userId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

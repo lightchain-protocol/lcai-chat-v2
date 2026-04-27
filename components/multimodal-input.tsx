@@ -4,7 +4,6 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Lock } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -15,7 +14,6 @@ import {
   startTransition,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -23,11 +21,8 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
-import type { SubscriptionTierType } from "@/config/subscription";
-import useSubscription from "@/hooks/use-subscription";
-import { useUsageWarnings } from "@/hooks/use-usage-warnings";
 import { chatModels } from "@/lib/ai/models";
-import { myProvider } from "@/lib/ai/providers";
+import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
@@ -48,10 +43,8 @@ import {
   StopIcon,
 } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
-import SubscriptionDialog from "./subscription-dialog";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
 import AlertError from "./ui/toast/AlertError";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -73,6 +66,8 @@ function PureMultimodalInput({
   usage,
   enableWebSearch,
   onWebSearchToggle,
+  disabled,
+  disabledPlaceholder,
 }: {
   chatId: string;
   input: string;
@@ -91,30 +86,12 @@ function PureMultimodalInput({
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
+  disabled?: boolean;
+  disabledPlaceholder?: string;
 }) {
   const session = useSession();
-  const subscription = useSubscription();
-  const { hasActiveSubscription } = subscription;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
-  const [showSubscriptionDialog, setShowSubscriptionDialog] = useState(false);
-
-  // Map blockchain tier names to our tier names
-  const getSubscriptionTierType = (): SubscriptionTierType => {
-    const tier = subscription.activeSubscription.data?.tier;
-    if (tier === "Pro") return "pro";
-    if (tier === "Enterprise") return "enterprise";
-    return "basic";
-  };
-
-  const subscriptionTier = getSubscriptionTierType();
-
-  // Enable usage warnings
-  useUsageWarnings({
-    usage,
-    subscriptionTier,
-    onUpgradeClick: () => setShowSubscriptionDialog(true),
-  });
 
   const adjustHeight = useCallback(() => {
     if (textareaRef.current) {
@@ -139,10 +116,7 @@ function PureMultimodalInput({
     ""
   );
 
-  const canUseChat = useMemo(() => {
-    if (session.status !== "authenticated") return false;
-    return hasActiveSubscription.data ?? false;
-  }, [session.status, hasActiveSubscription.data]);
+  const canUseChat = session.status === "authenticated";
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -169,6 +143,10 @@ function PureMultimodalInput({
 
   const submitForm = useCallback(() => {
     window.history.replaceState({}, "", `/chat/${chatId}`);
+
+    if (status === "error") {
+      setMessages((messages) => messages.slice(0, -1)); // remove last message if error
+    }
 
     sendMessage({
       role: "user",
@@ -204,6 +182,8 @@ function PureMultimodalInput({
     width,
     chatId,
     resetHeight,
+    setMessages,
+    status,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -211,7 +191,7 @@ function PureMultimodalInput({
     formData.append("file", file);
 
     try {
-      const response = await fetch("/api/files/upload", {
+      const response = await $http.request("/api/files/upload", {
         method: "POST",
         body: formData,
       });
@@ -235,9 +215,9 @@ function PureMultimodalInput({
     }
   }, []);
 
-  const _modelResolver = useMemo(() => {
-    return myProvider.languageModel(selectedModelId);
-  }, [selectedModelId]);
+  // const _modelResolver = useMemo(() => {
+  //   return myProvider.languageModel(selectedModelId);
+  // }, [selectedModelId]);
 
   // const contextProps = useMemo(
   //   () => ({
@@ -300,7 +280,7 @@ function PureMultimodalInput({
         className="border border-bdr-light p-3 transition-all duration-200 sm:p-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (status !== "ready") {
+          if (status === "submitted") {
             toast.custom((id) => (
               <AlertError
                 id={id}
@@ -347,30 +327,26 @@ function PureMultimodalInput({
         )}
         <div className="relative flex flex-row items-start gap-1 sm:gap-2">
           <div className="absolute top-[3px] border-surface-base-extraLight border-r pr-2 sm:top-0.5">
-            {hasActiveSubscription.data ? (
-              <Image
-                alt="Icon"
-                height={16}
-                src="/images/logo/favicon.png"
-                width={16}
-              />
-            ) : (
-              <Lock className="text-content-light" size={16} />
-            )}
+            <Image
+              alt="Icon"
+              height={16}
+              src="/images/logo/favicon.png"
+              width={16}
+            />
           </div>
           <PromptInputTextarea
             autoFocus
             className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
-            disabled={!canUseChat}
+            disabled={disabled || !canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
             placeholder={
-              hasActiveSubscription.data
-                ? "Send a message..."
-                : "Activate your subscription and get credit to unlock chat..."
+              disabled && disabledPlaceholder
+                ? disabledPlaceholder
+                : "Send a message..."
             }
             ref={textareaRef}
             rows={1}
@@ -385,14 +361,14 @@ function PureMultimodalInput({
               selectedModelId={selectedModelId}
               status={status}
             /> */}
-            <div className="flex items-center gap-2 px-1 py-1">
+            {/* <div className="flex items-center gap-2 px-1 py-1">
               <Switch
                 checked={enableWebSearch ?? false}
                 className="rounded-full!"
                 onCheckedChange={onWebSearchToggle}
               />
               <span className="text-content-secondary text-sm">Web Search</span>
-            </div>
+            </div> */}
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
@@ -404,7 +380,7 @@ function PureMultimodalInput({
           ) : (
             <PromptInputSubmit
               className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
-              disabled={!input.trim() || uploadQueue.length > 0}
+              disabled={disabled || !input.trim() || uploadQueue.length > 0}
               status={status}
             >
               <ArrowUpIcon size={14} />
@@ -416,19 +392,14 @@ function PureMultimodalInput({
       {messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 &&
-        canUseChat && (
+        canUseChat &&
+        !disabled && (
           <SuggestedActions
             chatId={chatId}
             selectedVisibilityType={selectedVisibilityType}
             sendMessage={sendMessage}
           />
         )}
-
-      {/* Subscription dialog for upgrades */}
-      <SubscriptionDialog
-        onOpenChange={setShowSubscriptionDialog}
-        open={showSubscriptionDialog}
-      />
     </div>
   );
 }
@@ -452,6 +423,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
+      return false;
+    }
+    if (prevProps.disabled !== nextProps.disabled) {
       return false;
     }
 

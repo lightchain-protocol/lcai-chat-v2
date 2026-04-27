@@ -7,6 +7,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { $http } from "@/lib/http";
 import { cn } from "@/lib/utils";
 
 const WWW_PREFIX = /^www\./;
@@ -30,7 +31,9 @@ async function fetchMetaData(url: string): Promise<{
   description: string;
 }> {
   try {
-    const res = await fetch(`/api/metadata?url=${encodeURIComponent(url)}`);
+    const res = await $http.get(`/api/metadata?url=${encodeURIComponent(url)}`, {
+      auth: false,
+    });
     if (!res.ok) throw new Error("Failed to fetch metadata");
     return res.json();
   } catch {

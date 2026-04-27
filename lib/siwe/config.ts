@@ -5,8 +5,34 @@ import {
   type SIWESession,
   type SIWEVerifyMessageArgs,
 } from "@reown/appkit-siwe";
-import { getCsrfToken, getSession, signIn, signOut } from "next-auth/react";
+import { getSession, signIn, signOut } from "next-auth/react";
 import config from "@/config";
+import { $http, clearAuthToken, setAuthToken } from "@/lib/http";
+
+/**
+ * Custom DOM event dispatched after SIWE sign-in or sign-out completes.
+ * The SIWESessionSync component listens for this to trigger a soft refresh.
+ */
+function dispatchSessionChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("siwe-session-changed"));
+  }
+}
+
+async function syncAuthTokenFromSession(): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const session = await getSession();
+    const token = session?.user?.token;
+    if (token) {
+      setAuthToken(token);
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return false;
+}
 
 export const siweConfig = createSIWEConfig({
   getMessageParams: async () => ({
@@ -19,21 +45,42 @@ export const siweConfig = createSIWEConfig({
   createMessage: ({ address, ...args }: SIWECreateMessageArgs) =>
     formatMessage(args, address),
 
-  getNonce: async () => {
-    const nonce = await getCsrfToken();
-    if (!nonce) {
+  getNonce: async (address) => {
+    const response = await $http.get(`/api/auth/challenge?address=${address}`, {
+      auth: false,
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to get challenge!");
+    }
+    const data = await response.json();
+
+    if (!data.nonce) {
       throw new Error("Failed to get nonce!");
     }
 
-    return nonce;
+    return data.nonce;
   },
 
   getSession: async () => {
     const session = await getSession();
-    console.log("session in siwe config", session);
     if (!session?.user?.id) {
+      clearAuthToken();
       return null;
     }
+
+    // verify if token is valid
+    const response = await $http.get("/api/auth/session");
+
+    const data = await response.json();
+    if (!data.user) {
+      clearAuthToken();
+      return null;
+    }
+
+    setAuthToken(session.user.token);
 
     return {
       address: session.user.walletAddress,
@@ -51,8 +98,8 @@ export const siweConfig = createSIWEConfig({
       });
 
       if (success?.ok) {
-        // Refresh the page after successful sign-in
-        window.location.reload();
+        await syncAuthTokenFromSession();
+        dispatchSessionChanged();
         return true;
       }
 
@@ -63,14 +110,9 @@ export const siweConfig = createSIWEConfig({
   },
   signOut: async () => {
     try {
-      // Sign out from NextAuth
-      await signOut({
-        redirect: false,
-      });
-
-      // Refresh the page to show the greeting/connect button again
-      window.location.reload();
-
+      clearAuthToken();
+      await signOut({ redirectTo: "/" });
+      dispatchSessionChanged();
       return true;
     } catch (_error) {
       return false;

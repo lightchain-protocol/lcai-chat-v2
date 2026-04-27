@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
+import { $http } from "@/lib/http";
 import type { ChatMessage } from "@/lib/types";
 import { Action, Actions } from "./elements/actions";
 import AlertError from "./ui/toast/AlertError";
@@ -66,7 +67,7 @@ export function PureMessageActions({
     return (
       <Actions className="-mr-0.5 justify-end">
         <div className="relative">
-          {setMode && (
+          {/* {setMode && (
             <Action
               className="-left-10 absolute top-0 opacity-0 transition-opacity group-hover/message:opacity-100"
               onClick={() => setMode("edit")}
@@ -74,7 +75,7 @@ export function PureMessageActions({
             >
               <Pencil />
             </Action>
-          )}
+          )} */}
           <Action onClick={handleCopy} tooltip="Copy">
             {copied ? <CopyCheck /> : <Copy />}
           </Action>
@@ -92,13 +93,10 @@ export function PureMessageActions({
       <Action
         data-testid="message-upvote"
         onClick={() => {
-          const upvote = fetch("/api/vote", {
-            method: "PATCH",
-            body: JSON.stringify({
-              chatId,
-              messageId: message.id,
-              type: "up",
-            }),
+          const upvote = $http.patch("/api/vote", {
+            chatId,
+            messageId: message.id,
+            type: "up",
           });
 
           toast.promise(upvote, {
@@ -181,13 +179,10 @@ export function PureMessageActions({
         data-testid="message-downvote"
         disabled={vote && !vote.isUpvoted}
         onClick={() => {
-          const downvote = fetch("/api/vote", {
-            method: "PATCH",
-            body: JSON.stringify({
-              chatId,
-              messageId: message.id,
-              type: "down",
-            }),
+          const downvote = $http.patch("/api/vote", {
+            chatId,
+            messageId: message.id,
+            type: "down",
           });
 
           toast.promise(downvote, {

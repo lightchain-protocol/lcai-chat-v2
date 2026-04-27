@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1762885598122,
-      "tag": "0000_productive_oracle",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1763642189968,
-      "tag": "0001_known_gamora",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1763698794629,
-      "tag": "0002_gigantic_wendell_rand",
+      "when": 1775130412793,
+      "tag": "0000_foamy_doomsday",
       "breakpoints": true
     }
   ]

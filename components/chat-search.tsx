@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SearchResult } from "@/lib/db/queries";
+import { $http } from "@/lib/http";
 import { cn } from "@/lib/utils";
 import { SidebarGroup, SidebarGroupContent } from "./ui/sidebar";
 import AlertError from "./ui/toast/AlertError";
@@ -38,7 +39,7 @@ export function ChatSearch() {
 
       setIsSearching(true);
       try {
-        const response = await fetch(
+        const response = await $http.get(
           `/api/search?q=${encodeURIComponent(debouncedQuery)}&limit=20`
         );
 

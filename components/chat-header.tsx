@@ -8,6 +8,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
@@ -29,6 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { $http } from "@/lib/http";
 import { PlusIcon } from "./icons";
 import { useSidebar } from "./ui/sidebar";
 import AlertError from "./ui/toast/AlertError";
@@ -54,9 +56,9 @@ function PureChatHeader({
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { open } = useSidebar();
+  const { status: sessionStatus } = useSession();
 
   const { width: windowWidth } = useWindowSize();
-
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const [editorDialogOpen, setEditorDialogOpen] = useState(false);
 
@@ -65,15 +67,20 @@ function PureChatHeader({
     backedUp: boolean;
     cid: string | null;
     encrypted: boolean;
-  }>(chatId ? `/api/chat/${chatId}/backup` : null, async (url: string) => {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return response.json();
-  });
+  }>(
+    params.id && sessionStatus === "authenticated"
+      ? `/api/chat/${chatId}/backup`
+      : null,
+    async (url: string) => {
+      const response = await $http.get(url);
+      if (!response.ok) return null;
+      return response.json();
+    }
+  );
 
   const handleExportChat = async () => {
     try {
-      const response = await fetch(`/api/chat/${chatId}/export`);
+      const response = await $http.get(`/api/chat/${chatId}/export`);
 
       if (!response.ok) {
         throw new Error("Failed to export chat");
@@ -108,9 +115,7 @@ function PureChatHeader({
 
   const handleBackup = () => {
     try {
-      const responsePromise = fetch(`/api/chat/${chatId}/backup`, {
-        method: "POST",
-      });
+      const responsePromise = $http.post(`/api/chat/${chatId}/backup`);
 
       toast.promise(responsePromise, {
         loading: (

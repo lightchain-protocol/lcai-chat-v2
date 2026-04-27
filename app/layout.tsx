@@ -7,6 +7,7 @@ import "./globals.css";
 import { headers } from "next/headers";
 import { SessionProvider } from "next-auth/react";
 import Web3WalletProvider from "@/components/web3-wallet-provider";
+import { SIWESessionSync } from "@/components/siwe-session-sync";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://chat.lightchain.ai"),
@@ -107,7 +108,10 @@ export default async function RootLayout({
             position="top-right"
           />
           <Web3WalletProvider cookies={cookies}>
-            <SessionProvider>{children}</SessionProvider>
+            <SessionProvider>
+              <SIWESessionSync />
+              {children}
+            </SessionProvider>
           </Web3WalletProvider>
         </ThemeProvider>
       </body>
