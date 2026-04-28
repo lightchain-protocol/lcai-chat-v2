@@ -19,6 +19,7 @@ import {
   encryptSessionKey,
   generateSessionKey,
   importPublicKey,
+  P256_UNCOMPRESSED_KEY_BYTES,
 } from "./crypto";
 import type {
   GatewayClient,
@@ -460,6 +461,11 @@ export class SessionManager {
         args: [newWorkerAddress as `0x${string}`],
       });
       const workerPubRaw = hexToUint8(workerPubKeyHex as string);
+      if (workerPubRaw.length !== P256_UNCOMPRESSED_KEY_BYTES) {
+        throw new Error(
+          `WorkerRegistry returned ${workerPubRaw.length}-byte pubkey for ${newWorkerAddress}; expected ${P256_UNCOMPRESSED_KEY_BYTES}-byte uncompressed P-256 (worker may not be registered)`
+        );
+      }
       const workerPub = await importPublicKey(workerPubRaw);
       const encWorkerKeyBytes = await encryptSessionKey(
         this.sessionKey,
@@ -607,7 +613,24 @@ export class SessionManager {
     encDisputerKey: string;
     sessionKey: Uint8Array;
   }> {
-    const workerPubRaw = base64ToUint8(selected.workerEncryptionKey);
+    // Authoritatively pin the worker's encryption key to the on-chain
+    // registry rather than trusting `selected.workerEncryptionKey` from the
+    // dispatcher — otherwise a malicious or compromised dispatcher could
+    // substitute its own pubkey, decrypt the session key, and forward to
+    // the real worker (MITM). The chain registry is already in the trust
+    // model (cf. `rewrapAndUpdateKey`).
+    const workerPubKeyHex = await this.publicClient.readContract({
+      address: this.workerRegistryAddress,
+      abi: workerRegistryAbi,
+      functionName: "getWorkerEncryptionKey",
+      args: [selected.worker as `0x${string}`],
+    });
+    const workerPubRaw = hexToUint8(workerPubKeyHex as string);
+    if (workerPubRaw.length !== P256_UNCOMPRESSED_KEY_BYTES) {
+      throw new Error(
+        `WorkerRegistry returned ${workerPubRaw.length}-byte pubkey for ${selected.worker}; expected ${P256_UNCOMPRESSED_KEY_BYTES}-byte uncompressed P-256 (worker may not be registered)`
+      );
+    }
     const workerPub = await importPublicKey(workerPubRaw);
     const sessionKey = await generateSessionKey();
     const encWorkerKeyBytes = await encryptSessionKey(sessionKey, workerPub);
