@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { deleteTrailingMessages } from "@/app/(chat)/actions";
 import type { ChatMessage } from "@/lib/types";
 import { getTextFromMessage } from "@/lib/utils";
 import { Button } from "./ui/button";
@@ -77,12 +76,8 @@ export function MessageEditor({
           className="h-fit px-3 py-2"
           data-testid="message-editor-send-button"
           disabled={isSubmitting}
-          onClick={async () => {
+          onClick={() => {
             setIsSubmitting(true);
-
-            await deleteTrailingMessages({
-              id: message.id,
-            });
 
             setMessages((messages) => {
               const index = messages.findIndex((m) => m.id === message.id);
