@@ -79,6 +79,7 @@ export function Chat({
   const {
     getTransport: getProtocolTransport,
     failoverStatus,
+    progressStatus,
     retryFailover,
     startNewSession,
   } = useProtocolSession(currentModelId, walletClient, address, id);
@@ -272,6 +273,7 @@ export function Chat({
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          protocolProgressStatus={isProtocolMode ? progressStatus : undefined}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
           setMessages={setMessages}

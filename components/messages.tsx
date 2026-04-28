@@ -5,7 +5,11 @@ import { ArrowDownIcon } from "lucide-react";
 import { memo, useEffect } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
-import type { ChatMessage } from "@/lib/types";
+import {
+  type ChatMessage,
+  PROTOCOL_LOADING_STATUS_LABELS,
+  type ProtocolLoadingStatus,
+} from "@/lib/types";
 import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
@@ -21,6 +25,7 @@ type MessagesProps = {
   isReadonly: boolean;
   isArtifactVisible: boolean;
   selectedModelId: string;
+  protocolProgressStatus?: ProtocolLoadingStatus;
 };
 
 function PureMessages({
@@ -32,6 +37,7 @@ function PureMessages({
   regenerate,
   isReadonly,
   selectedModelId,
+  protocolProgressStatus,
 }: MessagesProps) {
   const {
     containerRef: messagesContainerRef,
@@ -92,7 +98,16 @@ function PureMessages({
           ))}
 
           <AnimatePresence mode="wait">
-            {status === "submitted" && <ThinkingMessage key="thinking" />}
+            {status === "submitted" && (
+              <ThinkingMessage
+                key="thinking"
+                label={
+                  protocolProgressStatus
+                    ? PROTOCOL_LOADING_STATUS_LABELS[protocolProgressStatus]
+                    : "Thinking..."
+                }
+              />
+            )}
           </AnimatePresence>
 
           <div

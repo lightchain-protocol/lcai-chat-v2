@@ -20,6 +20,36 @@ export type ChatTools = {
   webSearch: webSearchTool;
 };
 
+export type ProtocolLoadingStatus =
+  | "idle"
+  | "preparing_chat"
+  | "writing_on_chain"
+  | "submitting_job"
+  | "waiting_for_relay"
+  | "decoding_prompt"
+  | "thinking"
+  | "reasoning"
+  | "streaming"
+  | "completed"
+  | "error";
+
+export const PROTOCOL_LOADING_STATUS_LABELS: Record<
+  ProtocolLoadingStatus,
+  string
+> = {
+  idle: "Thinking...",
+  preparing_chat: "Preparing your chat...",
+  writing_on_chain: "Writing on chain...",
+  submitting_job: "Uploading prompt to chain...",
+  waiting_for_relay: "Thinking...",
+  decoding_prompt: "Decoding your prompt",
+  thinking: "Thinking...",
+  reasoning: "Reasoning...",
+  streaming: "Reasoning...",
+  completed: "Thinking...",
+  error: "Thinking...",
+};
+
 export type CustomUIDataTypes = {
   textDelta: string;
   imageDelta: string;

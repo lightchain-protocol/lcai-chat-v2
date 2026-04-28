@@ -44,9 +44,7 @@ const PurePreviewMessage = ({
 
   const parts = message.parts ?? [];
 
-  const attachmentsFromMessage = parts.filter(
-    (part) => part.type === "file"
-  );
+  const attachmentsFromMessage = parts.filter((part) => part.type === "file");
 
   // Collect all search results from webSearch tool calls
   const searchResults = useMemo(() => {
@@ -116,9 +114,7 @@ const PurePreviewMessage = ({
             "min-h-96": message.role === "assistant" && requiresScrollPadding,
             "w-full":
               (message.role === "assistant" &&
-                parts.some(
-                  (p) => p.type === "text" && p.text?.trim()
-                )) ||
+                parts.some((p) => p.type === "text" && p.text?.trim())) ||
               mode === "edit",
             "max-w-[calc(100%-2.5rem)] sm:max-w-[min(fit-content,80%)]":
               message.role === "user" && mode !== "edit",
@@ -321,7 +317,11 @@ export const PreviewMessage = memo(
   }
 );
 
-export const ThinkingMessage = () => {
+export const ThinkingMessage = ({
+  label = "Thinking...",
+}: {
+  label?: string;
+}) => {
   const role = "assistant";
 
   return (
@@ -342,7 +342,7 @@ export const ThinkingMessage = () => {
 
         <div className="flex w-full flex-col gap-2 md:gap-4">
           <Shimmer as="p" duration={2}>
-            Thinking...
+            {label}
           </Shimmer>
         </div>
       </div>

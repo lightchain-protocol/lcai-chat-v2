@@ -11,6 +11,7 @@ import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
 import type { FailoverStatus } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
+import type { ProtocolLoadingStatus } from "@/lib/types";
 
 /**
  * React hook that manages a LightChain protocol session.
@@ -30,6 +31,8 @@ export function useProtocolSession(
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [failoverStatus, setFailoverStatus] = useState<FailoverStatus>("none");
+  const [progressStatus, setProgressStatus] =
+    useState<ProtocolLoadingStatus>("idle");
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
   const resolvedModelIdRef = useRef<string | null>(null);
@@ -173,13 +176,24 @@ export function useProtocolSession(
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);
+
+      if (s === "preparing" || s === "key_exchange") {
+        setProgressStatus("preparing_chat");
+      } else if (s === "creating") {
+        setProgressStatus("writing_on_chain");
+      } else if (s === "ready") {
+        setProgressStatus("thinking");
+      }
+
       if (s === "error") {
         setError("Session initialization failed");
+        setProgressStatus("error");
       } else {
         setError(null);
       }
     });
     transport.setOnFailoverStatus(setFailoverStatus);
+    transport.setOnProgressStatus(setProgressStatus);
     transportRef.current = transport;
     return transport;
   }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
@@ -192,6 +206,7 @@ export function useProtocolSession(
     resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
+    setProgressStatus("idle");
   }, []);
 
   /** Full teardown including persisted tab session (wallet change / disconnect). */
@@ -203,6 +218,7 @@ export function useProtocolSession(
     setStatus("idle");
     setError(null);
     setFailoverStatus("none");
+    setProgressStatus("idle");
   }, []);
 
   // Cleanup on unmount — preserve per-chat sessionStorage so revisiting the chat restores the session
@@ -247,6 +263,7 @@ export function useProtocolSession(
     status,
     error,
     failoverStatus,
+    progressStatus,
     getTransport,
     reset: resetForWallet,
     retryFailover,

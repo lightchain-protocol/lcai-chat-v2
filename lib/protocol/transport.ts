@@ -14,6 +14,7 @@
  * doesn't support custom headers.
  */
 
+import type { ProtocolLoadingStatus } from "../types";
 import type { GatewayClient } from "./gateway-client";
 import type { LifecycleEvent, WSErrorFrame, WSFrame } from "./relay-client";
 import { RelayClient } from "./relay-client";
@@ -70,6 +71,7 @@ export class ProtocolTransport {
   private lastRegisteredApiSessionId: number | null = null;
   private onSessionStatus?: (status: string) => void;
   private onFailoverStatusChange?: (status: FailoverStatus) => void;
+  private onProgressStatusChange?: (status: ProtocolLoadingStatus) => void;
   private failoverPromise: Promise<void> | null = null;
 
   constructor(config: ProtocolTransportConfig) {
@@ -87,6 +89,10 @@ export class ProtocolTransport {
 
   setOnFailoverStatus(cb: (status: FailoverStatus) => void) {
     this.onFailoverStatusChange = cb;
+  }
+
+  setOnProgressStatus(cb: (status: ProtocolLoadingStatus) => void) {
+    this.onProgressStatusChange = cb;
   }
 
   get sessionStatus() {
@@ -129,6 +135,7 @@ export class ProtocolTransport {
   startNewSession() {
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.setProgressStatus("idle");
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.sessionMgr.reset();
@@ -151,8 +158,11 @@ export class ProtocolTransport {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
+    this.setProgressStatus("preparing_chat");
+
     // Initialize session on first message
     await this.sessionMgr.initialize();
+    this.setProgressStatus("thinking");
 
     // Ensure relay is connected
     this.ensureRelayConnected();
@@ -185,7 +195,9 @@ export class ProtocolTransport {
     }
 
     // Submit job: encrypt → blob upload → on-chain TX via user's wallet
+    this.setProgressStatus("submitting_job");
     const { jobId } = await this.sessionMgr.submitJob(plaintext);
+    this.setProgressStatus("waiting_for_relay");
 
     // We persist the user message after the job is submitted to ensure the job ID is available for the assistant message.
     await this.persistence.persistUserMessage({
@@ -225,6 +237,7 @@ export class ProtocolTransport {
     this.lastRegisteredApiSessionId = null;
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.setProgressStatus("idle");
     this.sessionMgr.release();
   }
 
@@ -237,6 +250,7 @@ export class ProtocolTransport {
     this.lastRegisteredApiSessionId = null;
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.setProgressStatus("idle");
     this.sessionMgr.reset();
   }
 
@@ -276,6 +290,10 @@ export class ProtocolTransport {
     this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
     this.relayClient.onReconnect(() => this.handleReconnect());
     this.relayClient.connect();
+  }
+
+  private setProgressStatus(status: ProtocolLoadingStatus) {
+    this.onProgressStatusChange?.(status);
   }
 
   private setFailoverStatus(status: FailoverStatus) {
@@ -422,6 +440,7 @@ export class ProtocolTransport {
             try {
               if (frame.type === "error") {
                 const errorFrame = frame as WSErrorFrame;
+                this.setProgressStatus("error");
                 controller.enqueue(
                   sse({ type: "error", errorText: errorFrame.message })
                 );
@@ -434,6 +453,7 @@ export class ProtocolTransport {
 
               if (wsFrame.payload && !started) {
                 started = true;
+                this.setProgressStatus("decoding_prompt");
                 relayClient.beginAssistantMessage({
                   jobId,
                   chatId,
@@ -452,6 +472,7 @@ export class ProtocolTransport {
                 const decrypted = await sessionMgr.decryptResponse(
                   wsFrame.payload
                 );
+                this.setProgressStatus("reasoning");
                 relayClient.appendAssistantDelta(jobId, decrypted);
                 controller.enqueue(
                   sse({ type: "text-delta", id: partId, delta: decrypted })
@@ -460,15 +481,18 @@ export class ProtocolTransport {
 
               if (wsFrame.type === "complete") {
                 if (started) {
+                  this.setProgressStatus("streaming");
                   controller.enqueue(sse({ type: "text-end", id: partId }));
                   await relayClient.completeAssistantMessage(jobId);
                 }
+                this.setProgressStatus("completed");
                 controller.close();
                 unsubscribe();
               }
             } catch (err) {
               const msg =
                 err instanceof Error ? err.message : "decryption failed";
+              this.setProgressStatus("error");
               controller.enqueue(sse({ type: "error", errorText: msg }));
               relayClient.discardAssistantMessage(jobId);
               controller.close();
@@ -478,6 +502,7 @@ export class ProtocolTransport {
         );
 
         signal?.addEventListener("abort", () => {
+          this.setProgressStatus("idle");
           relayClient.discardAssistantMessage(jobId);
           unsubscribe();
           controller.close();
