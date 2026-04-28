@@ -3,8 +3,8 @@ import { clearAuthToken, getAuthToken } from "@/lib/http";
 import type { AuthProvider } from "./gateway-client";
 
 /**
- * Gateway AuthProvider backed by the consumer-api ES256K JWT stored in the
- * NextAuth session / localStorage after SIWE sign-in.
+ * Gateway AuthProvider backed by the consumer-api ES256K JWT carried in the
+ * NextAuth session after SIWE sign-in.
  *
  * There is no wallet challenge — the bearer token comes from the same session
  * that authenticates all other consumer-api calls (`lib/http.ts`). This
