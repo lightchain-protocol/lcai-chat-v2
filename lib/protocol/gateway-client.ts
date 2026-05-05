@@ -66,6 +66,13 @@ export class GatewayClientError extends Error {
   }
 }
 
+export class ProtocolAuthExpiredError extends Error {
+  constructor(message = "Protocol authentication expired") {
+    super(message);
+    this.name = "ProtocolAuthExpiredError";
+  }
+}
+
 export class GatewayClient {
   private readonly baseUrl: string;
   private readonly auth?: AuthProvider;
@@ -128,6 +135,9 @@ export class GatewayClient {
       res = await this.getResponse(`/api/sessions/${sessionId}/token`, {
         protected: true,
       });
+      if (res.status === 401) {
+        throw new ProtocolAuthExpiredError();
+      }
     }
 
     if (res.status === 202) {
@@ -198,6 +208,12 @@ export class GatewayClient {
       },
       body: JSON.stringify(body),
     });
+
+    if (res.status === 401 && options?.protected) {
+      this.auth?.clearToken?.();
+      throw new ProtocolAuthExpiredError();
+    }
+
     return this.handleResponse<T>(res);
   }
 
@@ -205,9 +221,16 @@ export class GatewayClient {
     path: string,
     options?: { protected?: boolean; bearerOnly?: boolean }
   ): Promise<Response> {
-    return fetch(`${this.baseUrl}${path}`, {
+    const res = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.getRequestHeaders(options),
     });
+
+    if (res.status === 401 && options?.protected) {
+      this.auth?.clearToken?.();
+      throw new ProtocolAuthExpiredError();
+    }
+
+    return res;
   }
 
   private async getRequestHeaders(options?: {

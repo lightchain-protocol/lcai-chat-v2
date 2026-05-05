@@ -2,7 +2,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
-import { memo, useEffect } from "react";
+import { memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
 import {
@@ -39,6 +39,7 @@ function PureMessages({
   selectedModelId,
   protocolProgressStatus,
 }: MessagesProps) {
+  const initialScrollChatIdRef = useRef<string | null>(null);
   const {
     containerRef: messagesContainerRef,
     endRef: messagesEndRef,
@@ -50,6 +51,20 @@ function PureMessages({
   });
 
   useDataStream();
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    if (initialScrollChatIdRef.current === chatId) {
+      return;
+    }
+
+    initialScrollChatIdRef.current = chatId;
+    requestAnimationFrame(() => {
+      scrollToBottom("auto");
+    });
+  }, [chatId, messages.length, scrollToBottom]);
 
   useEffect(() => {
     if (status === "submitted") {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { useAppKit } from "@reown/appkit/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -17,6 +18,7 @@ import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
@@ -30,6 +32,26 @@ import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
+
+function isProtocolAuthExpiredError(error: unknown): boolean {
+  if (error instanceof ProtocolAuthExpiredError) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const candidate = error as {
+    walk?: () => unknown;
+    cause?: unknown;
+  };
+  const walkedError = candidate.walk?.();
+  return (
+    walkedError instanceof ProtocolAuthExpiredError ||
+    candidate.cause instanceof ProtocolAuthExpiredError
+  );
+}
 
 export function Chat({
   id,
@@ -58,6 +80,7 @@ export function Chat({
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
   const { status: sessionStatus } = useSession();
+  const { open } = useAppKit();
 
   const [input, setInput] = useState<string>("");
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
@@ -193,6 +216,17 @@ export function Chat({
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error: any) => {
+      if (isProtocolMode && isProtocolAuthExpiredError(error)) {
+        toast.custom((errorId) => (
+          <AlertError
+            id={errorId}
+            title="Your session expired. Please sign in with your wallet again."
+          />
+        ));
+        open();
+        return;
+      }
+
       toast.custom((errorId) => (
         <AlertError
           id={errorId}
