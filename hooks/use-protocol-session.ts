@@ -75,7 +75,7 @@ export function useProtocolSession(
     }
 
     const match = models.find((m) =>
-      m.name.toLowerCase().includes(modelId.toLowerCase())
+      m.id.toLowerCase().includes(modelId.toLowerCase())
     );
     const resolved = match?.id ?? models[0].id;
     resolvedModelIdRef.current = resolved;

@@ -21,7 +21,7 @@ import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { fetcher, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
@@ -30,8 +30,6 @@ import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
-
-const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
 function isProtocolAuthExpiredError(error: unknown): boolean {
   if (error instanceof ProtocolAuthExpiredError) {
@@ -107,53 +105,31 @@ export function Chat({
     startNewSession,
   } = useProtocolSession(currentModelId, walletClient, address, id);
 
-  const sessionRecovering = isProtocolMode && failoverStatus !== "none";
+  const sessionRecovering = failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
   // fetch that routes through ProtocolTransport (encrypt → gateway → relay).
   // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const transport = useMemo(() => {
-    if (isProtocolMode) {
-      return new DefaultChatTransport({
-        api: "/protocol",
-        async fetch(_url, init) {
-          const t = await getProtocolTransport();
-          const body = JSON.parse((init?.body as string) ?? "{}");
-          const protocolBody = {
-            ...body,
-            id,
-            selectedVisibilityType: visibilityType,
-            systemPrompt: systemPromptRef.current,
-          };
-          const { response } = await t.sendMessages({
-            messages: protocolBody.messages ?? [],
-            body: protocolBody,
-            signal: init?.signal ?? undefined,
-          });
-
-          return response;
-        },
-      });
-    }
     return new DefaultChatTransport({
-      api: `${$http.baseUrl}/api/chat`,
-      fetch: (url, init) =>
-        fetchWithErrorHandlers(url, {
-          ...init,
-        }),
-      prepareSendMessagesRequest(request) {
-        return {
-          body: {
-            id: request.id,
-            message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
-            selectedVisibilityType: visibilityType,
-            systemPrompt: systemPromptRef.current,
-            enableWebSearch: enableWebSearchRef.current,
-            ...request.body,
-          },
+      api: "/protocol",
+      async fetch(_url, init) {
+        const t = await getProtocolTransport();
+        const body = JSON.parse((init?.body as string) ?? "{}");
+        const protocolBody = {
+          ...body,
+          id,
+          selectedVisibilityType: visibilityType,
+          systemPrompt: systemPromptRef.current,
         };
+        const { response } = await t.sendMessages({
+          messages: protocolBody.messages ?? [],
+          body: protocolBody,
+          signal: init?.signal ?? undefined,
+        });
+
+        return response;
       },
     });
   }, [id, visibilityType, getProtocolTransport]);
@@ -216,7 +192,7 @@ export function Chat({
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error: any) => {
-      if (isProtocolMode && isProtocolAuthExpiredError(error)) {
+      if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError
             id={errorId}
@@ -307,7 +283,7 @@ export function Chat({
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
-          protocolProgressStatus={isProtocolMode ? progressStatus : undefined}
+          protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
           setMessages={setMessages}

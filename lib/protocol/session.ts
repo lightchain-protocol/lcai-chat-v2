@@ -301,18 +301,18 @@ export class SessionManager {
     }
     const blobHash = blobHashes[0];
 
-    // 3. Calculate flat per-model fee
-    const fee = await this.publicClient.readContract({
-      address: this.aiConfigAddress,
-      abi: aiConfigAbi,
-      functionName: "calculateJobFee",
-      args: [this.modelIdBytes32 ?? padHexTo32Bytes(this.modelId)],
-    });
-
-    // 4. Check if the user has enough balance
-    const balance = await this.publicClient.getBalance({
-      address: account.address,
-    });
+    // 3. Calculate flat per-model fee and check if the user has enough balance
+    const [fee, balance] = await Promise.all([
+      this.publicClient.readContract({
+        address: this.aiConfigAddress,
+        abi: aiConfigAbi,
+        functionName: "calculateJobFee",
+        args: [this.modelIdBytes32 ?? padHexTo32Bytes(this.modelId)],
+      }),
+      this.publicClient.getBalance({
+        address: account.address,
+      }),
+    ]);
 
     if (balance < fee) {
       throw new Error("Insufficient balance");
@@ -327,18 +327,18 @@ export class SessionManager {
       value: fee,
     } as const;
 
-    // 5. Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
+    // 4. Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
     // (TSTORE reset) is underestimated by the default gas estimator on Anvil,
     // causing a ReentrancySentryOOG revert despite the main logic completing.
     const gasEstimate = await this.publicClient.estimateContractGas(callParams);
 
-    // 6. Simulate the transaction
+    // 5. Simulate the transaction
     const { request } = await this.publicClient.simulateContract({
       ...callParams,
       gas: (gasEstimate * 120n) / 100n,
     });
 
-    // 7. Submit job on-chain as a regular type-2 TX
+    // 6. Submit job on-chain as a regular type-2 TX
     const hash = await this.walletClient.writeContract(request);
 
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
