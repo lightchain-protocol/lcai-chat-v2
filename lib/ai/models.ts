@@ -1,5 +1,4 @@
-export const DEFAULT_CHAT_MODEL: string =
-  "0xf4a414fa51803433e9197f32cda96d5cb2ac8269c481eb0262fe2dd11f428848";
+export const DEFAULT_CHAT_MODEL: string = "llama3-8b";
 
 export type ChatModel = {
   id: string;
@@ -11,7 +10,7 @@ export type ChatModel = {
 
 export const chatModels: ChatModel[] = [
   {
-    id: "0xf4a414fa51803433e9197f32cda96d5cb2ac8269c481eb0262fe2dd11f428848",
+    id: "llama3-8b",
     name: "llama3-8b",
     fee: 0.02,
     maxOutputTokens: 2048,
