@@ -1,8 +1,9 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
-
+import { getBalanceQueryKey } from "wagmi/query";
 import config from "@/config";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
@@ -45,6 +46,7 @@ export function useProtocolSession(
   // regardless of which chain the wallet is connected to.
   const protocolChainId = config.chains[0].id;
   const { publicClient } = useWeb3Clients();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     walletClientRef.current = walletClient;
@@ -151,6 +153,13 @@ export function useProtocolSession(
           systemPrompt,
           sessionId,
         }) => {
+          // Invalidate balance query to refetch balance
+          queryClient.invalidateQueries({
+            queryKey: getBalanceQueryKey({
+              address: addressRef.current?.toLowerCase() as `0x${string}`,
+              chainId: protocolChainId,
+            }),
+          });
           const response = await $http.post(
             `/api/chat/${messageChatId}/messages`,
             {
@@ -196,7 +205,14 @@ export function useProtocolSession(
     transport.setOnProgressStatus(setProgressStatus);
     transportRef.current = transport;
     return transport;
-  }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
+  }, [
+    chatId,
+    getGateway,
+    resolveModelId,
+    protocolChainId,
+    publicClient,
+    queryClient,
+  ]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */
   const releaseTransport = useCallback(() => {
