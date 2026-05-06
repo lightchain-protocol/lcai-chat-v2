@@ -228,8 +228,8 @@ export class ProtocolTransport {
   }
 
   /**
-   * Disconnects relay and clears in-memory session state without removing
-   * sessionStorage — use when switching chats or unmounting the composer.
+   * Disconnects relay and clears in-memory session state — use when
+   * switching chats or unmounting the composer.
    */
   release() {
     this.relayClient?.disconnect();
@@ -242,7 +242,8 @@ export class ProtocolTransport {
   }
 
   /**
-   * Disconnects relay and clears persisted protocol state (wallet disconnect).
+   * Disconnects relay, clears in-memory state, and defensively evicts any
+   * sessionStorage slot left by older builds (wallet disconnect).
    */
   destroy() {
     this.relayClient?.disconnect();

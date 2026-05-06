@@ -214,7 +214,7 @@ export function useProtocolSession(
     queryClient,
   ]);
 
-  /** Drop relay + in-memory state; keep sessionStorage for this chat. */
+  /** Drop relay + in-memory state. */
   const releaseTransport = useCallback(() => {
     transportRef.current?.release();
     transportRef.current = null;
@@ -225,7 +225,7 @@ export function useProtocolSession(
     setProgressStatus("idle");
   }, []);
 
-  /** Full teardown including persisted tab session (wallet change / disconnect). */
+  /** Full teardown (wallet change / disconnect). */
   const resetForWallet = useCallback(() => {
     transportRef.current?.destroy();
     transportRef.current = null;
@@ -237,7 +237,9 @@ export function useProtocolSession(
     setProgressStatus("idle");
   }, []);
 
-  // Cleanup on unmount — preserve per-chat sessionStorage so revisiting the chat restores the session
+  // Cleanup on unmount. Revisiting the chat re-runs select → prepare →
+  // createSession (one wallet TX); the AES session key is intentionally
+  // not persisted — see lib/protocol/session.ts.
   useEffect(() => {
     return () => {
       transportRef.current?.release();

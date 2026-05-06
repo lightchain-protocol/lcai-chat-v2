@@ -87,8 +87,10 @@ export type SessionManagerConfig = {
  *   3. createSession → on-chain TX via user's wallet
  *   4. getSessionToken → fetch relay JWT once the dispatcher activates the session
  *
- * The 32-byte session key is held in memory for encrypt/decrypt operations.
- * Session metadata is persisted to sessionStorage for tab-scoped recovery.
+ * The 32-byte session key is held only in memory; it is intentionally NOT
+ * persisted to sessionStorage so that any same-origin XSS cannot exfiltrate
+ * it and decrypt every session frame. A tab reload or chat switch therefore
+ * re-runs `select → prepare → createSession` with one wallet TX.
  */
 export class SessionManager {
   private sessionKey: Uint8Array | null = null;
@@ -124,10 +126,10 @@ export class SessionManager {
     this.workerRegistryAddress = config.workerRegistryAddress;
     this.relayUrl = config.relayUrl;
     this.sessionStorageKey = config.sessionStorageKey ?? "lc-protocol-session";
-    this.tryRestore();
+    this.evictLegacySnapshot();
   }
 
-  /** Gateway hex model id (same id used in sessionStorage snapshot). */
+  /** Gateway hex model id. */
   get resolvedModelId(): string {
     return this.modelId;
   }
@@ -521,9 +523,9 @@ export class SessionManager {
   }
 
   /**
-   * Clears in-memory session material and notifies idle.
-   * Does not remove the persisted snapshot in sessionStorage — use when
-   * tearing down the transport so returning to this chat can tryRestore().
+   * Clears in-memory session material and notifies idle. Persistence is
+   * disabled (see `persist`/`evictLegacySnapshot`), so callers do not need a
+   * companion `reset()` to evict secrets from disk.
    */
   release() {
     this.sessionKey = null;
@@ -541,7 +543,8 @@ export class SessionManager {
   }
 
   /**
-   * Resets the session and removes the persisted tab snapshot (wallet change).
+   * Resets the session (wallet change). Defensively also clears the
+   * sessionStorage slot in case any future code path repopulates it.
    */
   reset() {
     this.release();
@@ -651,20 +654,13 @@ export class SessionManager {
   }
 
   private persist() {
-    try {
-      const data = {
-        version: 2,
-        sessionId: this.state.sessionId,
-        relayUrl: this.state.relayUrl,
-        relayToken: this.state.relayToken,
-        modelId: this.modelId,
-        sessionKey: this.sessionKey ? uint8ToBase64(this.sessionKey) : null,
-        disputerEncryptionKey: this.disputerEncryptionKey,
-      };
-      sessionStorage.setItem(this.sessionStorageKey, JSON.stringify(data));
-    } catch {
-      // sessionStorage unavailable (SSR)
-    }
+    // Intentional no-op. The previous implementation wrote the AES session
+    // key (and the relay JWT) to sessionStorage so reloading or revisiting
+    // a chat could resume the session without a fresh wallet TX. Any
+    // same-origin XSS could read the key and decrypt every session frame,
+    // so persistence is disabled until a non-extractable WebCrypto wrap is
+    // implemented. The on-chain session is still recoverable; the user
+    // pays one extra wallet TX per reload/chat-switch in exchange.
   }
 
   /**
@@ -692,28 +688,15 @@ export class SessionManager {
     }
   }
 
-  private tryRestore() {
+  private evictLegacySnapshot() {
+    // Persistence is disabled (see `persist`). Actively remove any
+    // pre-existing snapshot left behind by older builds so a previously-
+    // persisted AES session key cannot linger in storage waiting to be
+    // exfiltrated by a same-origin XSS.
     try {
-      const raw = sessionStorage.getItem(this.sessionStorageKey);
-      if (!raw) return;
-
-      const data = JSON.parse(raw);
-      if (data.modelId !== this.modelId) return;
-
-      if (data.sessionId != null && data.sessionKey && data.relayToken) {
-        this.state = {
-          status: "ready",
-          sessionId: data.sessionId,
-          relayUrl: this.relayUrl,
-          relayToken: data.relayToken,
-          error: null,
-        };
-        this.sessionKey = base64ToUint8(data.sessionKey);
-        // v2 migration: restore disputerEncryptionKey (absent in v1 sessions)
-        this.disputerEncryptionKey = data.disputerEncryptionKey ?? null;
-      }
+      sessionStorage.removeItem(this.sessionStorageKey);
     } catch {
-      // sessionStorage unavailable or corrupt — start fresh
+      // sessionStorage unavailable (e.g. SSR or storage disabled)
     }
   }
 }
