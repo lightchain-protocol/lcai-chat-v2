@@ -9,11 +9,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
-import { useAccount } from "wagmi";
+import { useAccount, useBalance } from "wagmi";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
@@ -30,6 +31,7 @@ import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
+import config from "@/config";
 
 function isProtocolAuthExpiredError(error: unknown): boolean {
   if (error instanceof ProtocolAuthExpiredError) {
@@ -95,6 +97,13 @@ export function Chat({
   const enableWebSearchRef = useRef(enableWebSearch);
   const { walletClient } = useWeb3Clients();
   const { address } = useAccount();
+  const balance = useBalance({ address });
+
+  // When the user has a funded prepaid balance + authorized delegate, route
+  // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
+  // stale read or a balance dip falls back to the wallet path gracefully.
+  const prepaid = usePrepaidBalance();
+  const submitMode = prepaid.ready ? "auto" : "wallet";
 
   // Protocol mode: session management for on-chain encrypted chat
   const {
@@ -103,7 +112,7 @@ export function Chat({
     progressStatus,
     retryFailover,
     startNewSession,
-  } = useProtocolSession(currentModelId, walletClient, address, id);
+  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
 
   const sessionRecovering = failoverStatus !== "none";
 
@@ -190,6 +199,8 @@ export function Chat({
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
+      prepaid.refetch();
+      balance.refetch();
     },
     onError: (error: any) => {
       if (isProtocolAuthExpiredError(error)) {

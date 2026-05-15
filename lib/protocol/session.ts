@@ -27,7 +27,22 @@ import type {
   SelectSessionResponse,
   TokenResponse,
 } from "./gateway-client";
-import { GatewayClientError } from "./gateway-client";
+import {
+  DelegateNotAuthorizedError,
+  GatewayClientError,
+  InsufficientPrepaidBalanceError,
+} from "./gateway-client";
+
+/**
+ * How a job is submitted on-chain:
+ *  - "wallet":    user signs a submitJob TX per prompt (legacy default).
+ *  - "delegated": consumer-api calls submitJobOnBehalf, debiting the user's
+ *                 prepaid balance. No wallet popup. Throws if the delegate
+ *                 isn't authorized or the balance is empty.
+ *  - "auto":      try "delegated"; on DelegateNotAuthorized / InsufficientBalance
+ *                 fall back to "wallet" with the already-uploaded blob.
+ */
+export type SubmitMode = "wallet" | "delegated" | "auto";
 
 export type SessionStatus =
   | "idle"
@@ -78,6 +93,12 @@ export type SessionManagerConfig = {
   aiConfigAddress: `0x${string}`;
   workerRegistryAddress: `0x${string}`;
   relayUrl: string;
+  /**
+   * Returns the submission mode to use for the next prompt. Re-evaluated on
+   * every submit so the UI can flip between wallet/delegated mid-session
+   * (e.g. after the user deposits + authorizes). Defaults to "wallet".
+   */
+  getSubmitMode?: () => SubmitMode;
 };
 
 /**
@@ -113,6 +134,7 @@ export class SessionManager {
   private readonly workerRegistryAddress: `0x${string}`;
   private readonly relayUrl: string;
   private readonly sessionStorageKey: string;
+  private readonly getSubmitMode: () => SubmitMode;
 
   constructor(config: SessionManagerConfig) {
     this.gateway = config.gateway;
@@ -124,6 +146,7 @@ export class SessionManager {
     this.workerRegistryAddress = config.workerRegistryAddress;
     this.relayUrl = config.relayUrl;
     this.sessionStorageKey = config.sessionStorageKey ?? "lc-protocol-session";
+    this.getSubmitMode = config.getSubmitMode ?? (() => "wallet");
     this.tryRestore();
   }
 
@@ -262,13 +285,20 @@ export class SessionManager {
   }
 
   /**
-   * Encrypts a plaintext prompt and submits the job in two steps:
-   *   1. Upload encrypted data to the gateway, which submits the real EIP-4844
-   *      blob TX and returns the versioned hashes.
-   *   2. Call submitJob on-chain as a regular type-2 TX with those hashes.
+   * Encrypts a plaintext prompt and submits the job.
    *
-   * This two-step flow is needed because browser wallets (MetaMask) cannot
-   * sign type-3 blob transactions with sidecars.
+   * Always: encrypt → upload the encrypted blob via the gateway (which submits
+   * the real EIP-4844 blob TX) and get the versioned hashes.
+   *
+   * Then, based on `getSubmitMode()`:
+   *  - "delegated"/"auto": call the consumer-api `POST /api/sessions/:id/messages`
+   *    which runs `submitJobOnBehalf`, debiting the user's prepaid balance — no
+   *    wallet popup. "auto" falls back to the wallet path on
+   *    DelegateNotAuthorized / InsufficientPrepaidBalance (reusing the blob).
+   *  - "wallet": user signs a `submitJob` type-2 TX per prompt (legacy).
+   *
+   * The blob-then-submit split exists because browser wallets (MetaMask)
+   * cannot sign type-3 blob transactions with sidecars.
    */
   async submitJob(
     plaintext: string
@@ -299,9 +329,44 @@ export class SessionManager {
         `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`
       );
     }
-    const blobHash = blobHashes[0];
 
-    // 3. Calculate flat per-model fee and check if the user has enough balance
+    // 3. Choose the submission path.
+    const mode = this.getSubmitMode();
+    if (mode === "delegated" || mode === "auto") {
+      try {
+        const result = await this.gateway.submitMessage(
+          this.state.sessionId,
+          blobHashes[0]
+        );
+
+        console.log("result", result.jobId);
+        return { jobId: Number(result.jobId), txHash: result.txHash };
+      } catch (err) {
+        const recoverable =
+          err instanceof DelegateNotAuthorizedError ||
+          err instanceof InsufficientPrepaidBalanceError;
+        if (mode === "delegated" || !recoverable) {
+          throw err;
+        }
+        // mode === "auto" + recoverable → fall through to the wallet path,
+        // reusing the blob we already uploaded.
+      }
+    }
+
+    return this.submitJobViaWallet(blobHashes[0]);
+  }
+
+  /** Wallet-signed submitJob path (legacy / fallback). */
+  private async submitJobViaWallet(
+    blobHash: `0x${string}`
+  ): Promise<{ jobId: number; txHash: string }> {
+    if (this.state.sessionId === null) {
+      throw new Error("Session ID not available");
+    }
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    // Calculate flat per-model fee and check if the user has enough balance
     const [fee, balance] = await Promise.all([
       this.publicClient.readContract({
         address: this.aiConfigAddress,
@@ -327,18 +392,16 @@ export class SessionManager {
       value: fee,
     } as const;
 
-    // 4. Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
+    // Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
     // (TSTORE reset) is underestimated by the default gas estimator on Anvil,
     // causing a ReentrancySentryOOG revert despite the main logic completing.
     const gasEstimate = await this.publicClient.estimateContractGas(callParams);
 
-    // 5. Simulate the transaction
     const { request } = await this.publicClient.simulateContract({
       ...callParams,
       gas: (gasEstimate * 120n) / 100n,
     });
 
-    // 6. Submit job on-chain as a regular type-2 TX
     const hash = await this.walletClient.writeContract(request);
 
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
