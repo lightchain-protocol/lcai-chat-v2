@@ -12,7 +12,10 @@ RUN corepack enable
 # ---- deps stage: full install for the Next.js build ----
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml carries the onlyBuiltDependencies allowlist for
+# native-addon packages (keccak, sharp, esbuild, etc.). Without it pnpm 9+
+# fails the install with ERR_PNPM_IGNORED_BUILDS.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ---- builder stage: build the Next.js app with public env baked in ----
