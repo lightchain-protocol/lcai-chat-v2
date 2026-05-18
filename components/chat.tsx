@@ -81,7 +81,12 @@ export function Chat({
     failoverStatus,
     retryFailover,
     startNewSession,
+    workerCapabilities,
   } = useProtocolSession(currentModelId, walletClient, address, id);
+  // searchCapable feeds the Switch's disabled state. In non-protocol mode the
+  // capability concept doesn't apply (server-side AI route does its own
+  // search via Vercel AI SDK tools) — so the Switch stays enabled.
+  const searchCapable = !isProtocolMode || workerCapabilities.includes("search");
 
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
@@ -104,7 +109,13 @@ export function Chat({
           };
           const { response } = await t.sendMessages({
             messages: protocolBody.messages ?? [],
-            body: protocolBody,
+            body: {
+              ...protocolBody,
+              // Per-message web-search opt-in (web-search epic, Story 16).
+              // ProtocolTransport forwards this through SessionManager.submitJob
+              // → GatewayClient.uploadBlob → consumer-api side-channel write.
+              enableWebSearch: enableWebSearchRef.current,
+            },
             signal: init?.signal ?? undefined,
           });
 
@@ -295,6 +306,7 @@ export function Chat({
               messages={messages}
               onModelChange={setCurrentModelId}
               onWebSearchToggle={setEnableWebSearch}
+              searchCapable={searchCapable}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}

@@ -20,6 +20,13 @@ export type SelectSessionResponse = {
   disputerEncryptionKey?: string;
   nonce: number;
   expiry: number;
+  /**
+   * Heartbeat-advertised capability set of the selected worker (web-search
+   * epic, Story 12). Optional for forward-compat with pre-epic dispatchers.
+   * Clients persist this in session state to gate per-message UI features
+   * (e.g., disable the web-search toggle when "search" is absent).
+   */
+  workerCapabilities?: string[];
 };
 
 export type PrepareSessionResponse = {
@@ -28,6 +35,7 @@ export type PrepareSessionResponse = {
   signature: string;
   nonce: number;
   expiry: number;
+  workerCapabilities?: string[];
 };
 
 export type UploadBlobResponse = {
@@ -87,10 +95,17 @@ export class GatewayClient {
     return await this.get<ModelsResponse>("/api/models");
   }
 
-  async selectSession(modelId: string): Promise<SelectSessionResponse> {
+  async selectSession(
+    modelId: string,
+    opts?: { requiredCapabilities?: string[] }
+  ): Promise<SelectSessionResponse> {
+    const body: Record<string, unknown> = { modelId };
+    if (opts?.requiredCapabilities && opts.requiredCapabilities.length > 0) {
+      body.requiredCapabilities = opts.requiredCapabilities;
+    }
     return await this.post<SelectSessionResponse>(
       "/api/sessions/select",
-      { modelId },
+      body,
       { protected: true }
     );
   }
@@ -99,6 +114,7 @@ export class GatewayClient {
     modelId: string;
     encWorkerKey: string;
     encDisputerKey: string;
+    requiredCapabilities?: string[];
   }): Promise<PrepareSessionResponse> {
     return await this.post<PrepareSessionResponse>(
       "/api/sessions/prepare",
@@ -107,10 +123,20 @@ export class GatewayClient {
     );
   }
 
-  async uploadBlob(base64Data: string): Promise<UploadBlobResponse> {
+  async uploadBlob(
+    base64Data: string,
+    opts?: { sessionId?: string; searchEnabled?: boolean }
+  ): Promise<UploadBlobResponse> {
+    const body: Record<string, unknown> = { data: base64Data };
+    if (opts?.sessionId !== undefined) {
+      body.sessionId = opts.sessionId;
+    }
+    if (opts?.searchEnabled === true) {
+      body.searchEnabled = true;
+    }
     return await this.post<UploadBlobResponse>(
       "/api/blobs",
-      { data: base64Data },
+      body,
       { protected: true, bearerOnly: true }
     );
   }

@@ -94,6 +94,15 @@ export class ProtocolTransport {
   }
 
   /**
+   * The session's bound worker's heartbeat-advertised capability set
+   * (web-search epic, Story 16). Empty list = no opt-in capabilities; the
+   * chat input renders affected toggles disabled with a tooltip.
+   */
+  get workerCapabilities(): string[] {
+    return this.sessionMgr.workerCapabilities;
+  }
+
+  /**
    * Public retry entry point for the UI banner.
    * Checks on-chain state first to resume partial failover correctly:
    * if reassignSession() already succeeded, skips straight to rewrap.
@@ -151,8 +160,14 @@ export class ProtocolTransport {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
-    // Initialize session on first message
-    await this.sessionMgr.initialize();
+    // Initialize session on first message. enableWebSearch in the body
+    // doubles as the signal to request a search-capable worker at
+    // session-create time — once the session is bound, the toggle gates
+    // the per-message side-channel (web-search epic, Story 16).
+    const enableWebSearch = options.body?.enableWebSearch === true;
+    await this.sessionMgr.initialize(
+      enableWebSearch ? { requiredCapabilities: ["search"] } : undefined,
+    );
 
     // Ensure relay is connected
     this.ensureRelayConnected();
@@ -184,8 +199,12 @@ export class ProtocolTransport {
       throw new Error("Session is not ready — recovery may be required");
     }
 
-    // Submit job: encrypt → blob upload → on-chain TX via user's wallet
-    const { jobId } = await this.sessionMgr.submitJob(plaintext);
+    // Submit job: encrypt → blob upload → on-chain TX via user's wallet.
+    // searchEnabled rides through SessionManager.submitJob into the gateway
+    // blob upload, which writes the side-channel the dispatcher reads.
+    const { jobId } = await this.sessionMgr.submitJob(plaintext, {
+      searchEnabled: enableWebSearch,
+    });
 
     // We persist the user message after the job is submitted to ensure the job ID is available for the assistant message.
     await this.persistence.persistUserMessage({

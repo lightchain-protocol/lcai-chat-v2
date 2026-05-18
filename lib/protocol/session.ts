@@ -66,6 +66,14 @@ export type ProtocolSession = {
   relayUrl: string | null;
   relayToken: string | null;
   error: string | null;
+  /**
+   * Heartbeat-advertised capability set of the session's bound worker
+   * (web-search epic, Story 16). Persisted in session state so the chat
+   * input can gate per-message UI features — e.g., disable the web-search
+   * toggle on conversations whose worker doesn't advertise "search".
+   * Empty / undefined = legacy worker, no opt-in features available.
+   */
+  workerCapabilities: string[];
 };
 
 export type SessionManagerConfig = {
@@ -101,7 +109,13 @@ export class SessionManager {
     relayUrl: null,
     relayToken: null,
     error: null,
+    workerCapabilities: [],
   };
+  // requestedCapabilities is the capability set the caller asked for at
+  // session-create time (web-search epic, Story 16). Preserved so a future
+  // failover/reassignment select can re-request the same set without the
+  // UI layer having to remember.
+  private requestedCapabilities: string[] = [];
   private onStatusChange?: (status: SessionStatus) => void;
 
   private readonly gateway: GatewayClient;
@@ -153,10 +167,26 @@ export class SessionManager {
   }
 
   /**
+   * Heartbeat-advertised capability set of the session's currently-bound
+   * worker. Empty when no session is active, or when the bound worker did
+   * not advertise capabilities (legacy / non-opt-in workers). The UI reads
+   * this to decide whether features like the web-search toggle should be
+   * enabled in the chat input.
+   */
+  get workerCapabilities(): string[] {
+    return this.state.workerCapabilities;
+  }
+
+  /**
    * Initializes the session if not already ready. Idempotent — safe to call
    * multiple times (returns immediately if already ready or in progress).
+   *
+   * `requiredCapabilities` (web-search epic, Story 16) is an optional
+   * filter: when present, the dispatcher restricts selection to workers
+   * whose heartbeat-advertised Capabilities is a superset of the request.
+   * Once persisted, the same set is re-sent on any failover re-selection.
    */
-  async initialize(): Promise<void> {
+  async initialize(opts?: { requiredCapabilities?: string[] }): Promise<void> {
     if (this.state.status === "ready") {
       const valid = await this.validateRestoredSession();
       if (valid) {
@@ -181,12 +211,19 @@ export class SessionManager {
       throw new Error("Wallet has no balance");
     }
 
+    // Persist the requested capability set so failover/reassignment can
+    // re-request the same constraint without the UI layer having to
+    // remember.
+    this.requestedCapabilities = opts?.requiredCapabilities ?? [];
+
     try {
       // Step 1: Select — dispatcher picks a worker and commits (worker, nonce,
       // expiry) to short-lived storage. We receive the worker's encryption key
       // so we can encrypt the session key for it before returning in Step 3.
       this.setState("preparing");
-      let selected = await this.gateway.selectSession(this.modelId);
+      let selected = await this.gateway.selectSession(this.modelId, {
+        requiredCapabilities: this.requestedCapabilities,
+      });
 
       // Step 2: ECDH key exchange — encrypt the generated session key for the
       // worker (and disputer, if provided).
@@ -201,7 +238,14 @@ export class SessionManager {
         modelId: this.modelId,
         encWorkerKey: keyExchange.encWorkerKey,
         encDisputerKey: keyExchange.encDisputerKey,
+        requiredCapabilities: this.requestedCapabilities,
       });
+
+      // Record the bound worker's full capability list so the UI can gate
+      // per-message features. Dispatcher echoes this from the heartbeat at
+      // selection time; an empty/undefined list = legacy worker.
+      this.state.workerCapabilities =
+        prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
 
       // Step 4: Create session on-chain via user's wallet
       this.setState("creating");
@@ -220,14 +264,19 @@ export class SessionManager {
         // pending selection TTL expired mid-flight — both signal a fresh
         // select → prepare round is needed).
         if (isStaleSignatureError(err) || isPendingSelectionMissing(err)) {
-          selected = await this.gateway.selectSession(this.modelId);
+          selected = await this.gateway.selectSession(this.modelId, {
+            requiredCapabilities: this.requestedCapabilities,
+          });
           keyExchange = await this.performKeyExchange(selected);
           this.sessionKey = keyExchange.sessionKey;
           prepared = await this.gateway.prepareSession({
             modelId: this.modelId,
             encWorkerKey: keyExchange.encWorkerKey,
             encDisputerKey: keyExchange.encDisputerKey,
+            requiredCapabilities: this.requestedCapabilities,
           });
+          this.state.workerCapabilities =
+            prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
           sessionId = await this.createSessionOnChain(
             modelIdBytes32,
             { ...selected, signature: prepared.signature },
@@ -246,6 +295,9 @@ export class SessionManager {
         relayUrl: this.relayUrl,
         relayToken,
         error: null,
+        // Preserve the capability list captured during prepareSession above —
+        // ready-state writes must NOT clobber it.
+        workerCapabilities: this.state.workerCapabilities,
       };
       this.onStatusChange?.("ready");
       this.persist();
@@ -271,7 +323,8 @@ export class SessionManager {
    * sign type-3 blob transactions with sidecars.
    */
   async submitJob(
-    plaintext: string
+    plaintext: string,
+    opts?: { searchEnabled?: boolean }
   ): Promise<{ jobId: number; txHash: string }> {
     if (!this.sessionKey) {
       throw new Error("Session not initialized — no session key");
@@ -289,7 +342,13 @@ export class SessionManager {
     // 2. Upload to gateway — gateway submits the real blob TX. Post-audit the
     // on-chain submitJob accepts a single blob hash per job; if the prompt spans
     // multiple blobs we can't fit it in one job under the current contract.
-    const blobResponse = await this.gateway.uploadBlob(encryptedBase64);
+    // searchEnabled rides the same upload as an opt-in side-channel (web-search
+    // epic, Story 15) — the gateway writes job-flags:{sid}:{blobHash} so the
+    // dispatcher can populate the per-job control flag.
+    const blobResponse = await this.gateway.uploadBlob(encryptedBase64, {
+      sessionId: String(this.state.sessionId),
+      searchEnabled: opts?.searchEnabled === true,
+    });
     const blobHashes = blobResponse.blobHashes as `0x${string}`[];
     if (blobHashes.length === 0) {
       throw new Error("Blob upload returned no hashes");
@@ -530,12 +589,14 @@ export class SessionManager {
     this.modelIdBytes32 = null;
     this.disputerEncryptionKey = null;
     this.failoverInProgress = false;
+    this.requestedCapabilities = [];
     this.state = {
       status: "idle",
       sessionId: null,
       relayUrl: null,
       relayToken: null,
       error: null,
+      workerCapabilities: [],
     };
     this.onStatusChange?.("idle");
   }
@@ -653,13 +714,17 @@ export class SessionManager {
   private persist() {
     try {
       const data = {
-        version: 2,
+        version: 3,
         sessionId: this.state.sessionId,
         relayUrl: this.state.relayUrl,
         relayToken: this.state.relayToken,
         modelId: this.modelId,
         sessionKey: this.sessionKey ? uint8ToBase64(this.sessionKey) : null,
         disputerEncryptionKey: this.disputerEncryptionKey,
+        // v3: web-search epic (Story 16). Persisted so the chat input can
+        // gate the search toggle even after a page reload.
+        workerCapabilities: this.state.workerCapabilities,
+        requestedCapabilities: this.requestedCapabilities,
       };
       sessionStorage.setItem(this.sessionStorageKey, JSON.stringify(data));
     } catch {
@@ -707,10 +772,20 @@ export class SessionManager {
           relayUrl: this.relayUrl,
           relayToken: data.relayToken,
           error: null,
+          // v3 migration: workerCapabilities is empty on restored v2 sessions —
+          // the chat input treats this as "legacy worker, no opt-in features".
+          workerCapabilities: Array.isArray(data.workerCapabilities)
+            ? data.workerCapabilities
+            : [],
         };
         this.sessionKey = base64ToUint8(data.sessionKey);
         // v2 migration: restore disputerEncryptionKey (absent in v1 sessions)
         this.disputerEncryptionKey = data.disputerEncryptionKey ?? null;
+        // v3: restore the originally-requested capability set so failover
+        // re-selection respects the same constraint.
+        this.requestedCapabilities = Array.isArray(data.requestedCapabilities)
+          ? data.requestedCapabilities
+          : [];
       }
     } catch {
       // sessionStorage unavailable or corrupt — start fresh

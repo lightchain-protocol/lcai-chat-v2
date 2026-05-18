@@ -30,6 +30,10 @@ export function useProtocolSession(
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [failoverStatus, setFailoverStatus] = useState<FailoverStatus>("none");
+  // Heartbeat-advertised capability set of the bound worker (web-search epic,
+  // Story 16). Refreshed whenever the session status changes — the transport
+  // only knows it after SessionManager.initialize() completes.
+  const [workerCapabilities, setWorkerCapabilities] = useState<string[]>([]);
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
   const resolvedModelIdRef = useRef<string | null>(null);
@@ -178,6 +182,10 @@ export function useProtocolSession(
       } else {
         setError(null);
       }
+      // Refresh capability snapshot — the transport only knows the bound
+      // worker's capabilities after the session reaches "ready". Reading on
+      // every status change keeps the chat input's Switch in sync.
+      setWorkerCapabilities(transport.workerCapabilities);
     });
     transport.setOnFailoverStatus(setFailoverStatus);
     transportRef.current = transport;
@@ -247,6 +255,7 @@ export function useProtocolSession(
     status,
     error,
     failoverStatus,
+    workerCapabilities,
     getTransport,
     reset: resetForWallet,
     retryFailover,
