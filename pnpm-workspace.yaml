@@ -5,3 +5,14 @@ onlyBuiltDependencies:
   - keccak
   - sharp
   - utf-8-validate
+
+# pnpm 11 reads `allowBuilds` (map form) as the canonical approval list, not
+# `onlyBuiltDependencies` (legacy sequence form). Both kept for cross-version
+# compatibility — see frontend/Dockerfile and concerns.md C-1 for context.
+allowBuilds:
+  '@reown/appkit': true
+  bufferutil: true
+  esbuild: true
+  keccak: true
+  sharp: true
+  utf-8-validate: true

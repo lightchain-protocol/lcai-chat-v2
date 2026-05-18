@@ -12,9 +12,13 @@ RUN corepack enable
 # ---- deps stage: full install for the Next.js build ----
 FROM base AS deps
 WORKDIR /app
-# pnpm-workspace.yaml carries the onlyBuiltDependencies allowlist for
-# native-addon packages (keccak, sharp, esbuild, etc.). Without it pnpm 9+
-# fails the install with ERR_PNPM_IGNORED_BUILDS.
+# Build tools needed for native-addon postinstalls (keccak, bufferutil,
+# utf-8-validate run node-gyp; sharp/esbuild fetch prebuilt binaries).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
+# pnpm-workspace.yaml carries the onlyBuiltDependencies + allowBuilds
+# (pnpm 11 reads the latter as the canonical approval list).
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
