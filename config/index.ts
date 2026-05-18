@@ -10,7 +10,11 @@ export const lcaiTestnet: Chain = {
   },
   rpcUrls: {
     default: {
-      http: ["https://rpc.testnet.lightchain.ai"],
+      // Overridable via NEXT_PUBLIC_RPC_URL (baked at build time).
+      // Defaults to the public testnet so prod builds work without extra config.
+      http: [
+        process.env.NEXT_PUBLIC_RPC_URL ?? "https://rpc.testnet.lightchain.ai",
+      ],
     },
   },
   blockExplorers: {
