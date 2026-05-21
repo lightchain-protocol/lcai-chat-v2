@@ -23,6 +23,7 @@ import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
+import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
@@ -101,8 +102,13 @@ export function Chat({
     getTransport: getProtocolTransport,
     failoverStatus,
     progressStatus,
+    activeJobs,
+    timedOutJob,
     retryFailover,
     startNewSession,
+    claimJobTimeout,
+    disputeJob,
+    clearTimedOutJob,
   } = useProtocolSession(currentModelId, walletClient, address, id);
 
   const sessionRecovering = failoverStatus !== "none";
@@ -167,6 +173,29 @@ export function Chat({
   useEffect(() => {
     enableWebSearchRef.current = enableWebSearch;
   }, [enableWebSearch]);
+
+  // Show a non-blocking toast when a job's deadline passes with no response
+  useEffect(() => {
+    if (!timedOutJob) return;
+    const toastId = `job-timeout-${timedOutJob.jobId}`;
+    toast.custom(
+      () => (
+        <JobTimeoutToast
+          id={toastId}
+          job={timedOutJob}
+          onClaim={claimJobTimeout}
+          onNewSession={() => {
+            clearTimedOutJob();
+            startNewSession();
+          }}
+        />
+      ),
+      {
+        id: toastId,
+        duration: Number.POSITIVE_INFINITY,
+      }
+    );
+  }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
   const {
     messages,
@@ -279,7 +308,10 @@ export function Chat({
         )}
 
         <Messages
+          activeJobs={activeJobs}
           chatId={id}
+          claimJobTimeout={claimJobTimeout}
+          disputeJob={disputeJob}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}

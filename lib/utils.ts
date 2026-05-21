@@ -88,13 +88,25 @@ export function sanitizeText(text: string) {
   return text.replace('<has_function_call>', '');
 }
 
-export function convertToUIMessages(messages: DBMessage[]): ChatMessage[] {
+/**
+ * Wire shape returned by GET /api/chat/:id/messages.
+ * Extends DBMessage with protocol fields stored in the consumer-api schema
+ * but absent from the local Drizzle type.
+ */
+type APIMessage = DBMessage & {
+  jobId?: number | null;
+  protocolMeta?: Record<string, unknown> | null;
+};
+
+export function convertToUIMessages(messages: APIMessage[]): ChatMessage[] {
   return messages.map((message) => ({
     id: message.id,
     role: message.role as 'user' | 'assistant' | 'system',
     parts: message.parts as UIMessagePart<CustomUIDataTypes, ChatTools>[],
     metadata: {
       createdAt: formatISO(message.createdAt),
+      ...(message.jobId != null ? { jobId: message.jobId } : {}),
+      ...(message.protocolMeta ? { protocolMeta: message.protocolMeta } : {}),
     },
   }));
 }
