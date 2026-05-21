@@ -10,7 +10,7 @@ import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
-import type { FailoverStatus } from "@/lib/protocol/transport";
+import type { FailoverStatus, TrackedJob } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
 import type { ProtocolLoadingStatus } from "@/lib/types";
 
@@ -34,6 +34,8 @@ export function useProtocolSession(
   const [failoverStatus, setFailoverStatus] = useState<FailoverStatus>("none");
   const [progressStatus, setProgressStatus] =
     useState<ProtocolLoadingStatus>("idle");
+  const [activeJobs, setActiveJobs] = useState<TrackedJob[]>([]);
+  const [timedOutJob, setTimedOutJob] = useState<TrackedJob | null>(null);
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
   const resolvedModelIdRef = useRef<string | null>(null);
@@ -152,6 +154,7 @@ export function useProtocolSession(
           selectedVisibilityType,
           systemPrompt,
           sessionId,
+          jobId,
         }) => {
           // Invalidate balance query to refetch balance
           queryClient.invalidateQueries({
@@ -172,6 +175,8 @@ export function useProtocolSession(
               systemPrompt,
               completionState: "completed",
               relaySource: "protocol-user",
+              jobId,
+              protocolMeta: { jobId, sessionId }
             }
           );
 
@@ -203,6 +208,17 @@ export function useProtocolSession(
     });
     transport.setOnFailoverStatus(setFailoverStatus);
     transport.setOnProgressStatus(setProgressStatus);
+    transport.setOnJobUpdate((job) => {
+      setActiveJobs(transport.listJobs());
+      // If the job was updated to completed, clear any pending timedOutJob for it
+      if (job.status === "completed" || job.status === "claimed" || job.status === "disputed") {
+        setTimedOutJob((prev) => (prev?.jobId === job.jobId ? null : prev));
+      }
+    });
+    transport.setOnJobTimeout((job) => {
+      setActiveJobs(transport.listJobs());
+      setTimedOutJob(job);
+    });
     transportRef.current = transport;
     return transport;
   }, [
@@ -223,6 +239,8 @@ export function useProtocolSession(
     setStatus("idle");
     setError(null);
     setProgressStatus("idle");
+    setActiveJobs([]);
+    setTimedOutJob(null);
   }, []);
 
   /** Full teardown including persisted tab session (wallet change / disconnect). */
@@ -235,6 +253,8 @@ export function useProtocolSession(
     setError(null);
     setFailoverStatus("none");
     setProgressStatus("idle");
+    setActiveJobs([]);
+    setTimedOutJob(null);
   }, []);
 
   // Cleanup on unmount — preserve per-chat sessionStorage so revisiting the chat restores the session
@@ -275,14 +295,46 @@ export function useProtocolSession(
     releaseTransport();
   }, [chatId, releaseTransport]);
 
+  const claimJobTimeout = useCallback(
+    async (jobId: number) => {
+      const transport = transportRef.current;
+      if (!transport) throw new Error("No active transport");
+      const result = await transport.claimJobTimeout(jobId);
+      setActiveJobs(transport.listJobs());
+      setTimedOutJob(null);
+      return result;
+    },
+    []
+  );
+
+  const disputeJob = useCallback(
+    async (jobId: number) => {
+      const transport = transportRef.current;
+      if (!transport) throw new Error("No active transport");
+      const result = await transport.disputeJob(jobId);
+      setActiveJobs(transport.listJobs());
+      return result;
+    },
+    []
+  );
+
+  const clearTimedOutJob = useCallback(() => {
+    setTimedOutJob(null);
+  }, []);
+
   return {
     status,
     error,
     failoverStatus,
     progressStatus,
+    activeJobs,
+    timedOutJob,
     getTransport,
     reset: resetForWallet,
     retryFailover,
     startNewSession,
+    claimJobTimeout,
+    disputeJob,
+    clearTimedOutJob,
   };
 }

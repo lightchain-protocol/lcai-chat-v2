@@ -8,6 +8,8 @@ export type DataPart = { type: "append-message"; message: string };
 
 export const messageMetadataSchema = z.object({
   createdAt: z.string(),
+  jobId: z.number().int().optional(),
+  protocolMeta: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
