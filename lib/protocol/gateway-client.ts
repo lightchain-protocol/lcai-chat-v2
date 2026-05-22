@@ -14,6 +14,17 @@ export type ModelsResponse = {
   models: ModelInfo[];
 };
 
+/**
+ * Read-only preflight payload returned by GET /api/models/:modelId/capabilities
+ * (web-search epic, Story 16). `capabilities` is the union of heartbeat-
+ * advertised capability tokens across all currently-active workers eligible
+ * for the model. Empty array = no capable worker currently heartbeating.
+ */
+export type ModelCapabilitiesResponse = {
+  modelId: string;
+  capabilities: string[];
+};
+
 export type SelectSessionResponse = {
   worker: string;
   workerEncryptionKey: string;
@@ -93,6 +104,19 @@ export class GatewayClient {
 
   async getModels(): Promise<ModelsResponse> {
     return await this.get<ModelsResponse>("/api/models");
+  }
+
+  /**
+   * Read-only capability preflight (web-search epic, Story 16). Caller MUST
+   * pass the hex model ID — use getModels() to resolve a friendly local
+   * name to its hex form first. Unauthenticated, so no auth provider needed.
+   */
+  async getModelCapabilities(
+    modelIdHex: string
+  ): Promise<ModelCapabilitiesResponse> {
+    return await this.get<ModelCapabilitiesResponse>(
+      `/api/models/${modelIdHex}/capabilities`
+    );
   }
 
   async selectSession(

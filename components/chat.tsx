@@ -13,6 +13,7 @@ import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
@@ -83,10 +84,25 @@ export function Chat({
     startNewSession,
     workerCapabilities,
   } = useProtocolSession(currentModelId, walletClient, address, id);
-  // searchCapable feeds the Switch's disabled state. In non-protocol mode the
-  // capability concept doesn't apply (server-side AI route does its own
-  // search via Vercel AI SDK tools) — so the Switch stays enabled.
-  const searchCapable = !isProtocolMode || workerCapabilities.includes("search");
+  // Read-only preflight: union of capabilities across all workers eligible
+  // for this model (web-search epic, Story 16). Populates at chat mount via
+  // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
+  // session is bound — fixes the "unlocks after Send" race.
+  const { availableCapabilities } = useModelCapabilities(currentModelId);
+
+  // searchCapable feeds the Switch's disabled state.
+  //   - non-protocol mode: Vercel AI SDK does its own search, always on.
+  //   - protocol mode, post-binding (workerCapabilities populated): the
+  //     bound worker's snapshot is the source of truth; a session bound to
+  //     a non-capable worker MUST lock the toggle off even if other capable
+  //     workers exist (the session can't switch).
+  //   - protocol mode, pre-binding: fall back to availableCapabilities
+  //     from the preflight — "is any capable worker reachable?"
+  const searchCapable = isProtocolMode
+    ? workerCapabilities.length > 0
+      ? workerCapabilities.includes("search")
+      : availableCapabilities.includes("search")
+    : true;
 
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
