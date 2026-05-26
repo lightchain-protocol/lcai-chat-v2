@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { Shimmer } from "./ai-elements/shimmer";
 import { CitationResponse, type CitationSource } from "./citation-response";
@@ -48,11 +48,32 @@ const PurePreviewMessage = ({
     (part) => part.type === "file"
   );
 
-  // Collect all search results from webSearch tool calls
+  const protocolFinalText = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-protocolFinal" &&
+        part.data &&
+        typeof part.data.text === "string"
+      ) {
+        return part.data.text;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const firstTextPartIndex = useMemo(
+    () => parts.findIndex((part) => part.type === "text"),
+    [parts]
+  );
+
+  // Collect all search results from protocol source metadata and legacy webSearch tool calls.
   const searchResults = useMemo(() => {
     const results: CitationSource[] = [];
 
     for (const part of parts) {
+      if (part.type === "data-webSearchSources" && part.data?.sources) {
+        results.push(...part.data.sources.map(toCitationSource));
+      }
       if (
         part.type === "tool-webSearch" &&
         part.state === "output-available" &&
@@ -65,6 +86,15 @@ const PurePreviewMessage = ({
 
     return results;
   }, [parts]);
+
+  const orderedSources = useMemo(
+    () =>
+      [...searchResults].sort((a, b) => {
+        if (a.position !== b.position) return a.position - b.position;
+        return a.url.localeCompare(b.url);
+      }),
+    [searchResults]
+  );
 
   // Replace citation patterns with inline citation components
   const replaceCitations = (text: string): string => {
@@ -157,6 +187,17 @@ const PurePreviewMessage = ({
             }
 
             if (type === "text") {
+              if (
+                message.role === "assistant" &&
+                protocolFinalText !== null &&
+                index !== firstTextPartIndex
+              ) {
+                return null;
+              }
+              const displayText =
+                message.role === "assistant" && protocolFinalText !== null
+                  ? protocolFinalText
+                  : (part.text ?? "");
               if (mode === "view") {
                 return (
                   <div key={key}>
@@ -183,7 +224,7 @@ const PurePreviewMessage = ({
                             ),
                           }}
                         >
-                          {replaceCitations(sanitizeText(part.text))}
+                          {replaceCitations(sanitizeText(displayText))}
                         </Response>
                       ) : (
                         <Response
@@ -194,7 +235,7 @@ const PurePreviewMessage = ({
                             },
                           }}
                         >
-                          {sanitizeText(part.text)}
+                          {sanitizeText(displayText)}
                         </Response>
                       )}
                     </MessageContent>
@@ -282,6 +323,37 @@ const PurePreviewMessage = ({
             return null;
           })}
 
+          {message.role === "assistant" && orderedSources.length > 0 && (
+            <div className="mt-1 border-border/70 border-t pt-3">
+              <div className="mb-2 font-medium text-content-subtle text-xs uppercase tracking-normal">
+                Sources
+              </div>
+              <div className="grid gap-2">
+                {orderedSources.map((source) => (
+                  <a
+                    className="group/source grid grid-cols-[1.75rem_1fr] gap-2 rounded-lg border border-border/70 bg-background px-2.5 py-2 text-left transition-colors hover:border-border hover:bg-surface-base-faint"
+                    href={source.url}
+                    key={`${source.position}-${source.url}`}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    <span className="flex size-6 items-center justify-center rounded-md bg-surface-base-subtle font-medium text-content-subtle text-xs">
+                      {source.position}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-content-strong text-sm group-hover/source:underline">
+                        {source.title || source.url}
+                      </span>
+                      <span className="block truncate text-content-subtle text-xs">
+                        {source.description || formatSourceHost(source.url)}
+                      </span>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!isReadonly && (
             <MessageActions
               chatId={chatId}
@@ -320,6 +392,23 @@ export const PreviewMessage = memo(
     return false;
   }
 );
+
+function formatSourceHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function toCitationSource(source: WebSearchSource): CitationSource {
+  return {
+    position: source.position,
+    title: source.title,
+    url: source.url,
+    description: source.description,
+  };
+}
 
 export const ThinkingMessage = () => {
   const role = "assistant";

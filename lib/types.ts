@@ -6,6 +6,13 @@ import type { AppUsage } from "./usage";
 
 export type DataPart = { type: "append-message"; message: string };
 
+export type WebSearchSource = {
+  position: number;
+  title: string;
+  url: string;
+  description: string;
+};
+
 export const messageMetadataSchema = z.object({
   createdAt: z.string(),
 });
@@ -31,6 +38,8 @@ export type CustomUIDataTypes = {
   clear: null;
   finish: null;
   usage: AppUsage;
+  webSearchSources: { sources: WebSearchSource[] };
+  protocolFinal: { text: string };
 };
 
 export type ChatMessage = UIMessage<

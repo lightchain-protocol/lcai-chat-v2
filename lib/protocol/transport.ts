@@ -15,7 +15,12 @@
  */
 
 import type { GatewayClient } from "./gateway-client";
-import type { LifecycleEvent, WSErrorFrame, WSFrame } from "./relay-client";
+import type {
+  LifecycleEvent,
+  ProtocolCitationSource,
+  WSErrorFrame,
+  WSFrame,
+} from "./relay-client";
 import { RelayClient } from "./relay-client";
 import type { SessionManagerConfig } from "./session";
 import {
@@ -424,6 +429,8 @@ export class ProtocolTransport {
     const partId = `text-${jobId}`;
     const assistantMessageId = crypto.randomUUID();
     let started = false;
+    let streamedText = "";
+    let suppressRetryChunks = false;
 
     const sse = (obj: Record<string, unknown>): Uint8Array =>
       encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
@@ -441,6 +448,12 @@ export class ProtocolTransport {
             try {
               if (frame.type === "error") {
                 const errorFrame = frame as WSErrorFrame;
+                if (
+                  errorFrame.code === "RATE_LIMITED" &&
+                  errorFrame.droppedSeq > 0
+                ) {
+                  return;
+                }
                 controller.enqueue(
                   sse({ type: "error", errorText: errorFrame.message })
                 );
@@ -450,6 +463,26 @@ export class ProtocolTransport {
               }
 
               const wsFrame = frame as WSFrame;
+
+              if (wsFrame.type === "metadata") {
+                if (wsFrame.payload) {
+                  const decrypted = await sessionMgr.decryptResponse(
+                    wsFrame.payload
+                  );
+                  const sources = parseWebSearchSources(decrypted);
+                  if (sources.length > 0) {
+                    relayClient.setAssistantSources(jobId, sources);
+                    controller.enqueue(
+                      sse({
+                        type: "data-webSearchSources",
+                        id: `protocol-web-search-${jobId}`,
+                        data: { sources },
+                      })
+                    );
+                  }
+                }
+                return;
+              }
 
               if (wsFrame.payload && !started) {
                 started = true;
@@ -471,10 +504,43 @@ export class ProtocolTransport {
                 const decrypted = await sessionMgr.decryptResponse(
                   wsFrame.payload
                 );
-                relayClient.appendAssistantDelta(jobId, decrypted);
-                controller.enqueue(
-                  sse({ type: "text-delta", id: partId, delta: decrypted })
-                );
+                if (wsFrame.type === "complete") {
+                  relayClient.replaceAssistantText(jobId, decrypted);
+                  if (!streamedText) {
+                    streamedText = decrypted;
+                    controller.enqueue(
+                      sse({ type: "text-delta", id: partId, delta: decrypted })
+                    );
+                  } else if (decrypted.startsWith(streamedText)) {
+                    const suffix = decrypted.slice(streamedText.length);
+                    if (suffix) {
+                      streamedText = decrypted;
+                      controller.enqueue(
+                        sse({ type: "text-delta", id: partId, delta: suffix })
+                      );
+                    }
+                  }
+                  controller.enqueue(
+                    sse({
+                      type: "data-protocolFinal",
+                      id: `protocol-final-${jobId}`,
+                      data: { text: decrypted },
+                    })
+                  );
+                } else {
+                  if (wsFrame.seq === 1 && streamedText.length > 0) {
+                    streamedText = "";
+                    relayClient.resetAssistantText(jobId);
+                    suppressRetryChunks = true;
+                  }
+                  streamedText += decrypted;
+                  relayClient.appendAssistantDelta(jobId, decrypted);
+                  if (!suppressRetryChunks) {
+                    controller.enqueue(
+                      sse({ type: "text-delta", id: partId, delta: decrypted })
+                    );
+                  }
+                }
               }
 
               if (wsFrame.type === "complete") {
@@ -504,6 +570,46 @@ export class ProtocolTransport {
       },
     });
   }
+}
+
+function parseWebSearchSources(payload: string): ProtocolCitationSource[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch (err) {
+    console.warn("Failed to parse protocol web-search metadata", err);
+    return [];
+  }
+  if (!isRecord(parsed) || parsed.type !== "webSearchSources") {
+    console.warn("Unexpected protocol metadata payload", parsed);
+    return [];
+  }
+  if (!Array.isArray(parsed.sources)) {
+    console.warn("Protocol web-search metadata missing sources array", parsed);
+    return [];
+  }
+
+  return parsed.sources.flatMap((source) => {
+    if (!isRecord(source)) return [];
+    const position =
+      typeof source.position === "number" ? source.position : undefined;
+    const title = typeof source.title === "string" ? source.title : "";
+    const url = typeof source.url === "string" ? source.url : "";
+    const snippet = typeof source.snippet === "string" ? source.snippet : "";
+    if (!position || !url) return [];
+    return [
+      {
+        position,
+        title: title || url,
+        url,
+        description: snippet,
+      },
+    ];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function getChatId(body?: Record<string, unknown>): string | null {
