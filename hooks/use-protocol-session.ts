@@ -1,16 +1,18 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
-
+import { getBalanceQueryKey } from "wagmi/query";
 import config from "@/config";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
-import type { FailoverStatus } from "@/lib/protocol/transport";
+import type { FailoverStatus, TrackedJob } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
+import type { ProtocolLoadingStatus } from "@/lib/types";
 
 /**
  * React hook that manages a LightChain protocol session.
@@ -34,6 +36,10 @@ export function useProtocolSession(
   // Story 16). Refreshed whenever the session status changes — the transport
   // only knows it after SessionManager.initialize() completes.
   const [workerCapabilities, setWorkerCapabilities] = useState<string[]>([]);
+  const [progressStatus, setProgressStatus] =
+    useState<ProtocolLoadingStatus>("idle");
+  const [activeJobs, setActiveJobs] = useState<TrackedJob[]>([]);
+  const [timedOutJob, setTimedOutJob] = useState<TrackedJob | null>(null);
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
   const resolvedModelIdRef = useRef<string | null>(null);
@@ -46,6 +52,7 @@ export function useProtocolSession(
   // regardless of which chain the wallet is connected to.
   const protocolChainId = config.chains[0].id;
   const { publicClient } = useWeb3Clients();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     walletClientRef.current = walletClient;
@@ -151,7 +158,15 @@ export function useProtocolSession(
           selectedVisibilityType,
           systemPrompt,
           sessionId,
+          jobId,
         }) => {
+          // Invalidate balance query to refetch balance
+          queryClient.invalidateQueries({
+            queryKey: getBalanceQueryKey({
+              address: addressRef.current?.toLowerCase() as `0x${string}`,
+              chainId: protocolChainId,
+            }),
+          });
           const response = await $http.post(
             `/api/chat/${messageChatId}/messages`,
             {
@@ -164,6 +179,8 @@ export function useProtocolSession(
               systemPrompt,
               completionState: "completed",
               relaySource: "protocol-user",
+              jobId,
+              protocolMeta: { jobId, sessionId },
             }
           );
 
@@ -177,8 +194,18 @@ export function useProtocolSession(
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);
+
+      if (s === "preparing" || s === "key_exchange") {
+        setProgressStatus("preparing_chat");
+      } else if (s === "creating") {
+        setProgressStatus("writing_on_chain");
+      } else if (s === "ready") {
+        setProgressStatus("thinking");
+      }
+
       if (s === "error") {
         setError("Session initialization failed");
+        setProgressStatus("error");
       } else {
         setError(null);
       }
@@ -188,9 +215,32 @@ export function useProtocolSession(
       setWorkerCapabilities(transport.workerCapabilities);
     });
     transport.setOnFailoverStatus(setFailoverStatus);
+    transport.setOnProgressStatus(setProgressStatus);
+    transport.setOnJobUpdate((job) => {
+      setActiveJobs(transport.listJobs());
+      // If the job was updated to completed, clear any pending timedOutJob for it
+      if (
+        job.status === "completed" ||
+        job.status === "claimed" ||
+        job.status === "disputed"
+      ) {
+        setTimedOutJob((prev) => (prev?.jobId === job.jobId ? null : prev));
+      }
+    });
+    transport.setOnJobTimeout((job) => {
+      setActiveJobs(transport.listJobs());
+      setTimedOutJob(job);
+    });
     transportRef.current = transport;
     return transport;
-  }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
+  }, [
+    chatId,
+    getGateway,
+    resolveModelId,
+    protocolChainId,
+    publicClient,
+    queryClient,
+  ]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */
   const releaseTransport = useCallback(() => {
@@ -200,6 +250,9 @@ export function useProtocolSession(
     resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
+    setProgressStatus("idle");
+    setActiveJobs([]);
+    setTimedOutJob(null);
   }, []);
 
   /** Full teardown including persisted tab session (wallet change / disconnect). */
@@ -211,6 +264,9 @@ export function useProtocolSession(
     setStatus("idle");
     setError(null);
     setFailoverStatus("none");
+    setProgressStatus("idle");
+    setActiveJobs([]);
+    setTimedOutJob(null);
   }, []);
 
   // Cleanup on unmount — preserve per-chat sessionStorage so revisiting the chat restores the session
@@ -251,14 +307,41 @@ export function useProtocolSession(
     releaseTransport();
   }, [chatId, releaseTransport]);
 
+  const claimJobTimeout = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.claimJobTimeout(jobId);
+    setActiveJobs(transport.listJobs());
+    setTimedOutJob(null);
+    return result;
+  }, []);
+
+  const disputeJob = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.disputeJob(jobId);
+    setActiveJobs(transport.listJobs());
+    return result;
+  }, []);
+
+  const clearTimedOutJob = useCallback(() => {
+    setTimedOutJob(null);
+  }, []);
+
   return {
     status,
     error,
     failoverStatus,
     workerCapabilities,
+    progressStatus,
+    activeJobs,
+    timedOutJob,
     getTransport,
     reset: resetForWallet,
     retryFailover,
     startNewSession,
+    claimJobTimeout,
+    disputeJob,
+    clearTimedOutJob,
   };
 }

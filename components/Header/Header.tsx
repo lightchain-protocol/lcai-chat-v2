@@ -170,12 +170,12 @@ export default function Header({ rawMenus }: { rawMenus: RawNavConfig[] }) {
 
               {!isConnected && (
                 <Button
-                  className="hidden rounded-[10px] sm:flex"
+                  className="flex rounded-[10px]"
                   onClick={() => open()}
                   variant="gradient"
                 >
                   <WalletMinimal />
-                  Connect Wallet
+                  <span className="hidden sm:flex">Connect Wallet</span>
                 </Button>
               )}
 

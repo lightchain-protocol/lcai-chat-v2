@@ -1,16 +1,20 @@
-export const DEFAULT_CHAT_MODEL: string = "chat-model";
+export const DEFAULT_CHAT_MODEL: string = "llama3-8b";
 
 export type ChatModel = {
   id: string;
   name: string;
   description: string;
+  fee: number;
+  maxOutputTokens: number;
 };
 
 export const chatModels: ChatModel[] = [
   {
-    id: "chat-model",
-    name: "Lightchain AI",
+    id: "llama3-8b",
+    name: "llama3-8b",
+    fee: 0.02,
+    maxOutputTokens: 2048,
     description:
-      "Lightchain AI is a general-purpose AI model that can be used to answer questions and help with tasks.",
+      "Llama3-8b is a general-purpose AI model that can be used to answer questions and help with tasks served by Lightchain worker network.",
   },
 ];

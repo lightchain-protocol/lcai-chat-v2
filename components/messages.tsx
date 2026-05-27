@@ -2,10 +2,15 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
-import { memo, useEffect } from "react";
+import { memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
-import type { ChatMessage } from "@/lib/types";
+import type { TrackedJob } from "@/lib/protocol/transport";
+import {
+  type ChatMessage,
+  PROTOCOL_LOADING_STATUS_LABELS,
+  type ProtocolLoadingStatus,
+} from "@/lib/types";
 import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
@@ -21,6 +26,10 @@ type MessagesProps = {
   isReadonly: boolean;
   isArtifactVisible: boolean;
   selectedModelId: string;
+  protocolProgressStatus?: ProtocolLoadingStatus;
+  activeJobs?: TrackedJob[];
+  claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
+  disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
 };
 
 function PureMessages({
@@ -32,7 +41,12 @@ function PureMessages({
   regenerate,
   isReadonly,
   selectedModelId,
+  protocolProgressStatus,
+  activeJobs,
+  claimJobTimeout,
+  disputeJob,
 }: MessagesProps) {
+  const initialScrollChatIdRef = useRef<string | null>(null);
   const {
     containerRef: messagesContainerRef,
     endRef: messagesEndRef,
@@ -44,6 +58,20 @@ function PureMessages({
   });
 
   useDataStream();
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    if (initialScrollChatIdRef.current === chatId) {
+      return;
+    }
+
+    initialScrollChatIdRef.current = chatId;
+    requestAnimationFrame(() => {
+      scrollToBottom("auto");
+    });
+  }, [chatId, messages.length, scrollToBottom]);
 
   useEffect(() => {
     if (status === "submitted") {
@@ -69,30 +97,54 @@ function PureMessages({
         <ConversationContent className="flex h-full flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && <Greeting />}
 
-          {messages.map((message, index) => (
-            <PreviewMessage
-              chatId={chatId}
-              isLoading={
-                status === "streaming" && messages.length - 1 === index
-              }
-              isReadonly={isReadonly}
-              key={message.id}
-              message={message}
-              regenerate={regenerate}
-              requiresScrollPadding={
-                hasSentMessage && index === messages.length - 1
-              }
-              setMessages={setMessages}
-              vote={
-                votes
-                  ? votes.find((vote) => vote.messageId === message.id)
-                  : undefined
-              }
-            />
-          ))}
+          {messages.map((message, index) => {
+            const jobId =
+              typeof message.metadata?.jobId === "number"
+                ? message.metadata.jobId
+                : undefined;
+            const trackedJob = 
+              jobId !== undefined
+                ? activeJobs?.find((j) => j.jobId === jobId)
+                : undefined;
+
+            return (
+              <PreviewMessage
+                chatId={chatId}
+                claimJobTimeout={claimJobTimeout}
+                disputeJob={disputeJob}
+                isLoading={
+                  status === "streaming" && messages.length - 1 === index
+                }
+                isReadonly={isReadonly}
+                jobId={jobId}
+                key={message.id}
+                message={message}
+                regenerate={regenerate}
+                requiresScrollPadding={
+                  hasSentMessage && index === messages.length - 1
+                }
+                setMessages={setMessages}
+                trackedJob={trackedJob}
+                vote={
+                  votes
+                    ? votes.find((vote) => vote.messageId === message.id)
+                    : undefined
+                }
+              />
+            );
+          })}
 
           <AnimatePresence mode="wait">
-            {status === "submitted" && <ThinkingMessage key="thinking" />}
+            {status === "submitted" && (
+              <ThinkingMessage
+                key="thinking"
+                label={
+                  protocolProgressStatus
+                    ? PROTOCOL_LOADING_STATUS_LABELS[protocolProgressStatus]
+                    : "Thinking..."
+                }
+              />
+            )}
           </AnimatePresence>
 
           <div

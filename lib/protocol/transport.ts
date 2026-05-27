@@ -14,6 +14,7 @@
  * doesn't support custom headers.
  */
 
+import type { ProtocolLoadingStatus } from "../types";
 import type { GatewayClient } from "./gateway-client";
 import type {
   LifecycleEvent,
@@ -22,7 +23,7 @@ import type {
   WSFrame,
 } from "./relay-client";
 import { RelayClient } from "./relay-client";
-import type { SessionManagerConfig } from "./session";
+import type { OnChainJob, SessionManagerConfig } from "./session";
 import {
   MaxReassignmentsError,
   MissingDisputerKeyError,
@@ -36,11 +37,34 @@ export type FailoverStatus =
   | "failed"
   | "rollover_required";
 
+export type JobStatus =
+  | "submitted"
+  | "streaming"
+  | "completed"
+  | "timed_out"
+  | "claimed"
+  | "disputed";
+
+export type TrackedJob = {
+  jobId: number;
+  sessionId: number;
+  chatId: string;
+  /** Unix seconds — from on-chain Job.deadline */
+  deadline: number;
+  /** Unix seconds — from on-chain Job.completedAt (0 if not yet completed) */
+  completedAt: number;
+  /** Wei — from on-chain Job.escrowedFee */
+  escrowedFee: bigint;
+  startedAt: number;
+  status: JobStatus;
+};
+
 type ProtocolTransportConfig = SessionManagerConfig & {
   persistence: {
     persistUserMessage: (args: {
       chatId: string;
       sessionId: number | null;
+      jobId: number | null;
       message: {
         id?: string;
         role: string;
@@ -75,7 +99,13 @@ export class ProtocolTransport {
   private lastRegisteredApiSessionId: number | null = null;
   private onSessionStatus?: (status: string) => void;
   private onFailoverStatusChange?: (status: FailoverStatus) => void;
+  private onProgressStatusChange?: (status: ProtocolLoadingStatus) => void;
   private failoverPromise: Promise<void> | null = null;
+  // ── Per-job timeout tracking ─────────────────────────────────────────────
+  private readonly activeJobs = new Map<number, TrackedJob>();
+  private readonly jobTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private onJobUpdateCallback?: (job: TrackedJob) => void;
+  private onJobTimeoutCallback?: (job: TrackedJob) => void;
 
   constructor(config: ProtocolTransportConfig) {
     const { persistence, registerProtocolSession, ...sessionConfig } = config;
@@ -94,8 +124,44 @@ export class ProtocolTransport {
     this.onFailoverStatusChange = cb;
   }
 
+  setOnProgressStatus(cb: (status: ProtocolLoadingStatus) => void) {
+    this.onProgressStatusChange = cb;
+  }
+
+  setOnJobUpdate(cb: (job: TrackedJob) => void) {
+    this.onJobUpdateCallback = cb;
+  }
+
+  setOnJobTimeout(cb: (job: TrackedJob) => void) {
+    this.onJobTimeoutCallback = cb;
+  }
+
   get sessionStatus() {
     return this.sessionMgr.status;
+  }
+
+  /** Returns a snapshot of all tracked jobs (across all chats). */
+  listJobs(): TrackedJob[] {
+    return [...this.activeJobs.values()];
+  }
+
+  /** Claims a timed-out job fee. Wallet signature required. */
+  async claimJobTimeout(jobId: number): Promise<{ txHash: string }> {
+    const result = await this.sessionMgr.claimJobTimeout(jobId);
+    this.updateJobStatus(jobId, "claimed");
+    return result;
+  }
+
+  /** Files an on-chain dispute for a completed job. Wallet signature required. */
+  async disputeJob(jobId: number): Promise<{ txHash: string; bond: bigint }> {
+    const result = await this.sessionMgr.disputeJob(jobId);
+    this.updateJobStatus(jobId, "disputed");
+    return result;
+  }
+
+  /** Returns live on-chain job data. */
+  async getJob(jobId: number): Promise<OnChainJob> {
+    return this.sessionMgr.getJob(jobId);
   }
 
   /**
@@ -143,6 +209,7 @@ export class ProtocolTransport {
   startNewSession() {
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.setProgressStatus("idle");
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.sessionMgr.reset();
@@ -165,14 +232,16 @@ export class ProtocolTransport {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
+    this.setProgressStatus("preparing_chat");
     // Initialize session on first message. enableWebSearch in the body
     // doubles as the signal to request a search-capable worker at
     // session-create time — once the session is bound, the toggle gates
     // the per-message side-channel (web-search epic, Story 16).
     const enableWebSearch = options.body?.enableWebSearch === true;
     await this.sessionMgr.initialize(
-      enableWebSearch ? { requiredCapabilities: ["search"] } : undefined,
+      enableWebSearch ? { requiredCapabilities: ["search"] } : undefined
     );
+    this.setProgressStatus("thinking");
 
     // Ensure relay is connected
     this.ensureRelayConnected();
@@ -207,14 +276,22 @@ export class ProtocolTransport {
     // Submit job: encrypt → blob upload → on-chain TX via user's wallet.
     // searchEnabled rides through SessionManager.submitJob into the gateway
     // blob upload, which writes the side-channel the dispatcher reads.
+    this.setProgressStatus("submitting_job");
     const { jobId } = await this.sessionMgr.submitJob(plaintext, {
       searchEnabled: enableWebSearch,
+    });
+    this.setProgressStatus("waiting_for_relay");
+
+    // Track job deadline from chain (fire-and-forget — don't block the stream)
+    this.trackJobDeadline(jobId, chatId).catch(() => {
+      // Deadline tracking is best-effort; failure must not block response delivery
     });
 
     // We persist the user message after the job is submitted to ensure the job ID is available for the assistant message.
     await this.persistence.persistUserMessage({
       chatId,
       sessionId: this.sessionMgr.sessionId,
+      jobId,
       message: lastMessage,
       selectedVisibilityType:
         typeof options.body?.selectedVisibilityType === "string"
@@ -249,6 +326,8 @@ export class ProtocolTransport {
     this.lastRegisteredApiSessionId = null;
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.setProgressStatus("idle");
+    this.clearAllJobTimers();
     this.sessionMgr.release();
   }
 
@@ -261,6 +340,8 @@ export class ProtocolTransport {
     this.lastRegisteredApiSessionId = null;
     this.failoverPromise = null;
     this.setFailoverStatus("none");
+    this.setProgressStatus("idle");
+    this.clearAllJobTimers();
     this.sessionMgr.reset();
   }
 
@@ -302,8 +383,113 @@ export class ProtocolTransport {
     this.relayClient.connect();
   }
 
+  private setProgressStatus(status: ProtocolLoadingStatus) {
+    this.onProgressStatusChange?.(status);
+  }
+
   private setFailoverStatus(status: FailoverStatus) {
     this.onFailoverStatusChange?.(status);
+  }
+
+  // ── Job deadline tracking helpers ─────────────────────────────────────────
+
+  private updateJobStatus(jobId: number, status: JobStatus) {
+    const job = this.activeJobs.get(jobId);
+    if (!job) return;
+    job.status = status;
+    this.onJobUpdateCallback?.(job);
+  }
+
+  private clearJobTimer(jobId: number) {
+    const timer = this.jobTimers.get(jobId);
+    if (timer) {
+      clearTimeout(timer);
+      this.jobTimers.delete(jobId);
+    }
+  }
+
+  private clearAllJobTimers() {
+    for (const timer of this.jobTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.jobTimers.clear();
+  }
+
+  /**
+   * Fetches the on-chain deadline for jobId, registers a TrackedJob, and
+   * schedules a timer that fires 2 s after the deadline.  On expiry, the job
+   * state is re-verified — if the worker completed in the same block we clear
+   * the timer silently.
+   */
+  private async trackJobDeadline(jobId: number, chatId: string): Promise<void> {
+    let onChain: OnChainJob;
+    try {
+      onChain = await this.sessionMgr.getJob(jobId);
+    } catch {
+      return; // Best-effort — can't read chain state
+    }
+
+    const tracked: TrackedJob = {
+      jobId,
+      sessionId: onChain.sessionId,
+      chatId,
+      deadline: onChain.deadline,
+      completedAt: onChain.completedAt,
+      escrowedFee: onChain.escrowedFee,
+      startedAt: Math.floor(Date.now() / 1000),
+      status: "submitted",
+    };
+    this.activeJobs.set(jobId, tracked);
+    this.onJobUpdateCallback?.(tracked);
+
+    // Delay = (deadline * 1000 - now) + 2000 ms grace
+    const delayMs = onChain.deadline * 1000 - Date.now() + 2000;
+    if (delayMs <= 0) {
+      // Already past deadline — fire immediately
+      await this.handleJobDeadlineExpiry(jobId);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.handleJobDeadlineExpiry(jobId).catch(() => {
+        // Best-effort
+      });
+    }, delayMs);
+    this.jobTimers.set(jobId, timer);
+  }
+
+  private async handleJobDeadlineExpiry(jobId: number): Promise<void> {
+    this.jobTimers.delete(jobId);
+
+    const tracked = this.activeJobs.get(jobId);
+    if (!tracked) return;
+    if (
+      tracked.status === "completed" ||
+      tracked.status === "claimed" ||
+      tracked.status === "disputed"
+    ) {
+      return;
+    }
+
+    // Re-check on-chain state — worker may have completed in the same second
+    try {
+      const onChain = await this.sessionMgr.getJob(jobId);
+      // JobState: 0=Submitted 1=Acknowledged 2=Completed 3=TimedOut
+      if (onChain.state === 2 || onChain.state === 3) {
+        // Worker completed or already timed out — update and don't fire
+        tracked.completedAt = onChain.completedAt;
+        tracked.status = onChain.state === 2 ? "completed" : "timed_out";
+        this.onJobUpdateCallback?.(tracked);
+        if (onChain.state === 2) return; // Don't fire timeout for a completed job
+      }
+    } catch {
+      // Chain read failed — fire the timeout optimistically
+    }
+
+    tracked.status = "timed_out";
+    this.activeJobs.set(jobId, tracked);
+    this.onJobUpdateCallback?.(tracked);
+    this.onJobTimeoutCallback?.(tracked);
   }
 
   private handleLifecycleEvent(event: LifecycleEvent) {
@@ -454,6 +640,7 @@ export class ProtocolTransport {
                 ) {
                   return;
                 }
+                this.setProgressStatus("error");
                 controller.enqueue(
                   sse({ type: "error", errorText: errorFrame.message })
                 );
@@ -486,6 +673,8 @@ export class ProtocolTransport {
 
               if (wsFrame.payload && !started) {
                 started = true;
+                this.updateJobStatus(jobId, "streaming");
+                this.setProgressStatus("decoding_prompt");
                 relayClient.beginAssistantMessage({
                   jobId,
                   chatId,
@@ -504,6 +693,7 @@ export class ProtocolTransport {
                 const decrypted = await sessionMgr.decryptResponse(
                   wsFrame.payload
                 );
+                this.setProgressStatus("reasoning");
                 if (wsFrame.type === "complete") {
                   relayClient.replaceAssistantText(jobId, decrypted);
                   if (!streamedText) {
@@ -545,15 +735,20 @@ export class ProtocolTransport {
 
               if (wsFrame.type === "complete") {
                 if (started) {
+                  this.setProgressStatus("streaming");
                   controller.enqueue(sse({ type: "text-end", id: partId }));
                   await relayClient.completeAssistantMessage(jobId);
                 }
+                this.setProgressStatus("completed");
+                this.updateJobStatus(jobId, "completed");
+                this.clearJobTimer(jobId);
                 controller.close();
                 unsubscribe();
               }
             } catch (err) {
               const msg =
                 err instanceof Error ? err.message : "decryption failed";
+              this.setProgressStatus("error");
               controller.enqueue(sse({ type: "error", errorText: msg }));
               relayClient.discardAssistantMessage(jobId);
               controller.close();
@@ -563,6 +758,7 @@ export class ProtocolTransport {
         );
 
         signal?.addEventListener("abort", () => {
+          this.setProgressStatus("idle");
           relayClient.discardAssistantMessage(jobId);
           unsubscribe();
           controller.close();

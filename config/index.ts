@@ -1,62 +1,47 @@
 import { type Chain, mainnet } from "viem/chains";
+import { lcai, lcaiTestnet } from "./chains";
 
-export const lcaiTestnet: Chain = {
-  id: 8200,
-  name: "LightchainAI Testnet",
-  nativeCurrency: {
-    name: "LightchainAI",
-    symbol: "LCAI",
-    decimals: 18,
-  },
-  rpcUrls: {
-    default: {
-      // Overridable via NEXT_PUBLIC_RPC_URL (baked at build time).
-      // Defaults to the public testnet so prod builds work without extra config.
-      http: [
-        process.env.NEXT_PUBLIC_RPC_URL ?? "https://rpc.testnet.lightchain.ai",
-      ],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: "LightchainAI Testnet Explorer",
-      url: "https://testnet-explorer.lightscan.app",
-    },
-  },
-};
+// const customMainnet: Chain = {
+//   ...mainnet,
+//   rpcUrls: {
+//     default: {
+//       http: ["https://mainnet.infura.io/v3/e4c15472e4824fefae8a9d5b265e8180"],
+//     },
+//   },
+// };
 
-const customMainnet: Chain = {
-  ...mainnet,
-  rpcUrls: {
-    default: {
-      http: ["https://mainnet.infura.io/v3/e4c15472e4824fefae8a9d5b265e8180"],
-    },
-  },
-};
+export const isTestnet = process.env.NEXT_PUBLIC_LCAI_IS_TESTNET === "true";
 
 const config = {
-  chains: [lcaiTestnet] as [Chain, ...Chain[]],
+  chains: [isTestnet ? lcaiTestnet : lcai] as [Chain, ...Chain[]],
   subscriptionContractAddress: {
     // [lcaiTestnet.id]: "0x0670662b75f92D14A645545bf3B0eDdfd5E299bd",
     [mainnet.id]: "0x535AE6B51742df53c1d5C4Ae6496cAd935615E3b",
   } as Record<number, `0x${string}`>,
 
-  // Transitional: contract addresses from env vars until GET /api/system/config exists
   jobRegistryAddress: {
-    [lcaiTestnet.id]: (process.env.NEXT_PUBLIC_JOB_REGISTRY_ADDRESS ??
-      "0x") as `0x${string}`,
+    [lcai.id]: "0xfB15F90298e4CcD7106E76fFB5e520315cC42B0b",
+    [lcaiTestnet.id]: "0x531b3A87c5D785441B9cF55b98169F20FD9056a7",
   } as Record<number, `0x${string}`>,
 
   aiConfigAddress: {
-    [lcaiTestnet.id]: (process.env.NEXT_PUBLIC_AI_CONFIG_ADDRESS ??
-      "0x") as `0x${string}`,
+    [lcai.id]: "0x24D11533C354092ed6E18b964257819cE78Ce77D",
+    [lcaiTestnet.id]: "0xeCF4Ca5Ba6D97ae586993e170764a1E92231b67e",
   } as Record<number, `0x${string}`>,
 
   workerRegistryAddress: {
-    [lcaiTestnet.id]: (process.env.NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS ?? "0x") as `0x${string}`,
+    [lcai.id]: "0x0000000000000000000000000000000000001002",
+    [lcaiTestnet.id]: "0x0000000000000000000000000000000000001002",
   } as Record<number, `0x${string}`>,
 
   lcaiToken: {
+    [lcai.id]: {
+      address: "0x0000000000000000000000000000000000000000",
+      symbol: "LCAI",
+      name: "LCAI",
+      image: "/images/logo/favicon.png",
+      decimals: 18,
+    },
     [lcaiTestnet.id]: {
       address: "0x0000000000000000000000000000000000000000",
       symbol: "LCAI",

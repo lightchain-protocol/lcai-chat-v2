@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { useAppKit } from "@reown/appkit/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -18,10 +19,12 @@ import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
+import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
@@ -29,6 +32,26 @@ import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
+
+function isProtocolAuthExpiredError(error: unknown): boolean {
+  if (error instanceof ProtocolAuthExpiredError) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const candidate = error as {
+    walk?: () => unknown;
+    cause?: unknown;
+  };
+  const walkedError = candidate.walk?.();
+  return (
+    walkedError instanceof ProtocolAuthExpiredError ||
+    candidate.cause instanceof ProtocolAuthExpiredError
+  );
+}
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
@@ -59,6 +82,7 @@ export function Chat({
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
   const { status: sessionStatus } = useSession();
+  const { open } = useAppKit();
 
   const [input, setInput] = useState<string>("");
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
@@ -80,9 +104,15 @@ export function Chat({
   const {
     getTransport: getProtocolTransport,
     failoverStatus,
+    progressStatus,
+    activeJobs,
+    timedOutJob,
     retryFailover,
     startNewSession,
     workerCapabilities,
+    claimJobTimeout,
+    disputeJob,
+    clearTimedOutJob,
   } = useProtocolSession(currentModelId, walletClient, address, id);
   // Read-only preflight: union of capabilities across all workers eligible
   // for this model (web-search epic, Story 16). Populates at chat mount via
@@ -195,6 +225,29 @@ export function Chat({
     enableWebSearchRef.current = enableWebSearch;
   }, [enableWebSearch]);
 
+  // Show a non-blocking toast when a job's deadline passes with no response
+  useEffect(() => {
+    if (!timedOutJob) return;
+    const toastId = `job-timeout-${timedOutJob.jobId}`;
+    toast.custom(
+      () => (
+        <JobTimeoutToast
+          id={toastId}
+          job={timedOutJob}
+          onClaim={claimJobTimeout}
+          onNewSession={() => {
+            clearTimedOutJob();
+            startNewSession();
+          }}
+        />
+      ),
+      {
+        id: toastId,
+        duration: Number.POSITIVE_INFINITY,
+      }
+    );
+  }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
+
   const {
     messages,
     setMessages,
@@ -219,6 +272,17 @@ export function Chat({
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error: any) => {
+      if (isProtocolAuthExpiredError(error)) {
+        toast.custom((errorId) => (
+          <AlertError
+            id={errorId}
+            title="Your session expired. Please sign in with your wallet again."
+          />
+        ));
+        open();
+        return;
+      }
+
       toast.custom((errorId) => (
         <AlertError
           id={errorId}
@@ -295,10 +359,14 @@ export function Chat({
         )}
 
         <Messages
+          activeJobs={activeJobs}
           chatId={id}
+          claimJobTimeout={claimJobTimeout}
+          disputeJob={disputeJob}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
           setMessages={setMessages}

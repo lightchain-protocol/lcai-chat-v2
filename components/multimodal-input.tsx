@@ -156,7 +156,7 @@ function PureMultimodalInput({
     window.history.replaceState({}, "", `/chat/${chatId}`);
 
     if (status === "error") {
-      setMessages((messages) => messages.slice(0, -1)); // remove last message if error
+      setMessages((currentMessages) => currentMessages.slice(0, -1)); // remove last message if error
     }
 
     sendMessage({

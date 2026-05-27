@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BriefcaseIcon,
   CloudDownloadIcon,
   Loader,
   MessageSquarePlus,
@@ -34,7 +35,7 @@ import {
 } from "@/components/ui/sidebar";
 import useSubscription from "@/hooks/use-subscription";
 import { $http } from "@/lib/http";
-import { compactNumber, formatDate } from "@/lib/utils";
+import { formatDate, formatNumber } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -132,6 +133,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                     router.push("/");
                     router.refresh();
                   }}
+                  title="New chat"
                   type="button"
                   variant="ghost"
                 >
@@ -157,6 +159,17 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                     className="space-y-1"
                     sideOffset={10}
                   >
+                    <DropdownMenuItem
+                      className="flex items-center gap-2 text-content-ultra"
+                      disabled={!user}
+                      onClick={() => {
+                        setOpenMobile(false);
+                        router.push("/jobs");
+                      }}
+                     >
+                      <BriefcaseIcon className="size-4 text-content-soft" />
+                      On-chain jobs
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       className="flex items-center gap-2 text-content-ultra"
                       onSelect={() => setShowImportDialog(true)}
@@ -225,7 +238,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                   </h6>
                   <div className="ml-auto pl-2">
                     <span className="block font-semibold text-content-strong text-sm">
-                      {compactNumber(formatEther(balance.data?.value || 0n))}{" "}
+                      {formatNumber(formatEther(balance.data?.value || 0n))}{" "}
                       LCAI
                     </span>
                   </div>

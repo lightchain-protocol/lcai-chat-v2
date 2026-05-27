@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
+import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { Shimmer } from "./ai-elements/shimmer";
@@ -15,6 +16,7 @@ import { Response } from "./elements/response";
 import { LCAIIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
+import { MessageJobActions } from "./message-job-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { SourceLinkChip } from "./source-link-chip";
@@ -29,6 +31,10 @@ const PurePreviewMessage = ({
   regenerate,
   isReadonly,
   requiresScrollPadding,
+  jobId,
+  trackedJob,
+  claimJobTimeout,
+  disputeJob,
 }: {
   chatId: string;
   message: ChatMessage;
@@ -38,6 +44,10 @@ const PurePreviewMessage = ({
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
   requiresScrollPadding: boolean;
+  jobId?: number;
+  trackedJob?: TrackedJob;
+  claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
+  disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
@@ -364,6 +374,16 @@ const PurePreviewMessage = ({
               vote={vote}
             />
           )}
+
+          {!isReadonly && jobId !== undefined && (
+            <MessageJobActions
+              jobId={jobId}
+              messageRole={message.role as "user" | "assistant"}
+              onClaimTimeout={claimJobTimeout}
+              onDisputeJob={disputeJob}
+              trackedJob={trackedJob}
+            />
+          )}
         </div>
       </div>
     </motion.div>
@@ -410,7 +430,11 @@ function toCitationSource(source: WebSearchSource): CitationSource {
   };
 }
 
-export const ThinkingMessage = () => {
+export const ThinkingMessage = ({
+  label = "Thinking...",
+}: {
+  label?: string;
+}) => {
   const role = "assistant";
 
   return (
@@ -431,7 +455,7 @@ export const ThinkingMessage = () => {
 
         <div className="flex w-full flex-col gap-2 md:gap-4">
           <Shimmer as="p" duration={2}>
-            Thinking...
+            {label}
           </Shimmer>
         </div>
       </div>
