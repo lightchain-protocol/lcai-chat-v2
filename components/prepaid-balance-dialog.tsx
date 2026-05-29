@@ -20,13 +20,7 @@ import { cn } from "@/lib/utils";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
-function shortAddr(addr?: string) {
-  if (!addr) return "—";
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
 function errMessage(error: unknown): string {
-  // viem errors carry a `.walk()` chain; surface the shortMessage if present.
   const anyErr = error as {
     walk?: () => { shortMessage?: string; message?: string };
     message?: string;
@@ -45,29 +39,25 @@ export function PrepaidBalanceDialog(props: DialogProps) {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const balanceLCAI = formatEther(pb.balance);
+  const allowanceLCAI = formatEther(pb.allowance);
   const busy =
-    pb.depositMutation.isPending ||
     pb.depositAndAuthorizeMutation.isPending ||
     pb.withdrawMutation.isPending ||
     pb.authorizeMutation.isPending ||
-    pb.revokeMutation.isPending;
+    pb.revokeMutation.isPending ||
+    pb.syncAllowanceMutation.isPending;
 
   const onDeposit = async () => {
     if (!depositAmount || Number(depositAmount) <= 0) return;
     try {
-      // If the delegate isn't authorized yet, do it in one TX.
-      if (pb.isAuthorized) {
-        await pb.depositMutation.mutateAsync(depositAmount);
-      } else {
-        await pb.depositAndAuthorizeMutation.mutateAsync(depositAmount);
-      }
+      await pb.depositAndAuthorizeMutation.mutateAsync(depositAmount);
       setDepositAmount("");
       toast.custom((id) => (
         <AlertSuccess
           id={id}
           title={
             pb.isAuthorized
-              ? "Balance topped up"
+              ? "Balance topped up & spending limit increased"
               : "Balance topped up & delegate authorized"
           }
         />
@@ -100,9 +90,27 @@ export function PrepaidBalanceDialog(props: DialogProps) {
       } else {
         await pb.authorizeMutation.mutateAsync();
         toast.custom((id) => (
-          <AlertSuccess id={id} title="Delegate authorized" />
+          <AlertSuccess
+            id={id}
+            title={
+              pb.balance > 0n
+                ? "Delegate authorized with spending limit"
+                : "Delegate authorized — deposit to enable prompts"
+            }
+          />
         ));
       }
+    } catch (error) {
+      toast.custom((id) => <AlertError id={id} title={errMessage(error)} />);
+    }
+  };
+
+  const onSyncAllowance = async () => {
+    try {
+      await pb.syncAllowanceMutation.mutateAsync();
+      toast.custom((id) => (
+        <AlertSuccess id={id} title="Spending limit updated to full balance" />
+      ));
     } catch (error) {
       toast.custom((id) => <AlertError id={id} title={errMessage(error)} />);
     }
@@ -134,8 +142,8 @@ export function PrepaidBalanceDialog(props: DialogProps) {
               </h4>
             </DialogTitle>
             <DialogDescription className="-tracking-[0.16px] mt-1 text-base text-content-default">
-              Deposit LCAI once and the protocol fee for each prompt is debited
-              automatically.
+              Deposit LCAI once; each prompt debits your balance through a
+              capped delegate spending limit.
             </DialogDescription>
           </DialogHeader>
 
@@ -143,7 +151,6 @@ export function PrepaidBalanceDialog(props: DialogProps) {
 
           {pb.available ? (
             <div className="space-y-6">
-              {/* Balance + delegate status */}
               <div className="rounded-2xl border border-bdr-light bg-surface-base-subtle p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-content-soft text-sm">
@@ -153,27 +160,35 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                     {pb.isLoading ? "…" : `${balanceLCAI} LCAI`}
                   </span>
                 </div>
-                <div className="mt-3 flex items-center justify-between">
-                {pb.ready ? (
-                  <p className="text-emerald-500 text-xs">
-                    ✓ You balance is topped up.
-                  </p>
-                ) : (
-                  <p className="text-content-light text-xs">
-                    Deposit LCAI
-                    {!pb.isAuthorized && " and authorize the delegate"} to
-                    switch to gas-free prompts. 
-                  </p>
-                )}
-                  {/* <span className="text-content-soft text-sm">
-                    Delegate{" "}
-                    <span className="text-content-light">
-                      ({shortAddr(pb.delegateAddress)})
+                {pb.isAuthorized && (
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-content-soft text-sm">
+                      Delegate spending limit
                     </span>
-                  </span> */}
+                    <span className="font-medium text-content-default text-sm">
+                      {pb.isLoading ? "…" : `${allowanceLCAI} LCAI`}
+                    </span>
+                  </div>
+                )}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  {pb.ready ? (
+                    <p className="text-emerald-500 text-xs">
+                      Your balance is ready for gas-free prompts.
+                    </p>
+                  ) : (
+                    <p className="text-content-light text-xs">
+                      {pb.balance === 0n
+                        ? "Deposit LCAI to get started."
+                        : !pb.isAuthorized
+                          ? "Authorize the delegate to enable gas-free prompts."
+                          : pb.allowance === 0n
+                            ? "Set a spending limit so the delegate can submit prompts."
+                            : "Increase the spending limit to match your balance."}
+                    </p>
+                  )}
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                      "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs",
                       pb.isAuthorized
                         ? "bg-emerald-500/10 text-emerald-500"
                         : "bg-amber-500/10 text-amber-500"
@@ -187,16 +202,34 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                     {pb.isAuthorized ? "Authorized" : "Not authorized"}
                   </span>
                 </div>
+                {pb.needsAllowanceSync && (
+                  <Button
+                    className="mt-3 h-8 w-full text-xs"
+                    disabled={busy}
+                    onClick={onSyncAllowance}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {pb.syncAllowanceMutation.isPending ? (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    ) : (
+                      `Allow delegate to spend full balance (${balanceLCAI} LCAI)`
+                    )}
+                  </Button>
+                )}
               </div>
 
-              {/* Deposit */}
               <div>
                 <label
                   className="mb-1.5 block text-content-soft text-sm"
                   htmlFor="prepaid-deposit"
                 >
-                  {pb.isAuthorized ? "Top up" : "Deposit & authorize"}
+                  Top up
                 </label>
+                <p className="mb-2 text-content-light text-xs">
+                  Deposits also increase the delegate spending limit by the same
+                  amount.
+                </p>
                 <div className="flex gap-2">
                   <Input
                     disabled={busy}
@@ -213,19 +246,15 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                     }
                     onClick={onDeposit}
                   >
-                    {pb.depositMutation.isPending ||
-                    pb.depositAndAuthorizeMutation.isPending ? (
+                    {pb.depositAndAuthorizeMutation.isPending ? (
                       <Loader2Icon className="size-4 animate-spin" />
-                    ) : pb.isAuthorized ? (
-                      "Deposit"
                     ) : (
-                      "Deposit & Authorize"
+                      "Deposit"
                     )}
                   </Button>
                 </div>
               </div>
 
-              {/* Withdraw */}
               <div>
                 <label
                   className="mb-1.5 block text-content-soft text-sm"
@@ -233,6 +262,10 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                 >
                   Withdraw to wallet
                 </label>
+                <p className="mb-2 text-content-light text-xs">
+                  Revoke the delegate first if you want to avoid pending prompts
+                  debiting your balance before withdrawal confirms.
+                </p>
                 <div className="flex gap-2">
                   <Input
                     disabled={busy || pb.balance === 0n}
@@ -272,7 +305,6 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                 )}
               </div>
 
-              {/* Delegate toggle */}
               <div className="flex items-center justify-between border-bdr-light border-t pt-4">
                 <div>
                   <p className="text-content-default text-sm">
@@ -283,7 +315,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                   <p className="text-content-light text-xs">
                     {pb.isAuthorized
                       ? "Revoke to require a wallet signature per prompt again."
-                      : "Authorize so the API can submit prompts from your balance."}
+                      : "Authorize so the API can submit prompts within your spending limit."}
                   </p>
                 </div>
                 <Button

@@ -3,9 +3,9 @@
  *
  * Contains only the functions and events needed by the frontend:
  *   - createSession / submitJob (write)
- *   - deposit / depositAndAuthorize / withdrawBalance / setDelegateAuthorization (prepaid balance)
- *   - balanceOf / isDelegateAuthorized (prepaid balance reads)
- *   - SessionCreated / JobSubmitted / Deposited / Withdrew / DelegateAuthorizationSet (events)
+ *   - deposit / depositAndAuthorize / withdrawBalance / setDelegateAuthorization / setDelegateAllowance (prepaid balance)
+ *   - prepaidBalanceOf / isDelegateAuthorized / delegateAllowance (prepaid balance reads)
+ *   - SessionCreated / JobSubmitted / Deposited / Withdrew / DelegateAuthorizationSet / DelegateAllowanceSet (events)
  *   - InvalidDispatcherSignature / SignatureExpired (errors for retry detection)
  */
 export const jobRegistryAbi = [
@@ -56,8 +56,18 @@ export const jobRegistryAbi = [
     type: "function",
   },
   {
+    inputs: [
+      { internalType: "address", name: "delegate", type: "address" },
+      { internalType: "uint256", name: "allowance", type: "uint256" },
+    ],
+    name: "setDelegateAllowance",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
     inputs: [{ internalType: "address", name: "user", type: "address" }],
-    name: "balanceOf",
+    name: "prepaidBalanceOf",
     outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
@@ -69,6 +79,16 @@ export const jobRegistryAbi = [
     ],
     name: "isDelegateAuthorized",
     outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "user", type: "address" },
+      { internalType: "address", name: "delegate", type: "address" },
+    ],
+    name: "delegateAllowance",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
@@ -290,6 +310,26 @@ export const jobRegistryAbi = [
       },
     ],
     name: "DelegateAuthorizationSet",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "address", name: "user", type: "address" },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "delegate",
+        type: "address",
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "allowance",
+        type: "uint256",
+      },
+    ],
+    name: "DelegateAllowanceSet",
     type: "event",
   },
   {

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
-import { type Address, getContract, parseEther, zeroAddress } from "viem";
+import { type Address, getContract, parseEther } from "viem";
 import { useAccount } from "wagmi";
 import config from "@/config";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
@@ -11,20 +11,16 @@ import { GatewayClient } from "@/lib/protocol/gateway-client";
 import useWeb3Clients from "./use-web3-clients";
 
 /**
- * Reads + writes the user's prepaid balance and delegate authorization on the
- * JobRegistry contract, and reads the delegate address from the consumer-api
- * (`GET /api/balance`).
+ * Reads + writes the user's prepaid balance, delegate authorization, and
+ * per-delegate spending allowance on JobRegistry. Delegate address comes from
+ * the consumer-api (`GET /api/balance`).
  *
- * The on-chain reads use `config.chains[0]` (the protocol chain) — same chain
- * the protocol session targets, regardless of the wallet's selected chain.
- * Write TXs go through the wallet on whatever chain it's on; the dialog should
- * prompt a chain switch if needed (handled by the connect-wallet flow).
+ * On-chain reads use `config.chains[0]` (the protocol chain).
  */
 export default function usePrepaidBalance() {
   const { publicClient, walletClient } = useWeb3Clients();
   const { address } = useAccount();
 
-  // Protocol always targets the first configured chain.
   const protocolChainId = config.chains[0].id;
   const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
 
@@ -40,9 +36,6 @@ export default function usePrepaidBalance() {
     [jobRegistryAddress, publicClient, walletClient]
   );
 
-  // Delegate address + authorization come from the consumer-api. We trust the
-  // consumer-api to report the delegate it actually submits from; we cross-check
-  // authorization on-chain below so a stale/lying API can't trick the UI.
   const apiBalance = useQuery({
     queryKey: ["prepaid-api-balance", address?.toLowerCase()],
     enabled: !!address,
@@ -57,7 +50,9 @@ export default function usePrepaidBalance() {
     enabled: !!address && !!contract,
     queryFn: async (): Promise<bigint> => {
       if (!contract || !address) return 0n;
-      return (await contract.read.balanceOf([address as Address])) as bigint;
+      return (await contract.read.prepaidBalanceOf([
+        address as Address,
+      ])) as bigint;
     },
   });
 
@@ -78,53 +73,52 @@ export default function usePrepaidBalance() {
     },
   });
 
+  const delegateAllowanceQuery = useQuery({
+    queryKey: [
+      "prepaid-delegate-allowance",
+      address?.toLowerCase(),
+      delegateAddress?.toLowerCase(),
+      protocolChainId,
+    ],
+    enabled: !!address && !!contract && !!delegateAddress,
+    queryFn: async (): Promise<bigint> => {
+      if (!contract || !address || !delegateAddress) return 0n;
+      return (await contract.read.delegateAllowance([
+        address as Address,
+        delegateAddress,
+      ])) as bigint;
+    },
+  });
+
   const refetchAll = useCallback(() => {
     onChainBalance.refetch();
     delegateAuthorized.refetch();
+    delegateAllowanceQuery.refetch();
     apiBalance.refetch();
-  }, [onChainBalance, delegateAuthorized, apiBalance]);
+  }, [onChainBalance, delegateAuthorized, delegateAllowanceQuery, apiBalance]);
 
   const requireWritable = useCallback(() => {
     if (!contract || !walletClient?.account) {
       throw new Error("Wallet not connected");
     }
+    if (!delegateAddress) throw new Error("Delegate address not available");
     return { contract, account: walletClient.account.address as Address };
-  }, [contract, walletClient]);
+  }, [contract, walletClient, delegateAddress]);
 
-  /** Top up the prepaid balance. amount is a decimal string of LCAI. */
-  const deposit = useCallback(
-    async (amount: string | number) => {
-      const { account } = requireWritable();
-      if (!contract || !walletClient) throw new Error("Wallet not connected");
-      const value = parseEther(`${amount}`);
-      const { request } = await publicClient.simulateContract({
-        address: contract.address,
-        abi: jobRegistryAbi,
-        functionName: "deposit",
-        args: [],
-        value,
-        account,
-      });
-      const hash = await walletClient.writeContract(request);
-      await publicClient.waitForTransactionReceipt({ hash });
-      refetchAll();
-      return hash;
-    },
-    [contract, walletClient, publicClient, requireWritable, refetchAll]
-  );
-
-  /** Deposit + authorize the consumer-api delegate in a single TX. */
+  /**
+   * Deposit + authorize delegate + increase spending allowance by deposit amount.
+   * Use for all top-ups so new funds are spendable by the delegate.
+   */
   const depositAndAuthorize = useCallback(
     async (amount: string | number) => {
-      const { account } = requireWritable();
-      if (!contract || !walletClient) throw new Error("Wallet not connected");
-      if (!delegateAddress) throw new Error("Delegate address not available");
+      const { account, contract: c } = requireWritable();
+      if (!walletClient) throw new Error("Wallet not connected");
       const value = parseEther(`${amount}`);
       const { request } = await publicClient.simulateContract({
-        address: contract.address,
+        address: c.address,
         abi: jobRegistryAbi,
         functionName: "depositAndAuthorize",
-        args: [delegateAddress],
+        args: [delegateAddress!],
         value,
         account,
       });
@@ -134,11 +128,10 @@ export default function usePrepaidBalance() {
       return hash;
     },
     [
-      contract,
+      requireWritable,
       walletClient,
       publicClient,
       delegateAddress,
-      requireWritable,
       refetchAll,
     ]
   );
@@ -146,11 +139,11 @@ export default function usePrepaidBalance() {
   /** Pull `amount` LCAI back from the prepaid balance to the wallet. */
   const withdrawBalance = useCallback(
     async (amount: string | number) => {
-      const { account } = requireWritable();
-      if (!contract || !walletClient) throw new Error("Wallet not connected");
+      const { account, contract: c } = requireWritable();
+      if (!walletClient) throw new Error("Wallet not connected");
       const wei = parseEther(`${amount}`);
       const { request } = await publicClient.simulateContract({
-        address: contract.address,
+        address: c.address,
         abi: jobRegistryAbi,
         functionName: "withdrawBalance",
         args: [wei],
@@ -161,19 +154,18 @@ export default function usePrepaidBalance() {
       refetchAll();
       return hash;
     },
-    [contract, walletClient, publicClient, requireWritable, refetchAll]
+    [requireWritable, walletClient, publicClient, refetchAll]
   );
 
-  const setDelegate = useCallback(
+  const setDelegateAuthorization = useCallback(
     async (authorized: boolean) => {
-      const { account } = requireWritable();
-      if (!contract || !walletClient) throw new Error("Wallet not connected");
-      if (!delegateAddress) throw new Error("Delegate address not available");
+      const { account, contract: c } = requireWritable();
+      if (!walletClient) throw new Error("Wallet not connected");
       const { request } = await publicClient.simulateContract({
-        address: contract.address,
+        address: c.address,
         abi: jobRegistryAbi,
         functionName: "setDelegateAuthorization",
-        args: [delegateAddress, authorized],
+        args: [delegateAddress!, authorized],
         account,
       });
       const hash = await walletClient.writeContract(request);
@@ -181,59 +173,104 @@ export default function usePrepaidBalance() {
       refetchAll();
       return hash;
     },
-    [
-      contract,
-      walletClient,
-      publicClient,
-      delegateAddress,
-      requireWritable,
-      refetchAll,
-    ]
+    [requireWritable, walletClient, publicClient, delegateAddress, refetchAll]
   );
 
-  const authorizeDelegate = useCallback(() => setDelegate(true), [setDelegate]);
-  const revokeDelegate = useCallback(() => setDelegate(false), [setDelegate]);
+  const setDelegateAllowance = useCallback(
+    async (allowanceWei: bigint) => {
+      const { account, contract: c } = requireWritable();
+      if (!walletClient) throw new Error("Wallet not connected");
+      const { request } = await publicClient.simulateContract({
+        address: c.address,
+        abi: jobRegistryAbi,
+        functionName: "setDelegateAllowance",
+        args: [delegateAddress!, allowanceWei],
+        account,
+      });
+      const hash = await walletClient.writeContract(request);
+      await publicClient.waitForTransactionReceipt({ hash });
+      refetchAll();
+      return hash;
+    },
+    [requireWritable, walletClient, publicClient, delegateAddress, refetchAll]
+  );
 
-  // Mutations for the dialog UI (handles loading state + toasts at the call site).
-  const depositMutation = useMutation({ mutationFn: deposit });
+  /** Authorize delegate and cap spend at current prepaid balance. */
+  const authorizeDelegate = useCallback(async () => {
+    const { account, contract: c } = requireWritable();
+    await setDelegateAuthorization(true);
+    const bal = (await c.read.prepaidBalanceOf([account])) as bigint;
+    if (bal > 0n) {
+      await setDelegateAllowance(bal);
+    }
+  }, [requireWritable, setDelegateAuthorization, setDelegateAllowance]);
+
+  const revokeDelegate = useCallback(
+    () => setDelegateAuthorization(false),
+    [setDelegateAuthorization]
+  );
+
+  /** Raise delegate spending limit to match full prepaid balance. */
+  const syncAllowanceToBalance = useCallback(async () => {
+    const { account, contract: c } = requireWritable();
+    const bal = (await c.read.prepaidBalanceOf([account])) as bigint;
+    if (bal === 0n) throw new Error("No prepaid balance to allocate");
+    const authorized = (await c.read.isDelegateAuthorized([
+      account,
+      delegateAddress!,
+    ])) as boolean;
+    if (!authorized) {
+      await setDelegateAuthorization(true);
+    }
+    await setDelegateAllowance(bal);
+  }, [
+    requireWritable,
+    delegateAddress,
+    setDelegateAuthorization,
+    setDelegateAllowance,
+  ]);
+
   const depositAndAuthorizeMutation = useMutation({
     mutationFn: depositAndAuthorize,
   });
   const withdrawMutation = useMutation({ mutationFn: withdrawBalance });
   const authorizeMutation = useMutation({ mutationFn: authorizeDelegate });
   const revokeMutation = useMutation({ mutationFn: revokeDelegate });
+  const syncAllowanceMutation = useMutation({
+    mutationFn: syncAllowanceToBalance,
+  });
 
   const balance = onChainBalance.data ?? 0n;
+  const allowance = delegateAllowanceQuery.data ?? 0n;
   const isAuthorized = delegateAuthorized.data ?? false;
+  const needsAllowanceSync =
+    isAuthorized && balance > 0n && allowance < balance;
 
   return {
-    /** Whether the prepaid feature is usable (contract + delegate known). */
     available: !!contract && !!delegateAddress,
-    /** On-chain prepaid balance in wei. */
     balance,
-    /** Whether the consumer-api delegate is authorized by the user. */
+    allowance,
     isAuthorized,
-    /** Delegated submission is ready: balance > 0 and delegate authorized. */
-    ready: balance > 0n && isAuthorized,
+    needsAllowanceSync,
+    /** Gas-free prompts: funded, authorized, and delegate has spending headroom. */
+    ready: balance > 0n && isAuthorized && allowance > 0n,
     delegateAddress,
     isLoading:
       onChainBalance.isLoading ||
       delegateAuthorized.isLoading ||
+      delegateAllowanceQuery.isLoading ||
       apiBalance.isLoading,
     refetch: refetchAll,
-    // raw query handles, if a caller needs them
-    queries: { onChainBalance, delegateAuthorized, apiBalance },
-    // actions
-    deposit,
+    queries: { onChainBalance, delegateAuthorized, delegateAllowanceQuery, apiBalance },
     depositAndAuthorize,
     withdrawBalance,
     authorizeDelegate,
     revokeDelegate,
-    // mutation wrappers for UI
-    depositMutation,
+    syncAllowanceToBalance,
     depositAndAuthorizeMutation,
     withdrawMutation,
     authorizeMutation,
     revokeMutation,
+    syncAllowanceMutation,
   };
 }
