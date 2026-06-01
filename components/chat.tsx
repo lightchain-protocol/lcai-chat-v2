@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useAppKit } from "@reown/appkit/react";
-import { DefaultChatTransport } from "ai";
+import { type DataUIPart, DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,7 +20,7 @@ import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
-import type { Attachment, ChatMessage } from "@/lib/types";
+import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
@@ -263,7 +263,9 @@ export function Chat({
     generateId: generateUUID,
     transport,
     onData: (dataPart) => {
-      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
+      setDataStream((ds) =>
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
+      );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
       // }

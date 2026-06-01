@@ -266,7 +266,7 @@ export class RelayClient {
     if (!pending) return;
     if (!pending.text.trim()) return;
 
-    const parts: Array<Record<string, unknown>> = [];
+    const parts: Record<string, unknown>[] = [];
     if (pending.sources.length > 0) {
       parts.push({
         type: "data-webSearchSources",

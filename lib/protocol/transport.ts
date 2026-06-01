@@ -160,7 +160,7 @@ export class ProtocolTransport {
   }
 
   /** Returns live on-chain job data. */
-  async getJob(jobId: number): Promise<OnChainJob> {
+  getJob(jobId: number): Promise<OnChainJob> {
     return this.sessionMgr.getJob(jobId);
   }
 
