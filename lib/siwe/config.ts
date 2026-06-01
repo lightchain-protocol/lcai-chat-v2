@@ -45,8 +45,8 @@ export const siweConfig = createSIWEConfig({
   createMessage: ({ address, ...args }: SIWECreateMessageArgs) =>
     formatMessage(args, address),
 
-  getNonce: async () => {
-    const response = await $http.get("/api/auth/nonce", {
+  getNonce: async (address) => {
+    const response = await $http.get(`/api/auth/challenge?address=${address}`, {
       auth: false,
       headers: { Accept: "application/json" },
       credentials: "include",

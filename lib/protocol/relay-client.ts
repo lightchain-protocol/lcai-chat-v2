@@ -5,7 +5,7 @@
  * WSFrame messages, and dispatches them to per-job callbacks for decryption.
  *
  * Frame format (from relay):
- *   { type: "chunk"|"complete"|"error", jobId, sessionId, seq, totalChunks, payload, ts }
+ *   { type: "chunk"|"complete"|"metadata"|"error", jobId, sessionId, seq, totalChunks, payload, ts }
  *
  * Error frame format:
  *   { type: "error", code, jobId, sessionId, droppedSeq, message, ts }
@@ -14,7 +14,7 @@
 import { $http } from "../http";
 
 export type WSFrame = {
-  type: "chunk" | "complete" | "error";
+  type: "chunk" | "complete" | "metadata" | "error";
   jobId: number;
   sessionId: number;
   seq: number;
@@ -58,7 +58,15 @@ type PendingAssistantMessage = {
   chatId: string;
   messageId: string;
   text: string;
+  sources: ProtocolCitationSource[];
   protocolMeta: Record<string, unknown>;
+};
+
+export type ProtocolCitationSource = {
+  position: number;
+  title: string;
+  url: string;
+  description: string;
 };
 
 /**
@@ -80,6 +88,10 @@ export class RelayClient {
   private readonly pendingAssistantMessages = new Map<
     number,
     PendingAssistantMessage
+  >();
+  private readonly pendingAssistantSources = new Map<
+    number,
+    ProtocolCitationSource[]
   >();
 
   constructor(relayUrl: string, token: string) {
@@ -205,10 +217,13 @@ export class RelayClient {
     messageId: string;
     protocolMeta: Record<string, unknown>;
   }) {
+    const sources = this.pendingAssistantSources.get(args.jobId) ?? [];
+    this.pendingAssistantSources.delete(args.jobId);
     this.pendingAssistantMessages.set(args.jobId, {
       chatId: args.chatId,
       messageId: args.messageId,
       text: "",
+      sources,
       protocolMeta: args.protocolMeta,
     });
   }
@@ -219,8 +234,30 @@ export class RelayClient {
     pending.text += delta;
   }
 
+  resetAssistantText(jobId: number) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.text = "";
+  }
+
+  replaceAssistantText(jobId: number, text: string) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.text = text;
+  }
+
+  setAssistantSources(jobId: number, sources: ProtocolCitationSource[]) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (pending) {
+      pending.sources = sources;
+      return;
+    }
+    this.pendingAssistantSources.set(jobId, sources);
+  }
+
   discardAssistantMessage(jobId: number) {
     this.pendingAssistantMessages.delete(jobId);
+    this.pendingAssistantSources.delete(jobId);
   }
 
   async completeAssistantMessage(jobId: number) {
@@ -229,11 +266,26 @@ export class RelayClient {
     if (!pending) return;
     if (!pending.text.trim()) return;
 
+    const parts: Array<Record<string, unknown>> = [];
+    if (pending.sources.length > 0) {
+      parts.push({
+        type: "data-webSearchSources",
+        id: `protocol-web-search-${jobId}`,
+        data: { sources: pending.sources },
+      });
+    }
+    parts.push({
+      type: "data-protocolFinal",
+      id: `protocol-final-${jobId}`,
+      data: { text: pending.text },
+    });
+    parts.push({ type: "text", text: pending.text });
+
     const response = await $http.post(`/api/chat/${pending.chatId}/messages`, {
       id: pending.messageId,
       sessionId: pending.protocolMeta?.sessionId ?? null,
       role: "assistant",
-      parts: [{ type: "text", text: pending.text }],
+      parts,
       attachments: [],
       jobId,
       completionState: "completed",

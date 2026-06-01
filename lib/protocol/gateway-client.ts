@@ -14,12 +14,37 @@ export type ModelsResponse = {
   models: ModelInfo[];
 };
 
+/**
+ * Read-only preflight payload returned by GET /api/models/:modelId/capabilities
+ * (web-search epic, Story 16). `capabilities` is the union of heartbeat-
+ * advertised capability tokens across all currently-active workers eligible
+ * for the model. Empty array = no capable worker currently heartbeating.
+ */
+export type ModelCapabilitiesResponse = {
+  modelId: string;
+  capabilities: string[];
+};
+
 export type SelectSessionResponse = {
   worker: string;
   workerEncryptionKey: string;
   disputerEncryptionKey?: string;
   nonce: number;
   expiry: number;
+  /**
+   * Heartbeat-advertised capability set of the selected worker (web-search
+   * epic, Story 12). Optional for forward-compat with pre-epic dispatchers.
+   * Clients persist this in session state to gate per-message UI features
+   * (e.g., disable the web-search toggle when "search" is absent).
+   */
+  workerCapabilities?: string[];
+  /**
+   * Opaque correlation token (web-search epic, Story 16). Must be echoed to
+   * prepareSession so a capability-aware overwrite on the dispatcher cannot
+   * bind this client to a worker that replaced the one it selected. Optional
+   * for forward-compat with a dispatcher that predates the token.
+   */
+  selectionId?: string;
 };
 
 export type PrepareSessionResponse = {
@@ -28,6 +53,7 @@ export type PrepareSessionResponse = {
   signature: string;
   nonce: number;
   expiry: number;
+  workerCapabilities?: string[];
 };
 
 export type UploadBlobResponse = {
@@ -94,10 +120,30 @@ export class GatewayClient {
     return await this.get<ModelsResponse>("/api/models");
   }
 
-  async selectSession(modelId: string): Promise<SelectSessionResponse> {
+  /**
+   * Read-only capability preflight (web-search epic, Story 16). Caller MUST
+   * pass the hex model ID — use getModels() to resolve a friendly local
+   * name to its hex form first. Unauthenticated, so no auth provider needed.
+   */
+  async getModelCapabilities(
+    modelIdHex: string
+  ): Promise<ModelCapabilitiesResponse> {
+    return await this.get<ModelCapabilitiesResponse>(
+      `/api/models/${modelIdHex}/capabilities`
+    );
+  }
+
+  async selectSession(
+    modelId: string,
+    opts?: { requiredCapabilities?: string[] }
+  ): Promise<SelectSessionResponse> {
+    const body: Record<string, unknown> = { modelId };
+    if (opts?.requiredCapabilities && opts.requiredCapabilities.length > 0) {
+      body.requiredCapabilities = opts.requiredCapabilities;
+    }
     return await this.post<SelectSessionResponse>(
       "/api/sessions/select",
-      { modelId },
+      body,
       { protected: true }
     );
   }
@@ -106,6 +152,9 @@ export class GatewayClient {
     modelId: string;
     encWorkerKey: string;
     encDisputerKey: string;
+    requiredCapabilities?: string[];
+    // Story 16: correlation token from the prior selectSession response.
+    selectionId?: string;
   }): Promise<PrepareSessionResponse> {
     return await this.post<PrepareSessionResponse>(
       "/api/sessions/prepare",
@@ -114,10 +163,20 @@ export class GatewayClient {
     );
   }
 
-  async uploadBlob(base64Data: string): Promise<UploadBlobResponse> {
+  async uploadBlob(
+    base64Data: string,
+    opts?: { sessionId?: string; searchEnabled?: boolean }
+  ): Promise<UploadBlobResponse> {
+    const body: Record<string, unknown> = { data: base64Data };
+    if (opts?.sessionId !== undefined) {
+      body.sessionId = opts.sessionId;
+    }
+    if (opts?.searchEnabled === true) {
+      body.searchEnabled = true;
+    }
     return await this.post<UploadBlobResponse>(
       "/api/blobs",
-      { data: base64Data },
+      body,
       { protected: true, bearerOnly: true }
     );
   }

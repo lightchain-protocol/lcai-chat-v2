@@ -16,7 +16,12 @@
 
 import type { ProtocolLoadingStatus } from "../types";
 import type { GatewayClient } from "./gateway-client";
-import type { LifecycleEvent, WSErrorFrame, WSFrame } from "./relay-client";
+import type {
+  LifecycleEvent,
+  ProtocolCitationSource,
+  WSErrorFrame,
+  WSFrame,
+} from "./relay-client";
 import { RelayClient } from "./relay-client";
 import type { OnChainJob, SessionManagerConfig } from "./session";
 import {
@@ -160,6 +165,15 @@ export class ProtocolTransport {
   }
 
   /**
+   * The session's bound worker's heartbeat-advertised capability set
+   * (web-search epic, Story 16). Empty list = no opt-in capabilities; the
+   * chat input renders affected toggles disabled with a tooltip.
+   */
+  get workerCapabilities(): string[] {
+    return this.sessionMgr.workerCapabilities;
+  }
+
+  /**
    * Public retry entry point for the UI banner.
    * Checks on-chain state first to resume partial failover correctly:
    * if reassignSession() already succeeded, skips straight to rewrap.
@@ -219,9 +233,14 @@ export class ProtocolTransport {
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
     this.setProgressStatus("preparing_chat");
-
-    // Initialize session on first message
-    await this.sessionMgr.initialize();
+    // Initialize session on first message. enableWebSearch in the body
+    // doubles as the signal to request a search-capable worker at
+    // session-create time — once the session is bound, the toggle gates
+    // the per-message side-channel (web-search epic, Story 16).
+    const enableWebSearch = options.body?.enableWebSearch === true;
+    await this.sessionMgr.initialize(
+      enableWebSearch ? { requiredCapabilities: ["search"] } : undefined
+    );
     this.setProgressStatus("thinking");
 
     // Ensure relay is connected
@@ -254,9 +273,13 @@ export class ProtocolTransport {
       throw new Error("Session is not ready — recovery may be required");
     }
 
-    // Submit job: encrypt → blob upload → on-chain TX via user's wallet
+    // Submit job: encrypt → blob upload → on-chain TX via user's wallet.
+    // searchEnabled rides through SessionManager.submitJob into the gateway
+    // blob upload, which writes the side-channel the dispatcher reads.
     this.setProgressStatus("submitting_job");
-    const { jobId } = await this.sessionMgr.submitJob(plaintext);
+    const { jobId } = await this.sessionMgr.submitJob(plaintext, {
+      searchEnabled: enableWebSearch,
+    });
     this.setProgressStatus("waiting_for_relay");
 
     // Track job deadline from chain (fire-and-forget — don't block the stream)
@@ -413,14 +436,14 @@ export class ProtocolTransport {
       deadline: onChain.deadline,
       completedAt: onChain.completedAt,
       escrowedFee: onChain.escrowedFee,
-      startedAt: Math.floor(Date.now() / 1_000),
+      startedAt: Math.floor(Date.now() / 1000),
       status: "submitted",
     };
     this.activeJobs.set(jobId, tracked);
     this.onJobUpdateCallback?.(tracked);
 
     // Delay = (deadline * 1000 - now) + 2000 ms grace
-    const delayMs = onChain.deadline * 1_000 - Date.now() + 2_000;
+    const delayMs = onChain.deadline * 1000 - Date.now() + 2000;
     if (delayMs <= 0) {
       // Already past deadline — fire immediately
       await this.handleJobDeadlineExpiry(jobId);
@@ -440,7 +463,11 @@ export class ProtocolTransport {
 
     const tracked = this.activeJobs.get(jobId);
     if (!tracked) return;
-    if (tracked.status === "completed" || tracked.status === "claimed" || tracked.status === "disputed") {
+    if (
+      tracked.status === "completed" ||
+      tracked.status === "claimed" ||
+      tracked.status === "disputed"
+    ) {
       return;
     }
 
@@ -588,6 +615,8 @@ export class ProtocolTransport {
     const partId = `text-${jobId}`;
     const assistantMessageId = crypto.randomUUID();
     let started = false;
+    let streamedText = "";
+    let suppressRetryChunks = false;
 
     const sse = (obj: Record<string, unknown>): Uint8Array =>
       encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
@@ -605,6 +634,12 @@ export class ProtocolTransport {
             try {
               if (frame.type === "error") {
                 const errorFrame = frame as WSErrorFrame;
+                if (
+                  errorFrame.code === "RATE_LIMITED" &&
+                  errorFrame.droppedSeq > 0
+                ) {
+                  return;
+                }
                 this.setProgressStatus("error");
                 controller.enqueue(
                   sse({ type: "error", errorText: errorFrame.message })
@@ -615,6 +650,26 @@ export class ProtocolTransport {
               }
 
               const wsFrame = frame as WSFrame;
+
+              if (wsFrame.type === "metadata") {
+                if (wsFrame.payload) {
+                  const decrypted = await sessionMgr.decryptResponse(
+                    wsFrame.payload
+                  );
+                  const sources = parseWebSearchSources(decrypted);
+                  if (sources.length > 0) {
+                    relayClient.setAssistantSources(jobId, sources);
+                    controller.enqueue(
+                      sse({
+                        type: "data-webSearchSources",
+                        id: `protocol-web-search-${jobId}`,
+                        data: { sources },
+                      })
+                    );
+                  }
+                }
+                return;
+              }
 
               if (wsFrame.payload && !started) {
                 started = true;
@@ -639,10 +694,43 @@ export class ProtocolTransport {
                   wsFrame.payload
                 );
                 this.setProgressStatus("reasoning");
-                relayClient.appendAssistantDelta(jobId, decrypted);
-                controller.enqueue(
-                  sse({ type: "text-delta", id: partId, delta: decrypted })
-                );
+                if (wsFrame.type === "complete") {
+                  relayClient.replaceAssistantText(jobId, decrypted);
+                  if (!streamedText) {
+                    streamedText = decrypted;
+                    controller.enqueue(
+                      sse({ type: "text-delta", id: partId, delta: decrypted })
+                    );
+                  } else if (decrypted.startsWith(streamedText)) {
+                    const suffix = decrypted.slice(streamedText.length);
+                    if (suffix) {
+                      streamedText = decrypted;
+                      controller.enqueue(
+                        sse({ type: "text-delta", id: partId, delta: suffix })
+                      );
+                    }
+                  }
+                  controller.enqueue(
+                    sse({
+                      type: "data-protocolFinal",
+                      id: `protocol-final-${jobId}`,
+                      data: { text: decrypted },
+                    })
+                  );
+                } else {
+                  if (wsFrame.seq === 1 && streamedText.length > 0) {
+                    streamedText = "";
+                    relayClient.resetAssistantText(jobId);
+                    suppressRetryChunks = true;
+                  }
+                  streamedText += decrypted;
+                  relayClient.appendAssistantDelta(jobId, decrypted);
+                  if (!suppressRetryChunks) {
+                    controller.enqueue(
+                      sse({ type: "text-delta", id: partId, delta: decrypted })
+                    );
+                  }
+                }
               }
 
               if (wsFrame.type === "complete") {
@@ -678,6 +766,46 @@ export class ProtocolTransport {
       },
     });
   }
+}
+
+function parseWebSearchSources(payload: string): ProtocolCitationSource[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch (err) {
+    console.warn("Failed to parse protocol web-search metadata", err);
+    return [];
+  }
+  if (!isRecord(parsed) || parsed.type !== "webSearchSources") {
+    console.warn("Unexpected protocol metadata payload", parsed);
+    return [];
+  }
+  if (!Array.isArray(parsed.sources)) {
+    console.warn("Protocol web-search metadata missing sources array", parsed);
+    return [];
+  }
+
+  return parsed.sources.flatMap((source) => {
+    if (!isRecord(source)) return [];
+    const position =
+      typeof source.position === "number" ? source.position : undefined;
+    const title = typeof source.title === "string" ? source.title : "";
+    const url = typeof source.url === "string" ? source.url : "";
+    const snippet = typeof source.snippet === "string" ? source.snippet : "";
+    if (!position || !url) return [];
+    return [
+      {
+        position,
+        title: title || url,
+        url,
+        description: snippet,
+      },
+    ];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function getChatId(body?: Record<string, unknown>): string | null {

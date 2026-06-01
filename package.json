@@ -121,5 +121,15 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "ultracite": "5.3.9"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@reown/appkit",
+      "bufferutil",
+      "esbuild",
+      "keccak",
+      "sharp",
+      "utf-8-validate"
+    ]
   }
 }
