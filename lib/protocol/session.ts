@@ -250,6 +250,7 @@ export class SessionManager {
         encWorkerKey: keyExchange.encWorkerKey,
         encDisputerKey: keyExchange.encDisputerKey,
         requiredCapabilities: this.requestedCapabilities,
+        selectionId: selected.selectionId,
       });
 
       // Record the bound worker's full capability list so the UI can gate
@@ -274,7 +275,11 @@ export class SessionManager {
         // Retry once on stale dispatcher signature (nonce consumed, or the
         // pending selection TTL expired mid-flight — both signal a fresh
         // select → prepare round is needed).
-        if (isStaleSignatureError(err) || isPendingSelectionMissing(err)) {
+        if (
+          isStaleSignatureError(err) ||
+          isPendingSelectionMissing(err) ||
+          isSelectionSuperseded(err)
+        ) {
           selected = await this.gateway.selectSession(this.modelId, {
             requiredCapabilities: this.requestedCapabilities,
           });
@@ -285,6 +290,7 @@ export class SessionManager {
             encWorkerKey: keyExchange.encWorkerKey,
             encDisputerKey: keyExchange.encDisputerKey,
             requiredCapabilities: this.requestedCapabilities,
+            selectionId: selected.selectionId,
           });
           this.state.workerCapabilities =
             prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
@@ -1002,6 +1008,17 @@ function isStaleSignatureError(err: unknown): boolean {
 function isPendingSelectionMissing(err: unknown): boolean {
   if (err instanceof GatewayClientError) {
     return err.status === 409 && err.body.includes("no_pending_selection");
+  }
+  return false;
+}
+
+// Dispatcher returns 409 selection_mismatch (web-search epic, Story 16) when a
+// prepare's selectionId no longer matches the pending slot — i.e. a later
+// capability-aware select overwrote it. Like no_pending_selection, the correct
+// recovery is a fresh select → prepare round (which mints a new selectionId).
+function isSelectionSuperseded(err: unknown): boolean {
+  if (err instanceof GatewayClientError) {
+    return err.status === 409 && err.body.includes("selection_mismatch");
   }
   return false;
 }
