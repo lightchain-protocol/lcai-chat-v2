@@ -38,6 +38,13 @@ export type SelectSessionResponse = {
    * (e.g., disable the web-search toggle when "search" is absent).
    */
   workerCapabilities?: string[];
+  /**
+   * Opaque correlation token (web-search epic, Story 16). Must be echoed to
+   * prepareSession so a capability-aware overwrite on the dispatcher cannot
+   * bind this client to a worker that replaced the one it selected. Optional
+   * for forward-compat with a dispatcher that predates the token.
+   */
+  selectionId?: string;
 };
 
 export type PrepareSessionResponse = {
@@ -146,6 +153,8 @@ export class GatewayClient {
     encWorkerKey: string;
     encDisputerKey: string;
     requiredCapabilities?: string[];
+    // Story 16: correlation token from the prior selectSession response.
+    selectionId?: string;
   }): Promise<PrepareSessionResponse> {
     return await this.post<PrepareSessionResponse>(
       "/api/sessions/prepare",
