@@ -7,12 +7,17 @@
 ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+# Native-addon dependencies (bufferutil, utf-8-validate, keccak, sharp) need
+# python3 + make + g++ for node-gyp builds. Matches consumer-api/Dockerfile.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
 # ---- deps stage: full install for the Next.js build ----
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ---- builder stage: build the Next.js app with public env baked in ----

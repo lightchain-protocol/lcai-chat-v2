@@ -11,6 +11,17 @@ import type { Abi, Log, PublicClient, WalletClient } from "viem";
 import { decodeEventLog, toHex } from "viem";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
+
+export type OnChainJob = {
+  sessionId: number;
+  worker: string;
+  /** Raw uint8 matching IJobRegistry.JobState enum: 0=Submitted 1=Acknowledged 2=Completed 3=TimedOut 4=Disputed 5=Resolved 6=Released */
+  state: number;
+  escrowedFee: bigint;
+  submittedAt: number;
+  completedAt: number;
+  deadline: number;
+};
 import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 
 import {
@@ -581,6 +592,99 @@ export class SessionManager {
       args: [BigInt(this.state.sessionId)],
     });
     return { status: Number(session.status), worker: session.worker };
+  }
+
+  /**
+   * Reads the on-chain Job struct for any job ID.
+   * Returns state, deadline, escrowedFee, completedAt and other fields.
+   */
+  async getJob(jobId: number): Promise<OnChainJob> {
+    const job = await this.publicClient.readContract({
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "getJob",
+      args: [BigInt(jobId)],
+    });
+    return {
+      sessionId: Number(job.sessionId),
+      worker: job.worker,
+      state: job.state,
+      escrowedFee: job.escrowedFee,
+      submittedAt: Number(job.submittedAt),
+      completedAt: Number(job.completedAt),
+      deadline: Number(job.deadline),
+    };
+  }
+
+  /**
+   * Calls claimTimeout(jobId) on-chain.
+   * The worker missed the deadline — the fee is refunded and the worker is slashed.
+   */
+  async claimJobTimeout(jobId: number): Promise<{ txHash: string }> {
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const callParams = {
+      account,
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "claimTimeout",
+      args: [BigInt(jobId)],
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
+      gas: (gasEstimate * 120n) / 100n,
+    });
+    const hash = await this.walletClient.writeContract(request);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`claimTimeout TX reverted (tx ${hash})`);
+    }
+    return { txHash: hash };
+  }
+
+  /**
+   * Files a dispute for a completed job.
+   * Reads the escrowed fee + bond multiplier from the chain, then calls
+   * disputeJob(jobId) with value = bond.
+   */
+  async disputeJob(jobId: number): Promise<{ txHash: string; bond: bigint }> {
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const [job, multiplier] = await Promise.all([
+      this.getJob(jobId),
+      this.publicClient.readContract({
+        address: this.aiConfigAddress,
+        abi: aiConfigAbi,
+        functionName: "getDisputeBondMultiplier",
+      }),
+    ]);
+
+    const bond = (job.escrowedFee * multiplier) / 10_000n;
+
+    const callParams = {
+      account,
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "disputeJob",
+      args: [BigInt(jobId)],
+      value: bond,
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
+      gas: (gasEstimate * 120n) / 100n,
+    });
+    const hash = await this.walletClient.writeContract(request);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`disputeJob TX reverted (tx ${hash})`);
+    }
+    return { txHash: hash, bond };
   }
 
   /**

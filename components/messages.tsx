@@ -5,6 +5,7 @@ import { ArrowDownIcon } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
+import type { TrackedJob } from "@/lib/protocol/transport";
 import {
   type ChatMessage,
   PROTOCOL_LOADING_STATUS_LABELS,
@@ -26,6 +27,9 @@ type MessagesProps = {
   isArtifactVisible: boolean;
   selectedModelId: string;
   protocolProgressStatus?: ProtocolLoadingStatus;
+  activeJobs?: TrackedJob[];
+  claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
+  disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
 };
 
 function PureMessages({
@@ -38,6 +42,9 @@ function PureMessages({
   isReadonly,
   selectedModelId,
   protocolProgressStatus,
+  activeJobs,
+  claimJobTimeout,
+  disputeJob,
 }: MessagesProps) {
   const initialScrollChatIdRef = useRef<string | null>(null);
   const {
@@ -90,27 +97,42 @@ function PureMessages({
         <ConversationContent className="flex h-full flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && <Greeting />}
 
-          {messages.map((message, index) => (
-            <PreviewMessage
-              chatId={chatId}
-              isLoading={
-                status === "streaming" && messages.length - 1 === index
-              }
-              isReadonly={isReadonly}
-              key={message.id}
-              message={message}
-              regenerate={regenerate}
-              requiresScrollPadding={
-                hasSentMessage && index === messages.length - 1
-              }
-              setMessages={setMessages}
-              vote={
-                votes
-                  ? votes.find((vote) => vote.messageId === message.id)
-                  : undefined
-              }
-            />
-          ))}
+          {messages.map((message, index) => {
+            const jobId =
+              typeof message.metadata?.jobId === "number"
+                ? message.metadata.jobId
+                : undefined;
+            const trackedJob = 
+              jobId !== undefined
+                ? activeJobs?.find((j) => j.jobId === jobId)
+                : undefined;
+
+            return (
+              <PreviewMessage
+                chatId={chatId}
+                claimJobTimeout={claimJobTimeout}
+                disputeJob={disputeJob}
+                isLoading={
+                  status === "streaming" && messages.length - 1 === index
+                }
+                isReadonly={isReadonly}
+                jobId={jobId}
+                key={message.id}
+                message={message}
+                regenerate={regenerate}
+                requiresScrollPadding={
+                  hasSentMessage && index === messages.length - 1
+                }
+                setMessages={setMessages}
+                trackedJob={trackedJob}
+                vote={
+                  votes
+                    ? votes.find((vote) => vote.messageId === message.id)
+                    : undefined
+                }
+              />
+            );
+          })}
 
           <AnimatePresence mode="wait">
             {status === "submitted" && (

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BriefcaseIcon,
   CloudDownloadIcon,
   Loader,
   MessageSquarePlus,
@@ -132,6 +133,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                     router.push("/");
                     router.refresh();
                   }}
+                  title="New chat"
                   type="button"
                   variant="ghost"
                 >
@@ -157,6 +159,17 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                     className="space-y-1"
                     sideOffset={10}
                   >
+                    <DropdownMenuItem
+                      className="flex items-center gap-2 text-content-ultra"
+                      disabled={!user}
+                      onClick={() => {
+                        setOpenMobile(false);
+                        router.push("/jobs");
+                      }}
+                     >
+                      <BriefcaseIcon className="size-4 text-content-soft" />
+                      On-chain jobs
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       className="flex items-center gap-2 text-content-ultra"
                       onSelect={() => setShowImportDialog(true)}

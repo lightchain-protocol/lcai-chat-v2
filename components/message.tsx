@@ -12,9 +12,11 @@ import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
 import { Response } from "./elements/response";
+import type { TrackedJob } from "@/lib/protocol/transport";
 import { LCAIIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
+import { MessageJobActions } from "./message-job-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { SourceLinkChip } from "./source-link-chip";
@@ -29,6 +31,10 @@ const PurePreviewMessage = ({
   regenerate,
   isReadonly,
   requiresScrollPadding,
+  jobId,
+  trackedJob,
+  claimJobTimeout,
+  disputeJob,
 }: {
   chatId: string;
   message: ChatMessage;
@@ -38,6 +44,10 @@ const PurePreviewMessage = ({
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
   requiresScrollPadding: boolean;
+  jobId?: number;
+  trackedJob?: TrackedJob;
+  claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
+  disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
@@ -75,7 +85,10 @@ const PurePreviewMessage = ({
         .filter((s) => s);
 
       return sources.length
-        ? `<citation-response sources="${JSON.stringify(sources).replaceAll('"', "&quot;")}" />`
+        ? `<citation-response sources="${JSON.stringify(sources).replaceAll(
+            '"',
+            "&quot;"
+          )}" />`
         : match;
     });
   };
@@ -286,6 +299,16 @@ const PurePreviewMessage = ({
               message={message}
               setMode={setMode}
               vote={vote}
+            />
+          )}
+
+          {!isReadonly && jobId !== undefined && (
+            <MessageJobActions
+              jobId={jobId}
+              messageRole={message.role as "user" | "assistant"}
+              onClaimTimeout={claimJobTimeout}
+              onDisputeJob={disputeJob}
+              trackedJob={trackedJob}
             />
           )}
         </div>
