@@ -628,6 +628,17 @@ export class ProtocolTransport {
           return;
         }
 
+        // Emit the message-start chunk up front so the AI SDK adopts the same
+        // id we later persist for this assistant message (beginAssistantMessage
+        // / completeAssistantMessage both use assistantMessageId). Without it,
+        // useChat's generateId mints a client-only id, and PATCH /api/vote then
+        // references a messageId the consumer-api never stored, returning 500
+        // until a reload swaps in the persisted id. Must precede any data-*
+        // chunk, otherwise the SDK auto-opens the message with a generated id.
+        controller.enqueue(
+          sse({ type: "start", messageId: assistantMessageId })
+        );
+
         const unsubscribe = relayClient.onJob(
           jobId,
           async (frame: WSFrame | WSErrorFrame) => {
