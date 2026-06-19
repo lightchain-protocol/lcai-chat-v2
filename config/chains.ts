@@ -1,7 +1,7 @@
 import type { Chain } from "viem";
 
 export const lcaiLocalhost: Chain = {
-  id: 8200,
+  id: 31337,
   name: "LightchainAI Localhost",
   nativeCurrency: {
     name: "LightchainAI",

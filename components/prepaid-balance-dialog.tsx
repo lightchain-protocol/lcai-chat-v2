@@ -191,7 +191,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                       "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs",
                       pb.isAuthorized
                         ? "bg-emerald-500/10 text-emerald-500"
-                        : "bg-amber-500/10 text-amber-500"
+                        : "bg-amber-500/10 text-amber-500",
                     )}
                   >
                     {pb.isAuthorized ? (

@@ -89,7 +89,7 @@ export function Chat({
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null
+    initialSystemPrompt || null,
   );
   const systemPromptRef = useRef(systemPrompt);
 
@@ -117,7 +117,7 @@ export function Chat({
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id);
+  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
 
   const sessionRecovering = failoverStatus !== "none";
 
@@ -155,14 +155,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    }
+    },
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt
+        (template) => template.prompt === initialSystemPrompt,
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -201,7 +201,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      }
+      },
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -275,7 +275,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher
+    fetcher,
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
