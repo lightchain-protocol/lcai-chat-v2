@@ -1,20 +1,10 @@
 import { type Chain, mainnet } from "viem/chains";
 import { lcai, lcaiLocalhost, lcaiTestnet } from "./chains";
 
-// const customMainnet: Chain = {
-//   ...mainnet,
-//   rpcUrls: {
-//     default: {
-//       http: ["https://mainnet.infura.io/v3/e4c15472e4824fefae8a9d5b265e8180"],
-//     },
-//   },
-// };
-
 export const isTestnet = process.env.NEXT_PUBLIC_LCAI_IS_TESTNET === "true";
 
 const config = {
-  // chains: [isTestnet ? lcaiTestnet : lcai] as [Chain, ...Chain[]],
-  chains: [lcaiLocalhost] as [Chain, ...Chain[]],
+  chains: [isTestnet ? lcaiTestnet : lcai] as [Chain, ...Chain[]],
   subscriptionContractAddress: {
     // [lcaiTestnet.id]: "0x0670662b75f92D14A645545bf3B0eDdfd5E299bd",
     [mainnet.id]: "0x535AE6B51742df53c1d5C4Ae6496cAd935615E3b",

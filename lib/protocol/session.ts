@@ -80,7 +80,7 @@ export class MaxReassignmentsError extends Error {
 export class MissingDisputerKeyError extends Error {
   constructor() {
     super(
-      "Disputer encryption key not available — session cannot be recovered"
+      "Disputer encryption key not available — session cannot be recovered",
     );
     this.name = "MissingDisputerKeyError";
   }
@@ -247,7 +247,7 @@ export class SessionManager {
         sessionId = await this.createSessionOnChain(
           modelIdBytes32,
           { ...selected, signature: prepared.signature },
-          keyExchange
+          keyExchange,
         );
       } catch (err) {
         // Retry once on stale dispatcher signature (nonce consumed, or the
@@ -265,7 +265,7 @@ export class SessionManager {
           sessionId = await this.createSessionOnChain(
             modelIdBytes32,
             { ...selected, signature: prepared.signature },
-            keyExchange
+            keyExchange,
           );
         } else {
           throw err;
@@ -312,7 +312,7 @@ export class SessionManager {
    * cannot sign type-3 blob transactions with sidecars.
    */
   async submitJob(
-    plaintext: string
+    plaintext: string,
   ): Promise<{ jobId: number; txHash: string }> {
     if (!this.sessionKey) {
       throw new Error("Session not initialized — no session key");
@@ -337,7 +337,7 @@ export class SessionManager {
     }
     if (blobHashes.length > 1) {
       throw new Error(
-        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`
+        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`,
       );
     }
 
@@ -347,10 +347,9 @@ export class SessionManager {
       try {
         const result = await this.gateway.submitMessage(
           this.state.sessionId,
-          blobHashes[0]
+          blobHashes[0],
         );
 
-        console.log("result", result.jobId);
         return { jobId: Number(result.jobId), txHash: result.txHash };
       } catch (err) {
         const recoverable =
@@ -369,7 +368,7 @@ export class SessionManager {
 
   /** Wallet-signed submitJob path (legacy / fallback). */
   private async submitJobViaWallet(
-    blobHash: `0x${string}`
+    blobHash: `0x${string}`,
   ): Promise<{ jobId: number; txHash: string }> {
     if (this.state.sessionId === null) {
       throw new Error("Session ID not available");
@@ -510,7 +509,7 @@ export class SessionManager {
       if (isMaxReassignmentsError(err)) {
         throw new MaxReassignmentsError(
           this.state.sessionId,
-          extractMaxFromError(err)
+          extractMaxFromError(err),
         );
       }
       throw err;
@@ -537,7 +536,7 @@ export class SessionManager {
       const workerPub = await importPublicKey(workerPubRaw);
       const encWorkerKeyBytes = await encryptSessionKey(
         this.sessionKey,
-        workerPub
+        workerPub,
       );
 
       if (!this.disputerEncryptionKey) throw new MissingDisputerKeyError();
@@ -545,7 +544,7 @@ export class SessionManager {
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         this.sessionKey,
-        disputerPub
+        disputerPub,
       );
 
       const encWorkerKeyHex = toHex(encWorkerKeyBytes);
@@ -722,7 +721,7 @@ export class SessionManager {
   private async createSessionOnChain(
     modelIdBytes32: `0x${string}`,
     prepared: PrepareSessionResponse,
-    keyExchange: { encWorkerKey: string; encDisputerKey: string }
+    keyExchange: { encWorkerKey: string; encDisputerKey: string },
   ): Promise<number> {
     const account = this.walletClient.account;
 
@@ -786,7 +785,7 @@ export class SessionManager {
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         sessionKey,
-        disputerPub
+        disputerPub,
       );
       encDisputerKey = uint8ToBase64(encDisputerKeyBytes);
     }
@@ -999,7 +998,7 @@ function isPendingSelectionMissing(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 function isReadyTokenResponse(
-  response: TokenResponse | PendingTokenResponse
+  response: TokenResponse | PendingTokenResponse,
 ): response is TokenResponse {
   return "token" in response && Boolean(response.token);
 }
