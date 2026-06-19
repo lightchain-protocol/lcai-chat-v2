@@ -13,6 +13,7 @@ import { memo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { mutate as globalMutate } from "swr";
 import { useWindowSize } from "usehooks-ts";
+import { PrepaidBalanceButton } from "@/components/prepaid-balance-button";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { SystemPromptEditor } from "@/components/system-prompt-editor";
 import { SystemPromptSelector } from "@/components/system-prompt-selector";
@@ -236,6 +237,8 @@ function PureChatHeader({
           <Settings2 className="size-4.5!" />
         </Button>
       )}
+
+      <PrepaidBalanceButton className="order-5" />
 
       <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
         <DialogContent className="sm:max-w-xl sm:rounded-3xl">

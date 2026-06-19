@@ -3,13 +3,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
-import { getBalanceQueryKey } from "wagmi/query";
 import config from "@/config";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
-import type { SessionStatus } from "@/lib/protocol/session";
+import type { SessionStatus, SubmitMode } from "@/lib/protocol/session";
 import type { FailoverStatus, TrackedJob } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
 import type { ProtocolLoadingStatus } from "@/lib/types";
@@ -23,11 +22,18 @@ import type { ProtocolLoadingStatus } from "@/lib/types";
  * The local modelId (e.g. "chat-model") is resolved to the gateway's hex
  * model ID on first getTransport() call by fetching GET /api/models.
  */
+// biome-ignore lint/nursery/useMaxParams: positional args mirror the prior signature; an options object would churn every call site.
 export function useProtocolSession(
   modelId: string,
   walletClient: WalletClient | undefined,
   address: string | undefined,
-  chatId: string
+  chatId: string,
+  /**
+   * Submission mode for prompts. Re-evaluated on every send, so the chat can
+   * flip from "wallet" to "delegated" the moment the user finishes setting up
+   * a prepaid balance. Defaults to "wallet" (legacy per-prompt TX).
+   */
+  submitMode: SubmitMode = "wallet"
 ) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +47,7 @@ export function useProtocolSession(
   const resolvedModelIdRef = useRef<string | null>(null);
   const walletClientRef = useRef(walletClient);
   const addressRef = useRef(address);
+  const submitModeRef = useRef<SubmitMode>(submitMode);
   const walletAddress = address ?? null;
   const lastWalletAddressRef = useRef<string | null>(walletAddress);
 
@@ -48,12 +55,15 @@ export function useProtocolSession(
   // regardless of which chain the wallet is connected to.
   const protocolChainId = config.chains[0].id;
   const { publicClient } = useWeb3Clients();
-  const queryClient = useQueryClient();
 
   useEffect(() => {
     walletClientRef.current = walletClient;
     addressRef.current = address;
   }, [address, walletClient]);
+
+  useEffect(() => {
+    submitModeRef.current = submitMode;
+  }, [submitMode]);
 
   // Lazily create the gateway client — singleton per hook instance.
   // Auth piggybacks on the SIWE session token (lib/http.ts cache), so no
@@ -129,6 +139,7 @@ export function useProtocolSession(
       aiConfigAddress,
       workerRegistryAddress,
       relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
+      getSubmitMode: () => submitModeRef.current,
       registerProtocolSession: async ({
         chatId: targetChatId,
         sessionId,
@@ -156,13 +167,6 @@ export function useProtocolSession(
           sessionId,
           jobId,
         }) => {
-          // Invalidate balance query to refetch balance
-          queryClient.invalidateQueries({
-            queryKey: getBalanceQueryKey({
-              address: addressRef.current?.toLowerCase() as `0x${string}`,
-              chainId: protocolChainId,
-            }),
-          });
           const response = await $http.post(
             `/api/chat/${messageChatId}/messages`,
             {
@@ -227,7 +231,6 @@ export function useProtocolSession(
     resolveModelId,
     protocolChainId,
     publicClient,
-    queryClient,
   ]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */

@@ -34,6 +34,36 @@ export type UploadBlobResponse = {
   blobHashes: string[];
 };
 
+export type BalanceResponse = {
+  /** Prepaid balance in wei, as a decimal string. */
+  balance: string;
+  /** The address the consumer-api submits on the user's behalf. */
+  delegate: string;
+  /** Whether `delegate` is currently authorized by the user on-chain. */
+  delegateAuthorized: boolean;
+};
+
+export type SubmitMessageResponse = {
+  jobId: string;
+  txHash: string;
+};
+
+export class InsufficientPrepaidBalanceError extends Error {
+  constructor(message = "Insufficient prepaid balance") {
+    super(message);
+    this.name = "InsufficientPrepaidBalanceError";
+  }
+}
+
+export class DelegateNotAuthorizedError extends Error {
+  readonly delegate: string;
+  constructor(delegate: string) {
+    super(`Delegate ${delegate} is not authorized on-chain`);
+    this.name = "DelegateNotAuthorizedError";
+    this.delegate = delegate;
+  }
+}
+
 export type TokenResponse = {
   token: string;
   expiresAt: string;
@@ -120,6 +150,53 @@ export class GatewayClient {
       { data: base64Data },
       { protected: true, bearerOnly: true }
     );
+  }
+
+  /**
+   * Reads the authenticated user's prepaid balance, the delegate address the
+   * consumer-api uses, and whether the user has authorized that delegate.
+   */
+  async getBalance(): Promise<BalanceResponse> {
+    return await this.get<BalanceResponse>("/api/balance", { protected: true });
+  }
+
+  /**
+   * Submits a job on behalf of the authenticated user, debiting their prepaid
+   * balance — no wallet TX. Requires the user to have authorized the delegate
+   * and to have a non-zero balance, otherwise throws Delegate/Insufficient errors.
+   */
+  async submitMessage(
+    sessionId: number,
+    blobHash: string
+  ): Promise<SubmitMessageResponse> {
+    const res = await fetch(
+      `${this.baseUrl}/api/sessions/${sessionId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await this.getRequestHeaders({
+            protected: true,
+            bearerOnly: true,
+          })),
+        },
+        body: JSON.stringify({ blobHash }),
+      }
+    );
+
+    if (res.status === 401) {
+      this.auth?.clearToken?.();
+      throw new ProtocolAuthExpiredError();
+    }
+    if (res.status === 403) {
+      const body = await res.json().catch(() => ({}) as { delegate?: string });
+      throw new DelegateNotAuthorizedError(body.delegate ?? "");
+    }
+    if (res.status === 402) {
+      throw new InsufficientPrepaidBalanceError();
+    }
+
+    return this.handleResponse<SubmitMessageResponse>(res);
   }
 
   async getSessionToken(

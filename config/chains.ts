@@ -1,5 +1,26 @@
 import type { Chain } from "viem";
 
+export const lcaiLocalhost: Chain = {
+  id: 31337,
+  name: "LightchainAI Localhost",
+  nativeCurrency: {
+    name: "LightchainAI",
+    symbol: "LCAI",
+    decimals: 18,
+  },
+  rpcUrls: {
+    default: {
+      http: ["http://localhost:8545"],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: "LightchainAI Localhost Explorer",
+      url: "http://localhost",
+    },
+  },
+};
+
 export const lcai: Chain = {
   id: 9200,
   name: "LightchainAI",

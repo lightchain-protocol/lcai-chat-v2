@@ -9,11 +9,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
-import { useAccount } from "wagmi";
+import { useAccount, useBalance } from "wagmi";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
@@ -88,7 +89,7 @@ export function Chat({
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null
+    initialSystemPrompt || null,
   );
   const systemPromptRef = useRef(systemPrompt);
 
@@ -96,6 +97,13 @@ export function Chat({
   const enableWebSearchRef = useRef(enableWebSearch);
   const { walletClient } = useWeb3Clients();
   const { address } = useAccount();
+  const balance = useBalance({ address });
+
+  // When the user has a funded prepaid balance + authorized delegate, route
+  // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
+  // stale read or a balance dip falls back to the wallet path gracefully.
+  const prepaid = usePrepaidBalance();
+  const submitMode = prepaid.ready ? "auto" : "wallet";
 
   // Protocol mode: session management for on-chain encrypted chat
   const {
@@ -109,7 +117,7 @@ export function Chat({
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id);
+  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
 
   const sessionRecovering = failoverStatus !== "none";
 
@@ -147,14 +155,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    }
+    },
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt
+        (template) => template.prompt === initialSystemPrompt,
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -193,7 +201,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      }
+      },
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -219,6 +227,8 @@ export function Chat({
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
+      prepaid.refetch();
+      balance.refetch();
     },
     onError: (error: any) => {
       if (isProtocolAuthExpiredError(error)) {
@@ -265,7 +275,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher
+    fetcher,
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
