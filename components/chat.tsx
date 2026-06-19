@@ -118,7 +118,7 @@ export function Chat({
   // for this model (web-search epic, Story 16). Populates at chat mount via
   // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
   // session is bound — fixes the "unlocks after Send" race.
-  const { availableCapabilities } = useModelCapabilities(currentModelId);
+  // const { availableCapabilities } = useModelCapabilities(currentModelId);
 
   // searchCapable feeds the Switch's disabled state.
   //   - non-protocol mode: Vercel AI SDK does its own search, always on.
@@ -128,11 +128,11 @@ export function Chat({
   //     workers exist (the session can't switch).
   //   - protocol mode, pre-binding: fall back to availableCapabilities
   //     from the preflight — "is any capable worker reachable?"
-  const searchCapable = isProtocolMode
-    ? workerCapabilities.length > 0
-      ? workerCapabilities.includes("search")
-      : availableCapabilities.includes("search")
-    : true;
+  // const searchCapable = isProtocolMode
+  //   ? workerCapabilities.length > 0
+  //     ? workerCapabilities.includes("search")
+  //     : availableCapabilities.includes("search")
+  //   : true;
 
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
@@ -392,7 +392,7 @@ export function Chat({
               messages={messages}
               onModelChange={setCurrentModelId}
               onWebSearchToggle={setEnableWebSearch}
-              searchCapable={searchCapable}
+              searchCapable={false}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}

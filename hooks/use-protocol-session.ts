@@ -2,17 +2,62 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { WalletClient } from "viem";
+import type { Address, PublicClient, WalletClient } from "viem";
 import { getBalanceQueryKey } from "wagmi/query";
 import config from "@/config";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
+import { loadDelegateKey } from "@/lib/protocol/delegate-key";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 import type { SessionStatus } from "@/lib/protocol/session";
 import type { FailoverStatus, TrackedJob } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
+import type { TxSender } from "@/lib/protocol/tx-sender";
+import { DelegatedTxSender } from "@/lib/protocol/tx-sender";
 import type { ProtocolLoadingStatus } from "@/lib/types";
+
+/**
+ * Build a {@link DelegatedTxSender} when the account is 7702-delegated AND a
+ * valid delegate key is stored locally; otherwise return undefined so the
+ * SessionManager falls back to the wallet (direct) path. A delegated account
+ * can still sign its own transactions, so the wallet fallback always works.
+ */
+async function resolveDelegatedTxSender(params: {
+  gateway: GatewayClient;
+  publicClient: PublicClient;
+  userEoa: Address;
+  chainId: number;
+}): Promise<TxSender | undefined> {
+  try {
+    const { mode } = await params.gateway.getAccountMode(params.userEoa);
+    if (mode !== "delegated") {
+      return;
+    }
+    const delegate = loadDelegateKey(params.chainId, params.userEoa);
+    if (!delegate) {
+      return;
+    }
+    const cfg = await params.gateway.getAaConfig();
+    if (!(cfg.sessionManagerName && cfg.sessionManagerVersion)) {
+      return;
+    }
+    return new DelegatedTxSender({
+      publicClient: params.publicClient,
+      gateway: params.gateway,
+      userEoa: params.userEoa,
+      delegate,
+      domain: {
+        name: cfg.sessionManagerName,
+        version: cfg.sessionManagerVersion,
+        chainId: cfg.chainId,
+      },
+    });
+  } catch {
+    // Mode/config lookup failed — fall back to the wallet (direct) path.
+    return;
+  }
+}
 
 /**
  * React hook that manages a LightChain protocol session.
@@ -123,12 +168,23 @@ export function useProtocolSession(
       );
     }
 
+    // If the account is 7702-delegated and a delegate key is stored, relay
+    // writes through the gateway (gasless). Otherwise this is undefined and the
+    // SessionManager signs each tx with the wallet (direct path).
+    const txSender = await resolveDelegatedTxSender({
+      gateway,
+      publicClient,
+      userEoa: client.account.address,
+      chainId: protocolChainId,
+    });
+
     const transport = new ProtocolTransport({
       gateway,
       modelId: hexModelId,
       sessionStorageKey: `lc-protocol-session:${chatId}`,
       walletClient: client,
       publicClient,
+      txSender,
       jobRegistryAddress,
       aiConfigAddress,
       workerRegistryAddress,

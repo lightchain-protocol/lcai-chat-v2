@@ -23,7 +23,6 @@ export type OnChainJob = {
   deadline: number;
 };
 import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
-
 import {
   decrypt,
   encrypt,
@@ -39,6 +38,8 @@ import type {
   TokenResponse,
 } from "./gateway-client";
 import { GatewayClientError } from "./gateway-client";
+import type { TxSender } from "./tx-sender";
+import { WalletTxSender } from "./tx-sender";
 
 export type SessionStatus =
   | "idle"
@@ -97,6 +98,13 @@ export type SessionManagerConfig = {
   aiConfigAddress: `0x${string}`;
   workerRegistryAddress: `0x${string}`;
   relayUrl: string;
+  /**
+   * Strategy for sending the on-chain writes (createSession / submitJob /
+   * reassignSession / updateSessionKey). Defaults to a {@link WalletTxSender}
+   * (the user signs each tx). Pass a `DelegatedTxSender` to relay them gaslessly
+   * through the gateway when the account is 7702-delegated.
+   */
+  txSender?: TxSender;
 };
 
 /**
@@ -133,6 +141,7 @@ export class SessionManager {
   private readonly modelId: string;
   private readonly walletClient: WalletClient;
   private readonly publicClient: PublicClient;
+  private readonly txSender: TxSender;
   private readonly jobRegistryAddress: `0x${string}`;
   private readonly aiConfigAddress: `0x${string}`;
   private readonly workerRegistryAddress: `0x${string}`;
@@ -144,6 +153,9 @@ export class SessionManager {
     this.modelId = config.modelId;
     this.walletClient = config.walletClient;
     this.publicClient = config.publicClient;
+    this.txSender =
+      config.txSender ??
+      new WalletTxSender(config.walletClient, config.publicClient);
     this.jobRegistryAddress = config.jobRegistryAddress;
     this.aiConfigAddress = config.aiConfigAddress;
     this.workerRegistryAddress = config.workerRegistryAddress;
@@ -394,30 +406,17 @@ export class SessionManager {
       throw new Error("Insufficient balance");
     }
 
-    const callParams = {
-      account,
+    // 4-6. Send via the configured strategy: the user's wallet (direct) or the
+    // gateway relay (delegated). The 20% gas buffer in WalletTxSender works
+    // around the ReentrancyGuardTransient cleanup (TSTORE reset) being
+    // underestimated on Anvil; the delegated path uses the signed maxGasCost.
+    const { hash, receipt } = await this.txSender.sendContractCall({
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "submitJob",
       args: [BigInt(this.state.sessionId), blobHash],
       value: fee,
-    } as const;
-
-    // 4. Estimate gas with a 20% buffer — the ReentrancyGuardTransient cleanup
-    // (TSTORE reset) is underestimated by the default gas estimator on Anvil,
-    // causing a ReentrancySentryOOG revert despite the main logic completing.
-    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
-
-    // 5. Simulate the transaction
-    const { request } = await this.publicClient.simulateContract({
-      ...callParams,
-      gas: (gasEstimate * 120n) / 100n,
     });
-
-    // 6. Submit job on-chain as a regular type-2 TX
-    const hash = await this.walletClient.writeContract(request);
-
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
       throw new Error(`submitJob TX reverted (tx ${hash})`);
     }
@@ -483,24 +482,11 @@ export class SessionManager {
 
     try {
       const sessionIdBig = BigInt(this.state.sessionId);
-      const gasEstimate = await this.publicClient.estimateContractGas({
-        account,
+      const { hash, receipt } = await this.txSender.sendContractCall({
         address: this.jobRegistryAddress,
         abi: jobRegistryAbi,
         functionName: "reassignSession",
         args: [sessionIdBig],
-      });
-      const hash = await this.walletClient.writeContract({
-        account,
-        chain: this.walletClient.chain,
-        address: this.jobRegistryAddress,
-        abi: jobRegistryAbi,
-        functionName: "reassignSession",
-        args: [sessionIdBig],
-        gas: (gasEstimate * 120n) / 100n,
-      });
-      const receipt = await this.publicClient.waitForTransactionReceipt({
-        hash,
       });
       if (receipt.status !== "success") {
         throw new Error(`reassignSession TX reverted (tx ${hash})`);
@@ -554,24 +540,11 @@ export class SessionManager {
       const encDisputerKeyHex = toHex(encDisputerKeyBytes);
       const sessionIdBig = BigInt(this.state.sessionId);
 
-      const gasEstimate = await this.publicClient.estimateContractGas({
-        account,
+      const { hash, receipt } = await this.txSender.sendContractCall({
         address: this.jobRegistryAddress,
         abi: jobRegistryAbi,
         functionName: "updateSessionKey",
         args: [sessionIdBig, encWorkerKeyHex, encDisputerKeyHex],
-      });
-      const hash = await this.walletClient.writeContract({
-        account,
-        chain: this.walletClient.chain,
-        address: this.jobRegistryAddress,
-        abi: jobRegistryAbi,
-        functionName: "updateSessionKey",
-        args: [sessionIdBig, encWorkerKeyHex, encDisputerKeyHex],
-        gas: (gasEstimate * 120n) / 100n,
-      });
-      const receipt = await this.publicClient.waitForTransactionReceipt({
-        hash,
       });
       if (receipt.status !== "success") {
         throw new Error(`updateSessionKey TX reverted (tx ${hash})`);
@@ -728,15 +701,12 @@ export class SessionManager {
     prepared: PrepareSessionResponse,
     keyExchange: { encWorkerKey: string; encDisputerKey: string }
   ): Promise<number> {
-    const account = this.walletClient.account;
-
     const encWorkerKeyHex = toHex(base64ToUint8(keyExchange.encWorkerKey));
     const encDisputerKeyHex = keyExchange.encDisputerKey
       ? toHex(base64ToUint8(keyExchange.encDisputerKey))
       : ("0x" as `0x${string}`);
 
-    const callParams = {
-      account,
+    const { hash, receipt } = await this.txSender.sendContractCall({
       address: this.jobRegistryAddress,
       abi: jobRegistryAbi,
       functionName: "createSession",
@@ -748,18 +718,7 @@ export class SessionManager {
         prepared.signature as `0x${string}`,
         BigInt(prepared.expiry),
       ],
-    } as const;
-
-    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
-
-    const { request } = await this.publicClient.simulateContract({
-      ...callParams,
-      gas: (gasEstimate * 120n) / 100n,
     });
-
-    const hash = await this.walletClient.writeContract(request);
-
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
       throw new Error(`createSession TX reverted (tx ${hash})`);
     }

@@ -1,10 +1,11 @@
 "use client";
 
 import { useDisconnect } from "@reown/appkit/react";
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import { ChevronsUpDown, LogOut, Zap } from "lucide-react";
 import Image from "next/image";
 import type { User } from "next-auth";
 import { useSession } from "next-auth/react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton } from "@/components/ui/sidebar";
+import { EnableDelegationDialog } from "./enable-delegation-dialog";
 import { LoaderIcon } from "./icons";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
@@ -21,6 +23,8 @@ import AlertSuccess from "./ui/toast/AlertSuccess";
 export function SidebarUserNav({ user }: { user: User }) {
   const { status } = useSession();
   const { disconnect } = useDisconnect();
+  const [delegationOpen, setDelegationOpen] = useState(false);
+  const isWalletUser = Boolean(user.walletAddress);
 
   const displayIdentity = user.walletAddress ?? user.username ?? "Guest";
   const formattedIdentity =
@@ -86,6 +90,18 @@ export function SidebarUserNav({ user }: { user: User }) {
             data-testid="user-nav-menu"
             side="top"
           >
+            {isWalletUser && (
+              <DropdownMenuItem asChild data-testid="user-nav-item-delegation">
+                <button
+                  className="w-full cursor-pointer font-medium"
+                  onClick={() => setDelegationOpen(true)}
+                  type="button"
+                >
+                  <Zap size={18} />
+                  Gasless mode
+                </button>
+              </DropdownMenuItem>
+            )}
             {/* <DropdownMenuSeparator /> */}
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button
@@ -100,6 +116,12 @@ export function SidebarUserNav({ user }: { user: User }) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {isWalletUser && delegationOpen && (
+        <EnableDelegationDialog
+          onOpenChange={setDelegationOpen}
+          open={delegationOpen}
+        />
+      )}
     </SidebarMenu>
   );
 }

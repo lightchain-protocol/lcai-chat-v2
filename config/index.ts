@@ -1,5 +1,5 @@
 import { type Chain, mainnet } from "viem/chains";
-import { lcai, lcaiTestnet } from "./chains";
+import { devnet, lcai, lcaiTestnet } from "./chains";
 
 // const customMainnet: Chain = {
 //   ...mainnet,
@@ -35,7 +35,7 @@ const TESTNET_WORKER_REGISTRY =
     | undefined) ?? "0x0000000000000000000000000000000000001002";
 
 const config = {
-  chains: [isTestnet ? lcaiTestnet : lcai] as [Chain, ...Chain[]],
+  chains: [devnet] as [Chain, ...Chain[]], //[isTestnet ? lcaiTestnet : lcai] as [Chain, ...Chain[]],
   subscriptionContractAddress: {
     // [lcaiTestnet.id]: "0x0670662b75f92D14A645545bf3B0eDdfd5E299bd",
     [mainnet.id]: "0x535AE6B51742df53c1d5C4Ae6496cAd935615E3b",
@@ -44,20 +44,30 @@ const config = {
   jobRegistryAddress: {
     [lcai.id]: "0xfB15F90298e4CcD7106E76fFB5e520315cC42B0b",
     [lcaiTestnet.id]: TESTNET_JOB_REGISTRY,
+    [devnet.id]: "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE",
   } as Record<number, `0x${string}`>,
 
   aiConfigAddress: {
     [lcai.id]: "0x24D11533C354092ed6E18b964257819cE78Ce77D",
     [lcaiTestnet.id]: TESTNET_AI_CONFIG,
+    [devnet.id]: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
   } as Record<number, `0x${string}`>,
 
   workerRegistryAddress: {
     [lcai.id]: "0x0000000000000000000000000000000000001002",
     [lcaiTestnet.id]: TESTNET_WORKER_REGISTRY,
+    [devnet.id]: "0x0000000000000000000000000000000000001002",
   } as Record<number, `0x${string}`>,
 
   lcaiToken: {
     [lcai.id]: {
+      address: "0x0000000000000000000000000000000000000000",
+      symbol: "LCAI",
+      name: "LCAI",
+      image: "/images/logo/favicon.png",
+      decimals: 18,
+    },
+    [devnet.id]: {
       address: "0x0000000000000000000000000000000000000000",
       symbol: "LCAI",
       name: "LCAI",

@@ -74,6 +74,58 @@ export type SessionStatusResponse = {
   sessionStatus: string; // "active" | "awaiting_reassignment" | "reassigning" | "closed" | "unknown"
 };
 
+export type AccountModeResponse = {
+  mode: "direct" | "delegated" | "unsupported_delegation";
+  implementation?: string;
+};
+
+export type AaConfigResponse = {
+  chainId: number;
+  jobRegistry: string;
+  sessionManagerImpl: string | null;
+  sessionManagerName: string | null;
+  sessionManagerVersion: string | null;
+};
+
+export type RelayResponse = { txHash: string; outcome: string };
+export type DelegationBroadcastResponse = { txHash: string; status: string };
+
+export type SignedDelegationAuthorization = {
+  chainId: number;
+  address: string;
+  nonce: number;
+  r: string;
+  s: string;
+  yParity: 0 | 1;
+};
+
+export type RelaySessionKeyOpInput = {
+  user: string;
+  op: {
+    target: string;
+    data: string;
+    value: bigint;
+    nonce: bigint;
+    deadline: bigint;
+    maxGasCost: bigint;
+  };
+  sig: string;
+};
+
+export type RelayRekeyInput = {
+  user: string;
+  sessionKey: string;
+  policy: {
+    validUntil: number;
+    validAfter: number;
+    spendingLimit: bigint;
+    permissions: { target: string; selectors: string[] }[];
+  };
+  registrationNonce: bigint;
+  deadline: bigint;
+  sig: string;
+};
+
 export type AuthProvider = {
   buildProtectedHeaders(): Promise<Record<string, string>>;
   buildBearerOnlyHeaders?(): Promise<Record<string, string>>;
@@ -244,6 +296,83 @@ export class GatewayClient {
     } catch {
       return { sessionStatus: "unknown" };
     }
+  }
+
+  // ── Account abstraction ──────────────────────────────────────────────
+
+  /** Classify an account's on-chain code: direct / delegated / unsupported. */
+  async getAccountMode(address: string): Promise<AccountModeResponse> {
+    return await this.get<AccountModeResponse>(`/api/account/${address}/mode`, { protected: true });
+  }
+
+  /** Public AA config: chain id, JobRegistry, SessionManager impl + domain. */
+  async getAaConfig(): Promise<AaConfigResponse> {
+    return await this.get<AaConfigResponse>("/api/aa/config");
+  }
+
+  /** Gateway-sponsored type-4 broadcast installing the 7702 delegation. */
+  async activateDelegation(
+    authorization: SignedDelegationAuthorization
+  ): Promise<DelegationBroadcastResponse> {
+    return await this.post<DelegationBroadcastResponse>(
+      "/api/delegation/activate",
+      { authorization },
+      { protected: true }
+    );
+  }
+
+  /** Gateway-sponsored type-4 broadcast removing the 7702 delegation. */
+  async revokeDelegation(
+    authorization: SignedDelegationAuthorization
+  ): Promise<DelegationBroadcastResponse> {
+    return await this.post<DelegationBroadcastResponse>(
+      "/api/delegation/revoke",
+      { authorization },
+      { protected: true }
+    );
+  }
+
+  /** Relay a session-key-signed SessionKeyOp (per-prompt gasless path). */
+  async relaySessionKeyOp(
+    input: RelaySessionKeyOpInput
+  ): Promise<RelayResponse> {
+    return await this.post<RelayResponse>(
+      "/api/relay",
+      {
+        user: input.user,
+        op: {
+          target: input.op.target,
+          data: input.op.data,
+          value: input.op.value.toString(),
+          nonce: input.op.nonce.toString(),
+          deadline: input.op.deadline.toString(),
+          maxGasCost: input.op.maxGasCost.toString(),
+        },
+        sig: input.sig,
+      },
+      { protected: true }
+    );
+  }
+
+  /** Relay a root-key-signed RegisterSessionKey (delegate-key registration). */
+  async relayRekey(input: RelayRekeyInput): Promise<RelayResponse> {
+    return await this.post<RelayResponse>(
+      "/api/relay/rekey",
+      {
+        user: input.user,
+        sessionKey: input.sessionKey,
+        policy: {
+          validUntil: input.policy.validUntil,
+          validAfter: input.policy.validAfter,
+          spendingLimit: input.policy.spendingLimit.toString(),
+          permissions: input.policy.permissions,
+        },
+        registrationNonce: input.registrationNonce.toString(),
+        deadline: input.deadline.toString(),
+        sig: input.sig,
+      },
+      { protected: true }
+    );
   }
 
   private async get<T>(
