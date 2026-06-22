@@ -23,6 +23,7 @@ import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, generateUUID } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
@@ -89,7 +90,7 @@ export function Chat({
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
@@ -155,14 +156,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -201,7 +202,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -242,16 +243,9 @@ export function Chat({
         return;
       }
 
+      const { title, description } = parseWeb3Error(error);
       toast.custom((errorId) => (
-        <AlertError
-          id={errorId}
-          title={
-            error.walk?.()?.shortMessage ||
-            error.walk?.()?.message ||
-            error.message ||
-            "Something went wrong"
-          }
-        />
+        <AlertError description={description} id={errorId} title={title} />
       ));
     },
   });
@@ -275,7 +269,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    fetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);

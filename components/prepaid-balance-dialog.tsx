@@ -17,20 +17,15 @@ import {
 import { Input } from "@/components/ui/input";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { cn } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
-function errMessage(error: unknown): string {
-  const anyErr = error as {
-    walk?: () => { shortMessage?: string; message?: string };
-    message?: string;
-  };
-  return (
-    anyErr?.walk?.()?.shortMessage ||
-    anyErr?.walk?.()?.message ||
-    anyErr?.message ||
-    "Transaction failed"
-  );
+function showError(error: unknown) {
+  const { title, description } = parseWeb3Error(error);
+  toast.custom((id) => (
+    <AlertError description={description} id={id} title={title} />
+  ));
 }
 
 export function PrepaidBalanceDialog(props: DialogProps) {
@@ -63,7 +58,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
         />
       ));
     } catch (error) {
-      toast.custom((id) => <AlertError id={id} title={errMessage(error)} />);
+      showError(error);
     }
   };
 
@@ -76,7 +71,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
         <AlertSuccess id={id} title="Withdrawn to wallet" />
       ));
     } catch (error) {
-      toast.custom((id) => <AlertError id={id} title={errMessage(error)} />);
+      showError(error);
     }
   };
 
@@ -101,7 +96,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
         ));
       }
     } catch (error) {
-      toast.custom((id) => <AlertError id={id} title={errMessage(error)} />);
+      showError(error);
     }
   };
 
@@ -112,7 +107,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
         <AlertSuccess id={id} title="Spending limit updated to full balance" />
       ));
     } catch (error) {
-      toast.custom((id) => <AlertError id={id} title={errMessage(error)} />);
+      showError(error);
     }
   };
 
@@ -179,11 +174,11 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                     <p className="text-content-light text-xs">
                       {pb.balance === 0n
                         ? "Deposit LCAI to get started."
-                        : !pb.isAuthorized
-                          ? "Authorize the delegate to enable gas-free prompts."
-                          : pb.allowance === 0n
+                        : pb.isAuthorized
+                          ? pb.allowance === 0n
                             ? "Set a spending limit so the delegate can submit prompts."
-                            : "Increase the spending limit to match your balance."}
+                            : "Increase the spending limit to match your balance."
+                          : "Authorize the delegate to enable gas-free prompts."}
                     </p>
                   )}
                   <span
@@ -191,7 +186,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                       "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs",
                       pb.isAuthorized
                         ? "bg-emerald-500/10 text-emerald-500"
-                        : "bg-amber-500/10 text-amber-500",
+                        : "bg-amber-500/10 text-amber-500"
                     )}
                   >
                     {pb.isAuthorized ? (
