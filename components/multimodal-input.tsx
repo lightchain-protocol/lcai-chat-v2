@@ -45,6 +45,8 @@ import {
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -66,6 +68,7 @@ function PureMultimodalInput({
   usage,
   enableWebSearch,
   onWebSearchToggle,
+  searchCapable,
   disabled,
   disabledPlaceholder,
 }: {
@@ -86,6 +89,14 @@ function PureMultimodalInput({
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
+  /**
+   * Whether the session's bound worker advertises the "search" capability
+   * (web-search epic, Story 16). When false, the Switch is rendered disabled
+   * with a tooltip explaining the constraint — the user must start a new
+   * conversation requesting search up front to enable it. The flag is sourced
+   * from SessionManager.workerCapabilities.
+   */
+  searchCapable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string;
 }) {
@@ -361,14 +372,11 @@ function PureMultimodalInput({
               selectedModelId={selectedModelId}
               status={status}
             /> */}
-            {/* <div className="flex items-center gap-2 px-1 py-1">
-              <Switch
-                checked={enableWebSearch ?? false}
-                className="rounded-full!"
-                onCheckedChange={onWebSearchToggle}
-              />
-              <span className="text-content-secondary text-sm">Web Search</span>
-            </div> */}
+            <WebSearchToggle
+              enabled={enableWebSearch ?? false}
+              onToggle={onWebSearchToggle}
+              searchCapable={searchCapable ?? false}
+            />
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
@@ -425,6 +433,9 @@ export const MultimodalInput = memo(
     if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
       return false;
     }
+    if (prevProps.searchCapable !== nextProps.searchCapable) {
+      return false;
+    }
     if (prevProps.disabled !== nextProps.disabled) {
       return false;
     }
@@ -432,6 +443,50 @@ export const MultimodalInput = memo(
     return true;
   }
 );
+
+/**
+ * WebSearchToggle renders the per-message web-search switch (web-search
+ * epic, Story 16). When the session's bound worker doesn't advertise the
+ * "search" capability, the switch renders disabled and a tooltip explains
+ * how to enable it. This mirrors a real-world constraint: the worker's
+ * BYOK TAVILY_API_KEY is set at boot, so mid-session capability changes
+ * aren't possible without a new session and a new worker binding.
+ */
+function WebSearchToggle({
+  enabled,
+  onToggle,
+  searchCapable,
+}: {
+  enabled: boolean;
+  onToggle?: (enabled: boolean) => void;
+  searchCapable: boolean;
+}) {
+  const inner = (
+    <div className="flex items-center gap-2 px-1 py-1">
+      <Switch
+        checked={searchCapable ? enabled : false}
+        className="rounded-full!"
+        disabled={!searchCapable}
+        onCheckedChange={searchCapable ? onToggle : undefined}
+      />
+      <span className="text-content-secondary text-sm">Web Search</span>
+    </div>
+  );
+
+  if (searchCapable) {
+    return inner;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{inner}</TooltipTrigger>
+      <TooltipContent>
+        This conversation&apos;s worker doesn&apos;t support web search. Start a
+        new conversation to enable it.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function PureAttachmentsButton({
   fileInputRef,

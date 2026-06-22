@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useAppKit } from "@reown/appkit/react";
-import { DefaultChatTransport } from "ai";
+import { type DataUIPart, DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,15 +15,16 @@ import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
+import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
-import type { Attachment, ChatMessage } from "@/lib/types";
+import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { fetcher, generateUUID } from "@/lib/utils";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
+import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
@@ -53,6 +54,8 @@ function isProtocolAuthExpiredError(error: unknown): boolean {
     candidate.cause instanceof ProtocolAuthExpiredError
   );
 }
+
+const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
 export function Chat({
   id,
@@ -115,36 +118,84 @@ export function Chat({
     timedOutJob,
     retryFailover,
     startNewSession,
+    workerCapabilities,
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
   } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
+  // Read-only preflight: union of capabilities across all workers eligible
+  // for this model (web-search epic, Story 16). Populates at chat mount via
+  // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
+  // session is bound — fixes the "unlocks after Send" race.
+  const { availableCapabilities } = useModelCapabilities(currentModelId);
 
-  const sessionRecovering = failoverStatus !== "none";
+  // searchCapable feeds the Switch's disabled state.
+  //   - non-protocol mode: Vercel AI SDK does its own search, always on.
+  //   - protocol mode, post-binding (workerCapabilities populated): the
+  //     bound worker's snapshot is the source of truth; a session bound to
+  //     a non-capable worker MUST lock the toggle off even if other capable
+  //     workers exist (the session can't switch).
+  //   - protocol mode, pre-binding: fall back to availableCapabilities
+  //     from the preflight — "is any capable worker reachable?"
+  const searchCapable = isProtocolMode
+    ? workerCapabilities.length > 0
+      ? workerCapabilities.includes("search")
+      : availableCapabilities.includes("search")
+    : true;
+
+  const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
   // fetch that routes through ProtocolTransport (encrypt → gateway → relay).
   // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const transport = useMemo(() => {
-    return new DefaultChatTransport({
-      api: "/protocol",
-      async fetch(_url, init) {
-        const t = await getProtocolTransport();
-        const body = JSON.parse((init?.body as string) ?? "{}");
-        const protocolBody = {
-          ...body,
-          id,
-          selectedVisibilityType: visibilityType,
-          systemPrompt: systemPromptRef.current,
-        };
-        const { response } = await t.sendMessages({
-          messages: protocolBody.messages ?? [],
-          body: protocolBody,
-          signal: init?.signal ?? undefined,
-        });
+    if (isProtocolMode) {
+      return new DefaultChatTransport({
+        api: "/protocol",
+        async fetch(_url, init) {
+          const t = await getProtocolTransport();
+          const body = JSON.parse((init?.body as string) ?? "{}");
+          const protocolBody = {
+            ...body,
+            id,
+            selectedVisibilityType: visibilityType,
+            systemPrompt: systemPromptRef.current,
+          };
+          const { response } = await t.sendMessages({
+            messages: protocolBody.messages ?? [],
+            body: {
+              ...protocolBody,
+              // Per-message web-search opt-in (web-search epic, Story 16).
+              // ProtocolTransport forwards this through SessionManager.submitJob
+              // → GatewayClient.uploadBlob → consumer-api side-channel write.
+              enableWebSearch: enableWebSearchRef.current,
+            },
+            signal: init?.signal ?? undefined,
+          });
 
-        return response;
+          return response;
+        },
+      });
+    }
+    return new DefaultChatTransport({
+      api: `${$http.baseUrl}/api/chat`,
+      fetch: (url, init) =>
+        fetchWithErrorHandlers(url, {
+          ...init,
+        }),
+      prepareSendMessagesRequest(request) {
+        return {
+          body: {
+            id: request.id,
+            message: request.messages.at(-1),
+            selectedChatModel: currentModelIdRef.current,
+            selectedVisibilityType: visibilityType,
+            systemPrompt: systemPromptRef.current,
+            enableWebSearch: enableWebSearchRef.current,
+            ...request.body,
+          },
+        };
       },
     });
   }, [id, visibilityType, getProtocolTransport]);
@@ -221,7 +272,9 @@ export function Chat({
     generateId: generateUUID,
     transport,
     onData: (dataPart) => {
-      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
+      setDataStream((ds) =>
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
+      );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
       // }
@@ -343,6 +396,7 @@ export function Chat({
               messages={messages}
               onModelChange={setCurrentModelId}
               onWebSearchToggle={setEnableWebSearch}
+              searchCapable={searchCapable}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}

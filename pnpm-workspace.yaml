@@ -5,3 +5,55 @@ allowBuilds:
   keccak: true
   sharp: true
   utf-8-validate: true
+minimumReleaseAgeExclude:
+  - esbuild@0.24.3
+  - prismjs@1.30.0
+  - next-auth@5.0.0-beta.30
+  - ai@5.0.52
+  - next@15.6.0-canary.59
+  - '@trpc/server@11.8.0'
+  - preact@10.27.3
+  - hono@4.11.4
+  - lodash-es@4.17.23
+  - lodash@4.17.23
+  - undici@6.23.0
+  - next@16.1.5
+  - hono@4.11.7
+  - next@15.6.0-canary.61
+  - mdast-util-to-hast@13.2.1
+  - markdown-it@14.1.1
+  - hono@4.11.10
+  - bn.js@5.2.3
+  - rollup@4.59.0
+  - hono@4.12.4
+  - hono@4.12.7
+  - undici@6.24.0
+  - h3@1.15.6
+  - h3@1.15.9
+  - socket.io-parser@4.2.6
+  - picomatch@2.3.2
+  - picomatch@4.0.4
+  - dompurify@3.3.2
+  - lodash-es@4.17.24
+  - lodash@4.17.24
+  - defu@6.1.5
+  - vite@7.3.2
+  - hono@4.12.12
+  - drizzle-orm@0.45.2
+  - h3@1.15.5
+  - follow-redirects@1.15.12
+  - dompurify@3.3.4
+  - hono@4.12.14
+  - axios@1.15.0
+  - postcss@8.5.10
+  - dompurify@3.4.0
+  - axios@1.15.1
+  - axios@1.15.2
+  - axios@1.13.5
+  - hono@4.12.18
+  - mermaid@11.14.1
+  - hono@4.12.16
+  - ws@8.20.1
+  - uuid@11.1.1
+  - axios@1.16.0
+  - '@ai-sdk/provider-utils@3.0.98'

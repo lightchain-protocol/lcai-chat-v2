@@ -38,6 +38,10 @@ export function useProtocolSession(
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [failoverStatus, setFailoverStatus] = useState<FailoverStatus>("none");
+  // Heartbeat-advertised capability set of the bound worker (web-search epic,
+  // Story 16). Refreshed whenever the session status changes — the transport
+  // only knows it after SessionManager.initialize() completes.
+  const [workerCapabilities, setWorkerCapabilities] = useState<string[]>([]);
   const [progressStatus, setProgressStatus] =
     useState<ProtocolLoadingStatus>("idle");
   const [activeJobs, setActiveJobs] = useState<TrackedJob[]>([]);
@@ -180,7 +184,7 @@ export function useProtocolSession(
               completionState: "completed",
               relaySource: "protocol-user",
               jobId,
-              protocolMeta: { jobId, sessionId }
+              protocolMeta: { jobId, sessionId },
             }
           );
 
@@ -209,13 +213,21 @@ export function useProtocolSession(
       } else {
         setError(null);
       }
+      // Refresh capability snapshot — the transport only knows the bound
+      // worker's capabilities after the session reaches "ready". Reading on
+      // every status change keeps the chat input's Switch in sync.
+      setWorkerCapabilities(transport.workerCapabilities);
     });
     transport.setOnFailoverStatus(setFailoverStatus);
     transport.setOnProgressStatus(setProgressStatus);
     transport.setOnJobUpdate((job) => {
       setActiveJobs(transport.listJobs());
       // If the job was updated to completed, clear any pending timedOutJob for it
-      if (job.status === "completed" || job.status === "claimed" || job.status === "disputed") {
+      if (
+        job.status === "completed" ||
+        job.status === "claimed" ||
+        job.status === "disputed"
+      ) {
         setTimedOutJob((prev) => (prev?.jobId === job.jobId ? null : prev));
       }
     });
@@ -298,28 +310,22 @@ export function useProtocolSession(
     releaseTransport();
   }, [chatId, releaseTransport]);
 
-  const claimJobTimeout = useCallback(
-    async (jobId: number) => {
-      const transport = transportRef.current;
-      if (!transport) throw new Error("No active transport");
-      const result = await transport.claimJobTimeout(jobId);
-      setActiveJobs(transport.listJobs());
-      setTimedOutJob(null);
-      return result;
-    },
-    []
-  );
+  const claimJobTimeout = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.claimJobTimeout(jobId);
+    setActiveJobs(transport.listJobs());
+    setTimedOutJob(null);
+    return result;
+  }, []);
 
-  const disputeJob = useCallback(
-    async (jobId: number) => {
-      const transport = transportRef.current;
-      if (!transport) throw new Error("No active transport");
-      const result = await transport.disputeJob(jobId);
-      setActiveJobs(transport.listJobs());
-      return result;
-    },
-    []
-  );
+  const disputeJob = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.disputeJob(jobId);
+    setActiveJobs(transport.listJobs());
+    return result;
+  }, []);
 
   const clearTimedOutJob = useCallback(() => {
     setTimedOutJob(null);
@@ -329,6 +335,7 @@ export function useProtocolSession(
     status,
     error,
     failoverStatus,
+    workerCapabilities,
     progressStatus,
     activeJobs,
     timedOutJob,
