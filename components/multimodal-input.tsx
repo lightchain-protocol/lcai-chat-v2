@@ -71,6 +71,7 @@ function PureMultimodalInput({
   searchCapable,
   disabled,
   disabledPlaceholder,
+  onBeforeSubmit,
 }: {
   chatId: string;
   input: string;
@@ -99,6 +100,13 @@ function PureMultimodalInput({
   searchCapable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string;
+  /**
+   * Pre-send guard. Returns false to block the send (e.g. no wallet connected
+   * or an unfunded/undelegated prepaid balance), in which case it is expected
+   * to surface the relevant modal. When it returns false the typed input and
+   * attachments are preserved so the user can resend after resolving the issue.
+   */
+  onBeforeSubmit?: () => boolean;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -153,6 +161,12 @@ function PureMultimodalInput({
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
 
   const submitForm = useCallback(() => {
+    // Gate before mutating any state so a blocked send leaves the typed message
+    // and attachments intact for resend after the user funds / authorizes.
+    if (onBeforeSubmit && !onBeforeSubmit()) {
+      return;
+    }
+
     window.history.replaceState({}, "", `/chat/${chatId}`);
 
     if (status === "error") {
@@ -195,6 +209,7 @@ function PureMultimodalInput({
     resetHeight,
     setMessages,
     status,
+    onBeforeSubmit,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -404,6 +419,7 @@ function PureMultimodalInput({
         !disabled && (
           <SuggestedActions
             chatId={chatId}
+            onBeforeSubmit={onBeforeSubmit}
             selectedVisibilityType={selectedVisibilityType}
             sendMessage={sendMessage}
           />
@@ -437,6 +453,11 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.disabled !== nextProps.disabled) {
+      return false;
+    }
+    // Re-render when the send guard changes identity so submitForm/SuggestedActions
+    // capture the latest readiness closure instead of a stale one.
+    if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
       return false;
     }
 

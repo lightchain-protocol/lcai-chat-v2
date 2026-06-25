@@ -11,9 +11,15 @@ type SuggestedActionsProps = {
   chatId: string;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
   selectedVisibilityType: VisibilityType;
+  /** Pre-send guard; returns false to block the send (see MultimodalInput). */
+  onBeforeSubmit?: () => boolean;
 };
 
-function PureSuggestedActions({ chatId, sendMessage }: SuggestedActionsProps) {
+function PureSuggestedActions({
+  chatId,
+  sendMessage,
+  onBeforeSubmit,
+}: SuggestedActionsProps) {
   const suggestedActions = [
     "What is Lightchain AI?",
     "What are the advantages of using Next.js?",
@@ -32,6 +38,9 @@ function PureSuggestedActions({ chatId, sendMessage }: SuggestedActionsProps) {
           <Suggestion key={index}
               className="p-px group h-full border-0 rounded-[10px] bg-transparent hover:bg-gradient-to-r hover:from-[#7064E9] hover:to-[#DD00AC]"
               onClick={(suggestion) => {
+                if (onBeforeSubmit && !onBeforeSubmit()) {
+                  return;
+                }
                 window.history.replaceState({}, "", `/chat/${chatId}`);
                 sendMessage({
                   role: "user",
@@ -72,6 +81,9 @@ export const SuggestedActions = memo(
       return false;
     }
     if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
+      return false;
+    }
+    if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
       return false;
     }
 

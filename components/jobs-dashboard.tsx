@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  Clock,
-  ExternalLink,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+import { Clock, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -14,6 +9,7 @@ import config from "@/config";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
+import { getWeb3ErrorMessage } from "@/lib/utils/web3-errors";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
@@ -94,8 +90,7 @@ export function JobsDashboard({ initialJobs }: JobsDashboardProps) {
       toast.success(`Job #${job.jobId}: fee refunded, worker slashed.`);
       await refreshJobs();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Transaction failed";
-      toast.error(msg);
+      toast.error(getWeb3ErrorMessage(err));
     } finally {
       setTxPending(null);
     }
@@ -215,7 +210,6 @@ export function JobsDashboard({ initialJobs }: JobsDashboardProps) {
                           Claim Timeout
                         </Button>
                       )}
-
                     </div>
                   </td>
                 </tr>

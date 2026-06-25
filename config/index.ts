@@ -1,14 +1,5 @@
 import { type Chain, mainnet } from "viem/chains";
-import { lcai, lcaiTestnet } from "./chains";
-
-// const customMainnet: Chain = {
-//   ...mainnet,
-//   rpcUrls: {
-//     default: {
-//       http: ["https://mainnet.infura.io/v3/e4c15472e4824fefae8a9d5b265e8180"],
-//     },
-//   },
-// };
+import { lcai, lcaiLocalhost, lcaiTestnet } from "./chains";
 
 export const isTestnet = process.env.NEXT_PUBLIC_LCAI_IS_TESTNET === "true";
 
@@ -43,20 +34,30 @@ const config = {
 
   jobRegistryAddress: {
     [lcai.id]: "0xfB15F90298e4CcD7106E76fFB5e520315cC42B0b",
+    [lcaiLocalhost.id]: "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE",
     [lcaiTestnet.id]: TESTNET_JOB_REGISTRY,
   } as Record<number, `0x${string}`>,
 
   aiConfigAddress: {
     [lcai.id]: "0x24D11533C354092ed6E18b964257819cE78Ce77D",
+    [lcaiLocalhost.id]: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
     [lcaiTestnet.id]: TESTNET_AI_CONFIG,
   } as Record<number, `0x${string}`>,
 
   workerRegistryAddress: {
     [lcai.id]: "0x0000000000000000000000000000000000001002",
+    [lcaiLocalhost.id]: "0x0000000000000000000000000000000000001002",
     [lcaiTestnet.id]: TESTNET_WORKER_REGISTRY,
   } as Record<number, `0x${string}`>,
 
   lcaiToken: {
+    [lcaiLocalhost.id]: {
+      address: "0x0000000000000000000000000000000000000000",
+      symbol: "LCAI",
+      name: "LCAI",
+      image: "/images/logo/favicon.png",
+      decimals: 18,
+    },
     [lcai.id]: {
       address: "0x0000000000000000000000000000000000000000",
       symbol: "LCAI",

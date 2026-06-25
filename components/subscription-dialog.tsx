@@ -17,6 +17,7 @@ import {
 import { type SubscriptionTier, tierDetails } from "@/config/subscription";
 import useSubscription from "@/hooks/use-subscription";
 import { cn, formatNumber } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
@@ -58,17 +59,10 @@ const SubscriptionDialog = (props: DialogProps) => {
         <AlertSuccess id={id} title="Subscription successful" />
       ));
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const { title, description } = parseWeb3Error(error);
       toast.custom((id) => (
-        <AlertError
-          id={id}
-          title={
-            error.walk?.()?.shortMessage ||
-            error.walk?.()?.message ||
-            error.message ||
-            "Subscription failed"
-          }
-        />
+        <AlertError description={description} id={id} title={title} />
       ));
     },
   });

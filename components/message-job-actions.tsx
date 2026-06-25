@@ -3,12 +3,13 @@
 import { Clock, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { formatEther } from "viem";
 import config from "@/config";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { TrackedJob } from "@/lib/protocol/transport";
-import { formatEther } from "viem";
+import { getWeb3ErrorMessage } from "@/lib/utils/web3-errors";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,8 +65,7 @@ export function MessageJobActions({
         await onClaimTimeout(jobId);
         toast.success("Job fee refunded. Worker slashed.");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Transaction failed";
-        toast.error(`Claim failed: ${msg}`);
+        toast.error(`Claim failed: ${getWeb3ErrorMessage(err)}`);
       } finally {
         setClaimPending(false);
       }
@@ -74,7 +74,7 @@ export function MessageJobActions({
     return (
       <div className="mt-1 flex items-center gap-2">
         <Button
-          className="h-6 gap-1 px-2 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-950/40"
+          className="h-6 gap-1 border-amber-300 px-2 text-amber-700 text-xs hover:bg-amber-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-950/40"
           disabled={claimPending}
           onClick={handleClaim}
           size="sm"
@@ -123,7 +123,7 @@ export function MessageJobActions({
           });
 
           const windowEnd = Number(job.completedAt) + Number(disputeWindow);
-          if (Date.now() / 1_000 >= windowEnd) return; // window closed
+          if (Date.now() / 1000 >= windowEnd) return; // window closed
 
           const bond = (job.escrowedFee * multiplier) / 10_000n;
           setDisputeBond(bond);
@@ -140,8 +140,7 @@ export function MessageJobActions({
           await onDisputeJob(jobId);
           toast.success("Dispute filed successfully.");
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Transaction failed";
-          toast.error(`Dispute failed: ${msg}`);
+          toast.error(`Dispute failed: ${getWeb3ErrorMessage(err)}`);
         } finally {
           setDisputePending(false);
         }
@@ -151,7 +150,7 @@ export function MessageJobActions({
         <>
           <div className="mt-1 flex items-center gap-2">
             <Button
-              className="h-6 gap-1 px-2 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 dark:text-blue-300 dark:border-blue-700 dark:hover:bg-blue-950/40"
+              className="h-6 gap-1 border-blue-300 px-2 text-blue-700 text-xs hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
               disabled={disputePending}
               onClick={openDisputeDialog}
               size="sm"
