@@ -5,7 +5,7 @@ import { useAppKit } from "@reown/appkit/react";
 import { type DataUIPart, DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
@@ -29,9 +29,11 @@ import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
+import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
+import AlertInfo from "./ui/toast/AlertInfo";
 import { UsageWarningBanner } from "./usage-warning-banner";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -93,21 +95,69 @@ export function Chat({
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null
+    initialSystemPrompt || null,
   );
   const systemPromptRef = useRef(systemPrompt);
 
   const [enableWebSearch, setEnableWebSearch] = useState(false);
   const enableWebSearchRef = useRef(enableWebSearch);
   const { walletClient } = useWeb3Clients();
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
+
+  // Pre-send gate: a prompt only produces a response when the user has a
+  // connected wallet AND a usable prepaid balance (funded, delegate authorized,
+  // allowance available). Otherwise the on-chain prompt is accepted but never
+  // answered. This dialog is the existing deposit/authorize modal, opened on a
+  // blocked send.
+  const [prepaidGateOpen, setPrepaidGateOpen] = useState(false);
 
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
   // stale read or a balance dip falls back to the wallet path gracefully.
   const prepaid = usePrepaidBalance();
-  const submitMode = prepaid.ready ? "auto" : "wallet";
+  const submitMode = "auto"; // prepaid.ready ? "auto" : "wallet";
+
+  // Guard run before every user-initiated send. Returns false (and surfaces the
+  // appropriate modal) when the prompt can't be answered:
+  //   - no wallet connected      -> AppKit connect modal
+  //   - connected but not "ready" -> prepaid top-up / authorize dialog
+  // While the prepaid read is still loading we let the send through; submitMode
+  // "auto" falls back to the per-prompt wallet path, so we don't false-block on
+  // a slow on-chain read. When prepaid isn't configured (`available` false) the
+  // gate is a no-op.
+  const canPrompt = useCallback((): boolean => {
+    if (!isConnected) {
+      open();
+      return false;
+    }
+    if (prepaid.available && !prepaid.isLoading && !prepaid.ready) {
+      const description =
+        prepaid.balance === 0n
+          ? "Add LCAI to your prepaid balance to start chatting."
+          : prepaid.isAuthorized
+            ? "Increase your delegate's spending allowance to continue."
+            : "Authorize the delegate to spend your prepaid balance.";
+      toast.custom((toastId) => (
+        <AlertInfo
+          description={description}
+          id={toastId}
+          title="Prepaid balance required"
+        />
+      ));
+      setPrepaidGateOpen(true);
+      return false;
+    }
+    return true;
+  }, [
+    isConnected,
+    open,
+    prepaid.available,
+    prepaid.isLoading,
+    prepaid.ready,
+    prepaid.balance,
+    prepaid.isAuthorized,
+  ]);
 
   // Protocol mode: session management for on-chain encrypted chat
   const {
@@ -207,14 +257,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    }
+    },
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt
+        (template) => template.prompt === initialSystemPrompt,
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -253,7 +303,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      }
+      },
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -273,7 +323,7 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
@@ -310,6 +360,10 @@ export function Chat({
 
   useEffect(() => {
     if (query && !hasAppendedQuery) {
+      if (!canPrompt()) {
+        return;
+      }
+
       sendMessage({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
@@ -318,11 +372,11 @@ export function Chat({
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
-  }, [query, sendMessage, hasAppendedQuery, id]);
+  }, [query, sendMessage, hasAppendedQuery, id, canPrompt]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher
+    fetcher,
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -394,6 +448,7 @@ export function Chat({
               enableWebSearch={enableWebSearch}
               input={input}
               messages={messages}
+              onBeforeSubmit={canPrompt}
               onModelChange={setCurrentModelId}
               onWebSearchToggle={setEnableWebSearch}
               searchCapable={searchCapable}
@@ -410,6 +465,11 @@ export function Chat({
           )}
         </div>
       </div>
+
+      <PrepaidBalanceDialog
+        onOpenChange={setPrepaidGateOpen}
+        open={prepaidGateOpen}
+      />
 
       {/* <AlertDialog
         onOpenChange={setShowCreditCardAlert}
