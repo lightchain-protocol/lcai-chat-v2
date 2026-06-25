@@ -59,7 +59,10 @@ function PureChatHeader({
   const { open } = useSidebar();
   const { status: sessionStatus } = useSession();
 
-  const { width: windowWidth } = useWindowSize();
+  // initializeWithValue: false keeps width at 0 on the server AND the first
+  // client render, avoiding a hydration mismatch on the window-width-dependent
+  // "New Chat" button below. It populates after mount via the resize effect.
+  const { width: windowWidth } = useWindowSize({ initializeWithValue: false });
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const [editorDialogOpen, setEditorDialogOpen] = useState(false);
 
@@ -170,7 +173,7 @@ function PureChatHeader({
     <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-3 md:px-4 md:py-4.5">
       <SidebarToggle />
 
-      {(!open || windowWidth < 768) && (
+      {(!open || (windowWidth ?? 0) < 768) && (
         <Button
           className="order-2 ml-auto h-8 bg-surface-base-faint px-2 text-content-default md:order-1 md:ml-0 md:h-fit md:px-2"
           onClick={() => {
