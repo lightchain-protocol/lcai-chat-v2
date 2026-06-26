@@ -383,19 +383,16 @@ export class SessionManager {
     const account = this.walletClient.account;
     if (!account) throw new Error("Wallet account not available");
 
-    // 1. Encrypt → base64
-    const encryptedBase64 = await this.encryptPrompt(plaintext);
+    // 1. Encode the prompt envelope (search → sentinel byte + JSON; else raw
+    //    UTF-8) then encrypt the resulting bytes. The sentinel + JSON format
+    //    matches pkg/searchaug.DecodePrompt so the dispatcher can read it.
+    const payload = this.encodePromptPayload(plaintext, opts?.searchEnabled === true);
+    const encryptedBase64 = await this.encryptPromptBytes(payload);
 
     // 2. Upload to gateway — gateway submits the real blob TX. Post-audit the
     // on-chain submitJob accepts a single blob hash per job; if the prompt spans
     // multiple blobs we can't fit it in one job under the current contract.
-    // searchEnabled rides the same upload as an opt-in side-channel (web-search
-    // epic, Story 15) — the gateway writes job-flags:{sid}:{blobHash} so the
-    // dispatcher can populate the per-job control flag.
-    const blobResponse = await this.gateway.uploadBlob(encryptedBase64, {
-      sessionId: String(this.state.sessionId),
-      searchEnabled: opts?.searchEnabled === true,
-    });
+    const blobResponse = await this.gateway.uploadBlob(encryptedBase64);
     const blobHashes = blobResponse.blobHashes as `0x${string}`[];
     if (blobHashes.length === 0) {
       throw new Error("Blob upload returned no hashes");
@@ -486,6 +483,39 @@ export class SessionManager {
 
     const jobEvent = parseJobSubmittedEvent(receipt.logs, jobRegistryAbi);
     return { jobId: Number(jobEvent.args.jobId), txHash: hash };
+  }
+
+  /**
+   * Builds the prompt envelope bytes.
+   *
+   * When search is enabled: one sentinel byte `0x00` followed by UTF-8
+   * `JSON.stringify({ v: 1, prompt, search: true })`.  This matches the
+   * format expected by Go `pkg/searchaug.DecodePrompt`.
+   *
+   * When search is disabled: raw UTF-8 bytes of the plaintext (unchanged).
+   */
+  private encodePromptPayload(plaintext: string, searchEnabled: boolean): Uint8Array {
+    if (!searchEnabled) {
+      return new TextEncoder().encode(plaintext);
+    }
+    const json = JSON.stringify({ v: 1, prompt: plaintext, search: true });
+    const body = new TextEncoder().encode(json);
+    const out = new Uint8Array(body.length + 1);
+    out[0] = 0x00; // sentinel — matches pkg/searchaug.DecodePrompt
+    out.set(body, 1);
+    return out;
+  }
+
+  /**
+   * Encrypts raw payload bytes using the session key.
+   * Returns base64-encoded ciphertext suitable for the gateway API.
+   */
+  private async encryptPromptBytes(payload: Uint8Array): Promise<string> {
+    if (!this.sessionKey) {
+      throw new Error("Session not initialized — no session key");
+    }
+    const ciphertext = await encrypt(this.sessionKey, payload);
+    return uint8ToBase64(ciphertext);
   }
 
   /**

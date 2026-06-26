@@ -193,20 +193,10 @@ export class GatewayClient {
     );
   }
 
-  async uploadBlob(
-    base64Data: string,
-    opts?: { sessionId?: string; searchEnabled?: boolean }
-  ): Promise<UploadBlobResponse> {
-    const body: Record<string, unknown> = { data: base64Data };
-    if (opts?.sessionId !== undefined) {
-      body.sessionId = opts.sessionId;
-    }
-    if (opts?.searchEnabled === true) {
-      body.searchEnabled = true;
-    }
+  async uploadBlob(base64Data: string): Promise<UploadBlobResponse> {
     return await this.post<UploadBlobResponse>(
       "/api/blobs",
-      body,
+      { data: base64Data },
       { protected: true, bearerOnly: true }
     );
   }
