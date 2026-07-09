@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
-import config from "@/config";
+import config, { isSortitionEnabled } from "@/config";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
@@ -199,7 +199,14 @@ export function useProtocolSession(
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);
 
-      if (s === "preparing" || s === "key_exchange") {
+      if (s === "preparing") {
+        // In the sortition path the dispatcher blocks here for ~10-25 s while
+        // a worker self-claims the slot — show "finding a worker" so the UI
+        // doesn't look stuck. Legacy path shows the generic preparing label.
+        setProgressStatus(
+          isSortitionEnabled ? "finding_worker" : "preparing_chat"
+        );
+      } else if (s === "key_exchange") {
         setProgressStatus("preparing_chat");
       } else if (s === "creating") {
         setProgressStatus("writing_on_chain");
