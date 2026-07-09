@@ -104,6 +104,21 @@ export type SessionStatusResponse = {
   sessionStatus: string; // "active" | "awaiting_reassignment" | "reassigning" | "closed" | "unknown"
 };
 
+export type SortitionRequestResponse = {
+  reqId: string;
+  worker: string;
+  /** 0x-prefixed hex public key */
+  workerEncryptionKey: string;
+  /** 0x-prefixed hex public key, or "0x" when no disputer */
+  disputerEncryptionKey: string;
+  capabilities: string[];
+};
+
+export type SortitionKeysResponse = {
+  sessionId: string;
+  txHash: string;
+};
+
 export type AuthProvider = {
   buildProtectedHeaders(): Promise<Record<string, string>>;
   buildBearerOnlyHeaders?(): Promise<Record<string, string>>;
@@ -163,6 +178,44 @@ export class GatewayClient {
     );
   }
 
+  /**
+   * Sortition session bootstrap — Step 1.
+   * Consumer-api blocks (~10-25 s) while a worker self-claims the slot.
+   * Throws GatewayClientError with status 408 when no worker claims in time.
+   */
+  async requestSortitionSession(
+    modelId: string,
+    expirySecs?: number
+  ): Promise<SortitionRequestResponse> {
+    const body: Record<string, unknown> = { modelId };
+    if (expirySecs !== undefined) {
+      body.expirySecs = expirySecs;
+    }
+    return await this.post<SortitionRequestResponse>(
+      "/api/sessions/sortition/request",
+      body,
+      { protected: true }
+    );
+  }
+
+  /**
+   * Sortition session bootstrap — Step 2.
+   * Delivers the encrypted session keys to consumer-api; the delegate has
+   * already signed the createSession TX on-chain server-side.
+   * Returns the resulting sessionId and txHash.
+   */
+  async provideSortitionKeys(
+    reqId: string,
+    encWorkerKey: string,
+    encDisputerKey: string
+  ): Promise<SortitionKeysResponse> {
+    return await this.post<SortitionKeysResponse>(
+      `/api/sessions/sortition/${reqId}/keys`,
+      { encWorkerKey, encDisputerKey },
+      { protected: true }
+    );
+  }
+
   async selectSession(
     modelId: string,
     opts?: { requiredCapabilities?: string[] }
@@ -204,11 +257,10 @@ export class GatewayClient {
     if (opts?.searchEnabled === true) {
       body.searchEnabled = true;
     }
-    return await this.post<UploadBlobResponse>(
-      "/api/blobs",
-      body,
-      { protected: true, bearerOnly: true }
-    );
+    return await this.post<UploadBlobResponse>("/api/blobs", body, {
+      protected: true,
+      bearerOnly: true,
+    });
   }
 
   /**
