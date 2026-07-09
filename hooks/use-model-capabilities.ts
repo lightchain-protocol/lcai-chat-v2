@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import useSWR from "swr";
 
+import { useModels } from "@/hooks/use-models";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 
 /**
@@ -12,10 +13,10 @@ import { GatewayClient } from "@/lib/protocol/gateway-client";
  * decide whether per-message UI features (e.g. the web-search toggle) are
  * offerable BEFORE a session is bound.
  *
- * `modelId` may be either the friendly local id (e.g. "chat-model") or
- * the hex id; this hook resolves the friendly form via the model registry,
- * then fetches capabilities for the resolved hex. Both fetches are SWR-
- * deduplicated so multiple chat instances on the same model share state.
+ * `modelId` is now always the real hex id from the model picker (which reads
+ * directly from useModels()) — no more friendly-name fuzzy resolution needed.
+ * We still validate it against the live model list before fetching
+ * capabilities, so a stale/unavailable modelId doesn't trigger a request.
  *
  * Returns `availableCapabilities: []` until the data resolves — chat.tsx
  * relies on the empty default to render the toggle in its "preflight not
@@ -27,30 +28,21 @@ export function useModelCapabilities(modelId: string | undefined) {
   // unauthenticated public metadata.
   const gateway = useMemo(() => new GatewayClient(), []);
 
-  // Step 1: model registry. Shared SWR key so all chat instances reuse one
-  // network call regardless of which model they target.
-  const { data: modelsData } = useSWR(
-    "/api/models",
-    () => gateway.getModels(),
-    { revalidateOnFocus: false }
-  );
+  // Shared model list — same SWR key as the picker and use-protocol-session,
+  // so this dedupes into one network call regardless of how many components
+  // are mounted.
+  const { models } = useModels();
 
-  // Step 2: resolve `modelId` → hex. Mirrors the resolution in
-  // use-protocol-session.ts:66-80 (substring match on name, fallback to
-  // first model). null when the registry isn't loaded yet.
+  // modelId is a real hex id now; just confirm it's one of the currently
+  // live/available models before fetching capabilities for it.
   const resolvedHex = useMemo(() => {
-    if (!modelsData || !modelId) return null;
-    if (modelsData.models.length === 0) return null;
-    const lowerId = modelId.toLowerCase();
-    const match = modelsData.models.find((m) =>
-      m.name.toLowerCase().includes(lowerId)
-    );
-    return match?.id ?? modelsData.models[0].id;
-  }, [modelsData, modelId]);
+    if (!modelId || models.length === 0) return null;
+    return models.some((m) => m.id === modelId) ? modelId : null;
+  }, [modelId, models]);
 
-  // Step 3: capabilities, gated on resolvedHex via SWR's null-key
-  // disable. The key is the URL path itself so SWR dedupes across hook
-  // instances and remembers the result across remounts.
+  // Capabilities, gated on resolvedHex via SWR's null-key disable. The key
+  // is the URL path itself so SWR dedupes across hook instances and
+  // remembers the result across remounts.
   const { data: capabilitiesData, error } = useSWR(
     resolvedHex ? `/api/models/${resolvedHex}/capabilities` : null,
     () => gateway.getModelCapabilities(resolvedHex as string),

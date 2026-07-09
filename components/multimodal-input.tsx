@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
-import { chatModels } from "@/lib/ai/models";
+import { useModels } from "@/hooks/use-models";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
@@ -90,22 +90,9 @@ function PureMultimodalInput({
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
-  /**
-   * Whether the session's bound worker advertises the "search" capability
-   * (web-search epic, Story 16). When false, the Switch is rendered disabled
-   * with a tooltip explaining the constraint — the user must start a new
-   * conversation requesting search up front to enable it. The flag is sourced
-   * from SessionManager.workerCapabilities.
-   */
   searchCapable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string;
-  /**
-   * Pre-send guard. Returns false to block the send (e.g. no wallet connected
-   * or an unfunded/undelegated prepaid balance), in which case it is expected
-   * to surface the relevant modal. When it returns false the typed input and
-   * attachments are preserved so the user can resend after resolving the issue.
-   */
   onBeforeSubmit?: () => boolean;
 }) {
   const session = useSession();
@@ -140,12 +127,10 @@ function PureMultimodalInput({
   useEffect(() => {
     if (textareaRef.current) {
       const domValue = textareaRef.current.value;
-      // Prefer DOM value over localStorage to handle hydration
       const finalValue = domValue || localStorageInput || "";
       setInput(finalValue);
       adjustHeight();
     }
-    // Only run once after hydration
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adjustHeight, localStorageInput, setInput]);
 
@@ -161,8 +146,6 @@ function PureMultimodalInput({
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
 
   const submitForm = useCallback(() => {
-    // Gate before mutating any state so a blocked send leaves the typed message
-    // and attachments intact for resend after the user funds / authorizes.
     if (onBeforeSubmit && !onBeforeSubmit()) {
       return;
     }
@@ -170,7 +153,7 @@ function PureMultimodalInput({
     window.history.replaceState({}, "", `/chat/${chatId}`);
 
     if (status === "error") {
-      setMessages((currentMessages) => currentMessages.slice(0, -1)); // remove last message if error
+      setMessages((currentMessages) => currentMessages.slice(0, -1));
     }
 
     sendMessage({
@@ -240,18 +223,6 @@ function PureMultimodalInput({
       ));
     }
   }, []);
-
-  // const _modelResolver = useMemo(() => {
-  //   return myProvider.languageModel(selectedModelId);
-  // }, [selectedModelId]);
-
-  // const contextProps = useMemo(
-  //   () => ({
-  //     usage,
-  //     subscriptionTier,
-  //   }),
-  //   [usage, subscriptionTier]
-  // );
 
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -378,15 +349,9 @@ function PureMultimodalInput({
             rows={1}
             value={input}
           />{" "}
-          {/* <Context {...contextProps} /> */}
         </div>
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
-            {/* <AttachmentsButton
-              fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
-              status={status}
-            /> */}
             <WebSearchToggle
               enabled={enableWebSearch ?? false}
               onToggle={onWebSearchToggle}
@@ -455,8 +420,6 @@ export const MultimodalInput = memo(
     if (prevProps.disabled !== nextProps.disabled) {
       return false;
     }
-    // Re-render when the send guard changes identity so submitForm/SuggestedActions
-    // capture the latest readiness closure instead of a stale one.
     if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
       return false;
     }
@@ -465,14 +428,6 @@ export const MultimodalInput = memo(
   }
 );
 
-/**
- * WebSearchToggle renders the per-message web-search switch (web-search
- * epic, Story 16). When the session's bound worker doesn't advertise the
- * "search" capability, the switch renders disabled and a tooltip explains
- * how to enable it. This mirrors a real-world constraint: the worker's
- * BYOK TAVILY_API_KEY is set at boot, so mid-session capability changes
- * aren't possible without a new session and a new worker binding.
- */
 function WebSearchToggle({
   enabled,
   onToggle,
@@ -546,29 +501,27 @@ function PureModelSelectorCompact({
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
 }) {
+  const { models } = useModels();
   const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
 
   useEffect(() => {
     setOptimisticModelId(selectedModelId);
   }, [selectedModelId]);
 
-  const selectedModel = chatModels.find(
+  const selectedModel = models.find(
     (model) => model.id === optimisticModelId
   );
 
   return (
     <PromptInputModelSelect
-      onValueChange={(modelName) => {
-        const model = chatModels.find((m) => m.name === modelName);
-        if (model) {
-          setOptimisticModelId(model.id);
-          onModelChange?.(model.id);
-          startTransition(() => {
-            saveChatModelAsCookie(model.id);
-          });
-        }
+      onValueChange={(modelId) => {
+        setOptimisticModelId(modelId);
+        onModelChange?.(modelId);
+        startTransition(() => {
+          saveChatModelAsCookie(modelId);
+        });
       }}
-      value={selectedModel?.name}
+      value={selectedModel?.id}
     >
       <Trigger
         className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
@@ -576,24 +529,21 @@ function PureModelSelectorCompact({
       >
         <CpuIcon size={16} />
         <span className="hidden font-medium text-xs sm:block">
-          {selectedModel?.name}
+          {selectedModel?.name ?? "Select model"}
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
       <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
         <div className="flex flex-col gap-px">
-          {chatModels.map((model) => (
+          {models.map((model) => (
             <SelectItem
               className="rounded-lg"
               key={model.id}
-              value={model.name}
+              value={model.id}
             >
               <h6 className="mb-0.5 truncate font-medium text-xs">
                 {model.name}
               </h6>
-              <p className="mt-px text-[10px] text-muted-foreground leading-tight">
-                {model.description}
-              </p>
             </SelectItem>
           ))}
         </div>
