@@ -273,7 +273,8 @@ export class SessionManager {
         // ----------------------------------------------------------------
 
         // Step 1: Request — consumer-api blocks until a worker self-claims
-        // (~10-25 s). A 408 means no worker claimed in time.
+        // (typically ~10-25 s; the server caps the wait at CLAIM_TIMEOUT_MS,
+        // 60 s by default). A 408 means no worker claimed in time.
         this.setState("preparing");
         let req: SortitionRequestResponse;
         try {

@@ -180,7 +180,8 @@ export class GatewayClient {
 
   /**
    * Sortition session bootstrap — Step 1.
-   * Consumer-api blocks (~10-25 s) while a worker self-claims the slot.
+   * Consumer-api blocks while a worker self-claims the slot (typically
+   * ~10-25 s; server-capped at CLAIM_TIMEOUT_MS, 60 s by default).
    * Throws GatewayClientError with status 408 when no worker claims in time.
    */
   async requestSortitionSession(
