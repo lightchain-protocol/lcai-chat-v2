@@ -292,9 +292,13 @@ export class SessionManager {
         const sessionKey = await generateSessionKey();
         this.sessionKey = sessionKey;
 
-        const workerPubRaw = hexToBytes(
-          req.workerEncryptionKey as `0x${string}`
-        );
+        // Defence-in-depth: hexToBytes does `hex.slice(2)` unconditionally, so a
+        // prefix-less key silently loses its leading byte. The API should return
+        // 0x-hex, but normalise here too so a raw-hex key can't corrupt the key.
+        const as0xHex = (k: string): `0x${string}` =>
+          (k.startsWith("0x") ? k : `0x${k}`) as `0x${string}`;
+
+        const workerPubRaw = hexToBytes(as0xHex(req.workerEncryptionKey));
         const workerPub = await importPublicKey(workerPubRaw);
         const encWorkerKeyBytes = await encryptSessionKey(
           sessionKey,
@@ -306,7 +310,7 @@ export class SessionManager {
         if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
           this.disputerEncryptionKey = req.disputerEncryptionKey;
           const disputerPubRaw = hexToBytes(
-            req.disputerEncryptionKey as `0x${string}`
+            as0xHex(req.disputerEncryptionKey)
           );
           const disputerPub = await importPublicKey(disputerPubRaw);
           const encDisputerKeyBytes = await encryptSessionKey(
