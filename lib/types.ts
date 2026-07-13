@@ -31,6 +31,7 @@ export type ChatTools = {
 
 export type ProtocolLoadingStatus =
   | "idle"
+  | "finding_worker"
   | "preparing_chat"
   | "writing_on_chain"
   | "submitting_job"
@@ -47,6 +48,7 @@ export const PROTOCOL_LOADING_STATUS_LABELS: Record<
   string
 > = {
   idle: "Thinking...",
+  finding_worker: "Finding a worker...",
   preparing_chat: "Preparing your chat...",
   writing_on_chain: "Writing on chain...",
   submitting_job: "Uploading prompt to chain...",

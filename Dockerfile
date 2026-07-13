@@ -34,6 +34,12 @@ ARG NEXT_PUBLIC_AI_CONFIG_ADDRESS
 ARG NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS
 ARG NEXT_PUBLIC_RELAY_URL
 ARG NEXT_PUBLIC_RPC_URL
+# Sortition (dispatcher-free) flow toggle — inlined into client bundles so
+# lib/protocol/session.ts takes the sortition bootstrap path. Must be declared
+# here (not just passed as a compose build arg): an undeclared ARG is discarded
+# by Docker, so `next build` would never see it and the flag would silently
+# resolve to undefined (false) in the browser.
+ARG NEXT_PUBLIC_SORTITION_ENABLED
 ENV NEXT_PUBLIC_USE_PROTOCOL=${NEXT_PUBLIC_USE_PROTOCOL} \
     NEXT_PUBLIC_LCAI_IS_TESTNET=${NEXT_PUBLIC_LCAI_IS_TESTNET} \
     NEXT_PUBLIC_CONSUMER_API_URL=${NEXT_PUBLIC_CONSUMER_API_URL} \
@@ -42,7 +48,8 @@ ENV NEXT_PUBLIC_USE_PROTOCOL=${NEXT_PUBLIC_USE_PROTOCOL} \
     NEXT_PUBLIC_AI_CONFIG_ADDRESS=${NEXT_PUBLIC_AI_CONFIG_ADDRESS} \
     NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS=${NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS} \
     NEXT_PUBLIC_RELAY_URL=${NEXT_PUBLIC_RELAY_URL} \
-    NEXT_PUBLIC_RPC_URL=${NEXT_PUBLIC_RPC_URL}
+    NEXT_PUBLIC_RPC_URL=${NEXT_PUBLIC_RPC_URL} \
+    NEXT_PUBLIC_SORTITION_ENABLED=${NEXT_PUBLIC_SORTITION_ENABLED}
 
 COPY . .
 # Skip next.js telemetry during build

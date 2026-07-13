@@ -2,6 +2,8 @@ import { type Chain, mainnet } from "viem/chains";
 import { lcai, lcaiLocalhost, lcaiTestnet } from "./chains";
 
 export const isTestnet = process.env.NEXT_PUBLIC_LCAI_IS_TESTNET === "true";
+export const isSortitionEnabled =
+  process.env.NEXT_PUBLIC_SORTITION_ENABLED === "true";
 
 // Testnet contract addresses are build-arg overridable so local devnets
 // (chainId 8200, freshly-deployed contracts) and forks can point the

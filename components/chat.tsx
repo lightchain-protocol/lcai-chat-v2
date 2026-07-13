@@ -21,6 +21,7 @@ import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import { NoWorkerAvailableError } from "@/lib/protocol/session";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
@@ -55,6 +56,17 @@ function isProtocolAuthExpiredError(error: unknown): boolean {
     walkedError instanceof ProtocolAuthExpiredError ||
     candidate.cause instanceof ProtocolAuthExpiredError
   );
+}
+
+function isNoWorkerAvailableError(error: unknown): boolean {
+  if (error instanceof NoWorkerAvailableError) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const candidate = error as { cause?: unknown };
+  return candidate.cause instanceof NoWorkerAvailableError;
 }
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
@@ -343,6 +355,16 @@ export function Chat({
           />
         ));
         open();
+        return;
+      }
+
+      if (isNoWorkerAvailableError(error)) {
+        toast.custom((errorId) => (
+          <AlertError
+            id={errorId}
+            title="No worker available right now — please try again."
+          />
+        ));
         return;
       }
 
