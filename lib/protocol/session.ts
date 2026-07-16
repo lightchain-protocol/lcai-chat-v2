@@ -280,7 +280,16 @@ export class SessionManager {
         try {
           req = await this.gateway.requestSortitionSession(this.modelId);
         } catch (err) {
-          if (err instanceof GatewayClientError && err.status === 408) {
+          // 408: consumer-api's own "no worker claimed within CLAIM_TIMEOUT_MS".
+          // 504: a proxy/LB in front of consumer-api timed out this same
+          // long-poll before the 408 could return (the fronting request timeout
+          // sits at ~the same ceiling). To the user both mean the same thing —
+          // no worker claimed — so surface the clean retry message instead of a
+          // raw "Gateway API error: 504".
+          if (
+            err instanceof GatewayClientError &&
+            (err.status === 408 || err.status === 504)
+          ) {
             throw new NoWorkerAvailableError();
           }
           throw err;
