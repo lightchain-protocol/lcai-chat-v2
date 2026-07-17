@@ -97,7 +97,7 @@ export function Chat({
 
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
-  const { status: sessionStatus } = useSession();
+  const { status: sessionStatus, data } = useSession();
   const { open } = useAppKit();
 
   const [input, setInput] = useState<string>("");
@@ -266,7 +266,11 @@ export function Chat({
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
     sessionStatus === "authenticated" ? "/api/prompts" : null,
     async (url: string) => {
-      const response = await $http.get(url);
+      const response = await $http.get(url, {
+        headers: {
+          Authorization: `Bearer ${data?.user.token}`,
+        },
+      });
       if (!response.ok) return null;
       return response.json();
     },
