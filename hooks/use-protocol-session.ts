@@ -19,8 +19,13 @@ import type { ProtocolLoadingStatus } from "@/lib/types";
  * Lazily initializes on first use — session is created when getTransport()
  * is called (typically on first message send in chat.tsx).
  *
- * The local modelId (e.g. "chat-model") is resolved to the gateway's hex
- * model ID on first getTransport() call by fetching GET /api/models.
+ * `modelId` is now always the real gateway hex model id, sourced directly
+ * from the model picker (which reads live from /api/models via useModels()).
+ * No more friendly-local-id fuzzy matching — resolveModelId() just confirms
+ * the id is one of the currently-available models before using it, and
+ * throws instead of silently falling back to models[0] if it isn't (a
+ * silent fallback previously meant picking an unintended model with no
+ * visible error).
  */
 // biome-ignore lint/nursery/useMaxParams: positional args mirror the prior signature; an options object would churn every call site.
 export function useProtocolSession(
@@ -48,12 +53,16 @@ export function useProtocolSession(
   const [timedOutJob, setTimedOutJob] = useState<TrackedJob | null>(null);
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
-  const resolvedModelIdRef = useRef<string | null>(null);
   const walletClientRef = useRef(walletClient);
   const addressRef = useRef(address);
   const submitModeRef = useRef<SubmitMode>(submitMode);
   const walletAddress = address ?? null;
   const lastWalletAddressRef = useRef<string | null>(walletAddress);
+  // Tracks the modelId a transport was actually built for, so the
+  // model-switch effect below only tears down when it *changes* — not on
+  // every render, and not on the very first mount (releaseTransport() is
+  // already called for that by the existing chatId effect).
+  const lastModelIdRef = useRef<string>(modelId);
 
   // Protocol always targets the first configured chain (lcaiDevnet),
   // regardless of which chain the wallet is connected to.
@@ -79,10 +88,13 @@ export function useProtocolSession(
     return gatewayRef.current;
   }, []);
 
-  // Resolve local model ID to gateway hex ID (cached after first call)
+  // Confirm modelId is one of the currently-available (worker-online) models
+  // from the gateway. modelId is already a real hex id — sourced from the
+  // picker, which reads /api/models directly — so no name resolution is
+  // needed here anymore. Throws (rather than silently falling back to
+  // models[0]) if the model isn't currently available, so a stale selection
+  // surfaces as a visible error instead of quietly talking to the wrong model.
   const resolveModelId = useCallback(async (): Promise<string> => {
-    if (resolvedModelIdRef.current) return resolvedModelIdRef.current;
-
     const gateway = getGateway();
     const { models } = await gateway.getModels();
 
@@ -90,12 +102,14 @@ export function useProtocolSession(
       throw new Error("No models available from gateway");
     }
 
-    const match = models.find((m) =>
-      m.name.toLowerCase().includes(modelId.toLowerCase())
-    );
-    const resolved = match?.id ?? models[0].id;
-    resolvedModelIdRef.current = resolved;
-    return resolved;
+    const found = models.some((m) => m.id === modelId);
+    if (!found) {
+      throw new Error(
+        `Model ${modelId} is not currently available — it may have no active workers.`
+      );
+    }
+
+    return modelId;
   }, [modelId, getGateway]);
 
   // Lazily create the transport — returns a promise since model resolution is async
@@ -257,7 +271,6 @@ export function useProtocolSession(
     transportRef.current?.release();
     transportRef.current = null;
     gatewayRef.current = null;
-    resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
     setProgressStatus("idle");
@@ -270,7 +283,6 @@ export function useProtocolSession(
     transportRef.current?.destroy();
     transportRef.current = null;
     gatewayRef.current = null;
-    resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
     setFailoverStatus("none");
@@ -316,6 +328,18 @@ export function useProtocolSession(
     if (!chatId) return;
     releaseTransport();
   }, [chatId, releaseTransport]);
+
+  // NEW: tear down the transport when the user picks a different model
+  // mid-chat. Without this, changing `modelId` was silently a no-op —
+  // getTransport() would keep returning the already-built transport bound
+  // to the old model, since only chatId changes triggered a release.
+  // Skips the very first render (lastModelIdRef starts equal to modelId),
+  // so this doesn't double-release alongside the chatId effect on mount.
+  useEffect(() => {
+    if (lastModelIdRef.current === modelId) return;
+    lastModelIdRef.current = modelId;
+    releaseTransport();
+  }, [modelId, releaseTransport]);
 
   const claimJobTimeout = useCallback(async (jobId: number) => {
     const transport = transportRef.current;
