@@ -16,8 +16,11 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
+import { useModels } from "@/hooks/use-models";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { saveChatModelAsCookie } from "@/app/(chat)/actions";
+import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
@@ -104,6 +107,26 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+
+  // Live models are keyed by on-chain id (0x…hex); the initial/cookie value may
+  // be a legacy name ("llama3-8b") or a model with no active worker, which the
+  // picker can't resolve — leaving it showing "Select model". Auto-select an
+  // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
+  // default is always chosen, like before the live-model picker landed.
+  const { models: availableModels } = useModels();
+  useEffect(() => {
+    if (availableModels.length === 0) {
+      return;
+    }
+    if (availableModels.some((model) => model.id === currentModelId)) {
+      return;
+    }
+    const fallback =
+      availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
+      availableModels[0];
+    setCurrentModelId(fallback.id);
+    void saveChatModelAsCookie(fallback.id);
+  }, [availableModels, currentModelId]);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
