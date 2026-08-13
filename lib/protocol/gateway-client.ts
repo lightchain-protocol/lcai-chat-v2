@@ -186,11 +186,15 @@ export class GatewayClient {
    */
   async requestSortitionSession(
     modelId: string,
-    expirySecs?: number
+    opts?: { expirySecs?: number; requiredCapabilities?: string[] }
   ): Promise<SortitionRequestResponse> {
     const body: Record<string, unknown> = { modelId };
-    if (expirySecs !== undefined) {
-      body.expirySecs = expirySecs;
+    if (opts?.expirySecs !== undefined) {
+      body.expirySecs = opts.expirySecs;
+    }
+    // LC-30: capability names the claiming worker must have declared on-chain.
+    if (opts?.requiredCapabilities && opts.requiredCapabilities.length > 0) {
+      body.requiredCapabilities = opts.requiredCapabilities;
     }
     return await this.post<SortitionRequestResponse>(
       "/api/sessions/sortition/request",

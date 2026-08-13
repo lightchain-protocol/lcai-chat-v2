@@ -95,8 +95,8 @@ export class MissingDisputerKeyError extends Error {
  * a "no worker available, retry" message rather than a generic error.
  */
 export class NoWorkerAvailableError extends Error {
-  constructor() {
-    super("No worker available — retry session initialization");
+  constructor(message?: string) {
+    super(message ?? "No worker available — retry session initialization");
     this.name = "NoWorkerAvailableError";
   }
 }
@@ -278,7 +278,12 @@ export class SessionManager {
         this.setState("preparing");
         let req: SortitionRequestResponse;
         try {
-          req = await this.gateway.requestSortitionSession(this.modelId);
+          // LC-30: the capability constraint rides the session request and is
+          // enforced on-chain at claimSession — only a worker that declared
+          // every required capability can claim.
+          req = await this.gateway.requestSortitionSession(this.modelId, {
+            requiredCapabilities: this.requestedCapabilities,
+          });
         } catch (err) {
           // 408: consumer-api's own "no worker claimed within CLAIM_TIMEOUT_MS".
           // 504: a proxy/LB in front of consumer-api timed out this same
@@ -290,7 +295,13 @@ export class SessionManager {
             err instanceof GatewayClientError &&
             (err.status === 408 || err.status === 504)
           ) {
-            throw new NoWorkerAvailableError();
+            // Hard fail (LC-30): when capabilities were required, say which
+            // lever the user has instead of a generic retry message.
+            throw new NoWorkerAvailableError(
+              this.requestedCapabilities.length > 0
+                ? "No search-capable worker available — try again or turn off web search."
+                : undefined
+            );
           }
           throw err;
         }
