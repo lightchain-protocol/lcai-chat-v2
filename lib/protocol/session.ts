@@ -278,7 +278,7 @@ export class SessionManager {
         this.setState("preparing");
         let req: SortitionRequestResponse;
         try {
-          // LC-30: the capability constraint rides the session request and is
+          // The capability constraint rides the session request and is
           // enforced on-chain at claimSession — only a worker that declared
           // every required capability can claim.
           req = await this.gateway.requestSortitionSession(this.modelId, {
@@ -295,7 +295,7 @@ export class SessionManager {
             err instanceof GatewayClientError &&
             (err.status === 408 || err.status === 504)
           ) {
-            // Hard fail (LC-30): when capabilities were required, say which
+            // Hard fail: when capabilities were required, say which
             // lever the user has instead of a generic retry message.
             throw new NoWorkerAvailableError(
               this.requestedCapabilities.length > 0

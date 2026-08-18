@@ -72,6 +72,18 @@ function isNoWorkerAvailableError(error: unknown): boolean {
   return candidate.cause instanceof NoWorkerAvailableError;
 }
 
+// Surface the thrown message itself: a capability-constrained timeout carries
+// actionable copy ("… turn off web search") that a generic retry line hides.
+function noWorkerAvailableMessage(error: unknown): string | undefined {
+  if (error instanceof NoWorkerAvailableError) {
+    return error.message || undefined;
+  }
+  if (error instanceof Error && error.cause instanceof NoWorkerAvailableError) {
+    return error.cause.message || undefined;
+  }
+  return undefined;
+}
+
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
 export function Chat({
@@ -386,11 +398,11 @@ export function Chat({
       }
 
       if (isNoWorkerAvailableError(error)) {
+        const message =
+          noWorkerAvailableMessage(error) ??
+          "No worker available right now — please try again.";
         toast.custom((errorId) => (
-          <AlertError
-            id={errorId}
-            title="No worker available right now — please try again."
-          />
+          <AlertError id={errorId} title={message} />
         ));
         return;
       }

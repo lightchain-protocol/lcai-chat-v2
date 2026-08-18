@@ -192,7 +192,7 @@ export class GatewayClient {
     if (opts?.expirySecs !== undefined) {
       body.expirySecs = opts.expirySecs;
     }
-    // LC-30: capability names the claiming worker must have declared on-chain.
+    // Capability names the claiming worker must have declared on-chain.
     if (opts?.requiredCapabilities && opts.requiredCapabilities.length > 0) {
       body.requiredCapabilities = opts.requiredCapabilities;
     }
