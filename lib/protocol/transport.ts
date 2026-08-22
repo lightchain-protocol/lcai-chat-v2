@@ -71,6 +71,9 @@ const UNSPECIFIED_RELAY_ERROR =
 const EMPTY_ANSWER_ERROR =
   "The worker finished without returning an answer. Please try again.";
 
+/** Cap on retained mismatch evidence entries (FIFO eviction past this). */
+const MAX_MISMATCH_EVIDENCE = 50;
+
 /**
  * A response stream whose relay subscription is wired up independently of the
  * submit call, so frames can be consumed before a jobId exists.
@@ -187,6 +190,18 @@ export class ProtocolTransport {
   private releaseWhenIdle = false;
   private onJobUpdateCallback?: (job: TrackedJob) => void;
   private onJobTimeoutCallback?: (job: TrackedJob) => void;
+  /**
+   * Terminal-frame ciphertext + worker signature, kept in memory per job.
+   * `disputeResponseMismatch` needs the full ciphertext as calldata and the
+   * persisted proof deliberately omits it (it would double message storage),
+   * so the cryptographic dispute is filable only within the live page session
+   * that received the answer. Bounded FIFO; entries are small (response text
+   * + 28 bytes of AEAD framing).
+   */
+  private readonly mismatchEvidence = new Map<
+    number,
+    { ciphertext: Uint8Array; signature: `0x${string}` }
+  >();
 
   constructor(config: ProtocolTransportConfig) {
     const { persistence, registerProtocolSession, ...sessionConfig } = config;
@@ -240,6 +255,33 @@ export class ProtocolTransport {
   /** Files an on-chain dispute for a completed job. Wallet signature required. */
   async disputeJob(jobId: number): Promise<{ txHash: string; bond: bigint }> {
     const result = await this.sessionMgr.disputeJob(jobId);
+    this.updateJobStatus(jobId, "disputed");
+    return result;
+  }
+
+  /** True while the live-session evidence for a cryptographic dispute exists. */
+  hasMismatchEvidence(jobId: number): boolean {
+    return this.mismatchEvidence.has(jobId);
+  }
+
+  /**
+   * Files disputeResponseMismatch with the ciphertext + signature captured
+   * from the terminal frame. Only possible within the live page session —
+   * the ciphertext is never persisted, so after a reload this throws and the
+   * UI should steer the user to the bond dispute instead.
+   */
+  async disputeResponseMismatch(jobId: number): Promise<{ txHash: string }> {
+    const evidence = this.mismatchEvidence.get(jobId);
+    if (!evidence) {
+      throw new Error(
+        "Cryptographic dispute evidence is only kept for the live session that received the answer; it was not persisted. Use a bond dispute instead."
+      );
+    }
+    const result = await this.sessionMgr.disputeResponseMismatch({
+      jobId,
+      ciphertext: evidence.ciphertext,
+      signature: evidence.signature,
+    });
     this.updateJobStatus(jobId, "disputed");
     return result;
   }
@@ -571,6 +613,7 @@ export class ProtocolTransport {
     this.setFailoverStatus("none");
     this.setProgressStatus("idle");
     this.clearAllJobTimers();
+    this.mismatchEvidence.clear();
     this.sessionMgr.release();
   }
 
@@ -597,6 +640,7 @@ export class ProtocolTransport {
     this.setFailoverStatus("none");
     this.setProgressStatus("idle");
     this.clearAllJobTimers();
+    this.mismatchEvidence.clear();
     this.sessionMgr.reset();
   }
 
@@ -889,14 +933,28 @@ export class ProtocolTransport {
     emit: (obj: Record<string, unknown>) => void;
   }): Promise<void> {
     try {
+      const ciphertext = decodeBase64ToBytes(args.payload);
       const proof = await captureResponseProof({
         chainId: this.chainId,
         jobRegistryAddress: this.jobRegistryAddress,
         jobId: args.jobId,
         sessionId: args.sessionId,
-        ciphertext: decodeBase64ToBytes(args.payload),
+        ciphertext,
         signature: (args.signature || null) as `0x${string}` | null,
       });
+      // Keep the dispute evidence for the live session. The persisted proof
+      // carries only the hash + signature + digest; disputeResponseMismatch
+      // needs the bytes themselves, and this is the only place they exist.
+      if (proof.signature && proof.signedDigest) {
+        this.mismatchEvidence.set(args.jobId, {
+          ciphertext,
+          signature: proof.signature,
+        });
+        if (this.mismatchEvidence.size > MAX_MISMATCH_EVIDENCE) {
+          const oldest = this.mismatchEvidence.keys().next().value;
+          if (oldest !== undefined) this.mismatchEvidence.delete(oldest);
+        }
+      }
       args.relayClient?.setAssistantProof(args.jobId, proof);
       args.emit({
         type: "data-responseProof",
@@ -1310,7 +1368,26 @@ export class ProtocolTransport {
     };
 
     const onSubmitted = (jobId: number | null) => {
-      if (closed || !relayClient) return;
+      if (!relayClient) return;
+
+      if (closed) {
+        // The stream was aborted (or already failed) but the submit went out:
+        // the job is live on-chain and its frames will arrive with nobody
+        // listening. Tombstone it so the NEXT prompt's pending handler can
+        // never adopt them. With a known jobId (wallet mode) the id itself is
+        // observed; in delegated mode (jobId null until the first frame) a
+        // session-scoped drain swallows the orphan's first frame instead.
+        // Deadline tracking still runs so the paid job keeps its
+        // Claim Timeout affordance even though nothing renders.
+        if (jobId !== null) {
+          relayClient.tombstoneJobId(jobId);
+          onJobIdResolved(jobId);
+        } else {
+          relayClient.tombstonePendingSubmission(sessionId);
+        }
+        return;
+      }
+
       if (!started) this.setProgressStatus("waiting_for_relay");
 
       if (jobId === null) {

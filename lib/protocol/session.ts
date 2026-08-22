@@ -790,6 +790,48 @@ export class SessionManager {
   }
 
   /**
+   * Calls disputeResponseMismatch(jobId, ciphertext, signature) on-chain.
+   *
+   * The cryptographic remedy for a settled answer that is not what the worker
+   * committed to: the contract re-derives the signer from (ciphertext,
+   * signature) and slashes the worker when keccak256(ciphertext) differs from
+   * the committed responseCiphertextHash. Unlike disputeJob there is no bond —
+   * the evidence is self-verifying.
+   *
+   * The ciphertext is only available to the client that received the terminal
+   * frame (it is never persisted), so this is callable only within the live
+   * page session that got the answer.
+   */
+  async disputeResponseMismatch(args: {
+    jobId: number;
+    ciphertext: Uint8Array;
+    signature: `0x${string}`;
+  }): Promise<{ txHash: string }> {
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const callParams = {
+      account,
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "disputeResponseMismatch",
+      args: [BigInt(args.jobId), toHex(args.ciphertext), args.signature],
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
+      gas: (gasEstimate * 120n) / 100n,
+    });
+    const hash = await this.walletClient.writeContract(request);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`disputeResponseMismatch TX reverted (tx ${hash})`);
+    }
+    return { txHash: hash };
+  }
+
+  /**
    * Clears in-memory session material and notifies idle.
    * Does not remove the persisted snapshot in sessionStorage — use when
    * tearing down the transport so returning to this chat can tryRestore().

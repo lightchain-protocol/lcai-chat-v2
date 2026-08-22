@@ -31,6 +31,9 @@ type MessagesProps = {
   activeJobs?: TrackedJob[];
   claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
   disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
+  /** Files disputeResponseMismatch with live-session evidence, if retained. */
+  disputeResponseMismatch?: (jobId: number) => Promise<{ txHash: string }>;
+  hasMismatchEvidence?: (jobId: number) => boolean;
   /** Reads a job from the chain so a reloaded answer stays verifiable. */
   fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
   fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
@@ -50,6 +53,8 @@ function PureMessages({
   activeJobs,
   claimJobTimeout,
   disputeJob,
+  disputeResponseMismatch,
+  hasMismatchEvidence,
   fetchOnChainJob,
   fetchWorkerStake,
   explorerBaseUrl,
@@ -142,9 +147,11 @@ function PureMessages({
                 chatId={chatId}
                 claimJobTimeout={claimJobTimeout}
                 disputeJob={disputeJob}
+                disputeResponseMismatch={disputeResponseMismatch}
                 explorerBaseUrl={explorerBaseUrl}
                 fetchOnChainJob={fetchOnChainJob}
                 fetchWorkerStake={fetchWorkerStake}
+                hasMismatchEvidence={hasMismatchEvidence}
                 isLoading={
                   status === "streaming" && messages.length - 1 === index
                 }

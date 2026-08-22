@@ -175,6 +175,8 @@ export function Chat({
     startNewSession,
     claimJobTimeout,
     disputeJob,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
     fetchOnChainJob,
     fetchWorkerStake,
     clearTimedOutJob,
@@ -411,9 +413,11 @@ export function Chat({
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
           explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
           fetchOnChainJob={fetchOnChainJob}
           fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}

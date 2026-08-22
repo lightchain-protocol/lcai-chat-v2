@@ -152,6 +152,14 @@ export class PendingJobConflictError extends Error {
  */
 const MAX_OBSERVED_JOB_IDS = 1024;
 
+/**
+ * How long a session-scoped drain stays armed after an aborted submission.
+ * Matches the transport's no-answer watchdog: an orphaned job must produce its
+ * first frame within its 120 s on-chain deadline plus settlement slack, so any
+ * frame arriving later than this is treated as belonging to a newer prompt.
+ */
+export const TOMBSTONE_DRAIN_TTL_MS = 180_000;
+
 export type ProtocolCitationSource = {
   position: number;
   title: string;
@@ -182,6 +190,14 @@ export class RelayClient {
   private reconnectAttempt = 0;
   private readonly relayUrl: string;
   private token: string;
+  /**
+   * Per-session count of aborted submissions whose jobs may still be live
+   * on-chain, stored as drain expiry timestamps (ms). While a drain is armed,
+   * the next frame on that session carrying an unobserved jobId is swallowed
+   * and its jobId observed, so frames from an abandoned job can never be
+   * adopted by the next prompt's pending handler (cross-answer hijack).
+   */
+  private readonly sessionDrains = new Map<number, number[]>();
   private readonly pendingAssistantMessages = new Map<
     number,
     PendingAssistantMessage
@@ -331,6 +347,53 @@ export class RelayClient {
     return (
       handler !== undefined && !handler.cancelled && handler.boundJobId === null
     );
+  }
+
+  /**
+   * Tombstones a known jobId: its late frames are observed-and-dropped and can
+   * never be adopted by a future pending handler. Used when a submission is
+   * aborted after the jobId is already known (wallet-mode submit returned).
+   */
+  tombstoneJobId(jobId: number) {
+    this.observeJobId(jobId);
+  }
+
+  /**
+   * Arms a one-shot drain on a session for an aborted delegated submission,
+   * whose jobId is never known client-side (consumer-api answers at broadcast
+   * with `jobId: null`). The job may still be live on-chain; when its first
+   * frame arrives the drain swallows it and observes the jobId, so the frames
+   * render nowhere instead of being adopted by the next prompt's handler.
+   *
+   * Drains are deliberately not counted by `hasUnboundPendingJob`: an aborted
+   * submission must not force the next prompt onto the legacy subscribe path.
+   * The inherent ambiguity (an unseen frame could be the orphan's or the new
+   * job's) is resolved in the orphan's favour because its frames were published
+   * first; a misattribution is bounded by the transport's no-answer watchdog.
+   */
+  tombstonePendingSubmission(sessionId: number) {
+    const list = this.sessionDrains.get(sessionId) ?? [];
+    list.push(Date.now() + TOMBSTONE_DRAIN_TTL_MS);
+    this.sessionDrains.set(sessionId, list);
+  }
+
+  /** Consumes one armed, unexpired drain for the session. */
+  private consumeDrain(sessionId: number): boolean {
+    const list = this.sessionDrains.get(sessionId);
+    if (!list) return false;
+    const now = Date.now();
+    while (list.length > 0 && list[0] <= now) {
+      list.shift();
+    }
+    if (list.length === 0) {
+      this.sessionDrains.delete(sessionId);
+      return false;
+    }
+    list.shift();
+    if (list.length === 0) {
+      this.sessionDrains.delete(sessionId);
+    }
+    return true;
   }
 
   /**
@@ -567,6 +630,14 @@ export class RelayClient {
     // or duplicate frame. Adopting it would bind the next prompt's handler to
     // the previous prompt's job.
     if (this.observedJobIds.has(frame.jobId)) return null;
+
+    // Aborted submissions on this session get their frames swallowed first.
+    // The drain observes the jobId, so the rest of the orphan job's frames
+    // drop via the check above rather than hijacking a later prompt.
+    if (this.consumeDrain(frame.sessionId)) {
+      this.observeJobId(frame.jobId);
+      return null;
+    }
 
     const handler = this.pendingSessionHandlers.get(frame.sessionId);
     if (!handler || handler.cancelled || handler.boundJobId !== null) {

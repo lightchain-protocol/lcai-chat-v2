@@ -1,6 +1,5 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
 import config from "@/config";
@@ -322,6 +321,25 @@ export function useProtocolSession(
   }, []);
 
   /**
+   * Cryptographic dispute with the evidence captured at receipt. Only filable
+   * while the page session that received the answer is alive — the ciphertext
+   * is never persisted, so post-reload this throws and the caller should
+   * steer the user to the bond dispute.
+   */
+  const disputeResponseMismatch = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.disputeResponseMismatch(jobId);
+    setActiveJobs(transport.listJobs());
+    return result;
+  }, []);
+
+  /** True while disputeResponseMismatch(jobId) can still be filed. */
+  const hasMismatchEvidence = useCallback((jobId: number) => {
+    return transportRef.current?.hasMismatchEvidence(jobId) ?? false;
+  }, []);
+
+  /**
    * Reads a job straight from the chain.
    *
    * The proof panel needs this rather than the tracked-job cache because that
@@ -367,6 +385,8 @@ export function useProtocolSession(
     startNewSession,
     claimJobTimeout,
     disputeJob,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
     fetchOnChainJob,
     fetchWorkerStake,
     clearTimedOutJob,

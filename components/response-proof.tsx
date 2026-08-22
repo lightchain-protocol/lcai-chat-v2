@@ -7,10 +7,13 @@ import {
   ShieldQuestion,
 } from "lucide-react";
 import { memo, useEffect, useState } from "react";
+import { toast } from "sonner";
+import type { Address } from "viem";
 import type { OnChainJob } from "@/lib/protocol/session";
 import {
   checkProofAgainstChain,
   type ResponseProof,
+  recoverProofSigner,
   type VerificationStatus,
 } from "@/lib/protocol/verify-response";
 import { cn } from "@/lib/utils";
@@ -21,40 +24,52 @@ import { cn } from "@/lib/utils";
  * Two independent checks, both run in this browser against data it already
  * holds: the worker's signature recovers to the address the chain assigned,
  * and the answer hashes to the value the worker committed in completeJob.
- * Nothing here trusts the relay or the API — which is the point, and something
- * no centralized assistant can offer.
+ * The signer is re-recovered from the persisted (signature, digest) pair on
+ * every mount rather than trusting the stored address, so a tampered message
+ * row cannot fake the verdict. Nothing here trusts the relay or the API —
+ * which is the point, and something no centralized assistant can offer.
  */
 function PureResponseProof({
   proof,
   fetchOnChainJob,
   fetchWorkerStake,
   explorerBaseUrl,
+  disputeResponseMismatch,
+  hasMismatchEvidence,
 }: {
   proof: ResponseProof;
   fetchOnChainJob: (jobId: number) => Promise<OnChainJob | null>;
   fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
   explorerBaseUrl?: string;
+  /** Files disputeResponseMismatch; evidence exists only in the live session. */
+  disputeResponseMismatch?: (jobId: number) => Promise<{ txHash: string }>;
+  hasMismatchEvidence?: (jobId: number) => boolean;
 }) {
   const [job, setJob] = useState<OnChainJob | null>(null);
+  const [freshSigner, setFreshSigner] = useState<Address | null>(null);
   const [stake, setStake] = useState<bigint | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [disputePending, setDisputePending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetchOnChainJob(proof.jobId)
-      .then((result) => {
-        if (cancelled) return;
-        setJob(result);
-        setLoaded(true);
-      })
-      .catch(() => {
-        if (!cancelled) setLoaded(true);
-      });
+    // Chain read and signature recovery settle together: rendering before the
+    // recovery lands would flicker the badge from the stored (API-provided)
+    // signer to the re-derived one.
+    Promise.all([
+      fetchOnChainJob(proof.jobId).catch(() => null),
+      recoverProofSigner(proof).catch(() => null),
+    ]).then(([result, signer]) => {
+      if (cancelled) return;
+      setJob(result);
+      setFreshSigner(signer);
+      setLoaded(true);
+    });
     return () => {
       cancelled = true;
     };
-  }, [proof.jobId, fetchOnChainJob]);
+  }, [proof.jobId, proof, fetchOnChainJob]);
 
   // Stake is only worth fetching once the panel is open and the worker is
   // known — it is supporting detail, not part of the headline verdict.
@@ -73,10 +88,27 @@ function PureResponseProof({
     };
   }, [expanded, job, fetchWorkerStake, stake]);
 
-  const verification = checkProofAgainstChain(proof, job);
+  const verification = checkProofAgainstChain(proof, job, freshSigner);
   // Until the chain read lands there is nothing meaningful to claim, and a
   // badge that flickers from "unverified" to "verified" reads as a bug.
   if (!loaded) return null;
+
+  const handleMismatchDispute = async () => {
+    if (!disputeResponseMismatch) return;
+    setDisputePending(true);
+    try {
+      await disputeResponseMismatch(proof.jobId);
+      toast.success(
+        "Cryptographic mismatch dispute filed. The worker's stake is on the line."
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Mismatch dispute failed"
+      );
+    } finally {
+      setDisputePending(false);
+    }
+  };
 
   return (
     <div className="mt-1">
@@ -111,6 +143,32 @@ function PureResponseProof({
             label="Answer matches the hash committed on chain"
             value={verification.ciphertextMatches}
           />
+
+          {verification.status === "mismatch" &&
+            disputeResponseMismatch &&
+            (hasMismatchEvidence?.(proof.jobId) ? (
+              // The worker-signed ciphertext is still in memory, so the
+              // self-verifying on-chain remedy (no bond) is available.
+              <button
+                className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-red-300 px-2 py-1 font-medium text-red-700 text-xs hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40"
+                disabled={disputePending}
+                onClick={handleMismatchDispute}
+                type="button"
+              >
+                <ShieldAlert size={12} />
+                {disputePending
+                  ? "Filing dispute…"
+                  : "File cryptographic mismatch dispute"}
+              </button>
+            ) : (
+              // The ciphertext is never persisted, so after a reload the
+              // on-chain cryptographic remedy is no longer filable from here.
+              <p className="mt-1.5 text-content-subtle">
+                Cryptographic dispute evidence is only kept for the session that
+                received this answer; after a reload only a bond dispute is
+                available.
+              </p>
+            ))}
 
           <Field label="Job" value={`#${proof.jobId}`} />
           {job && (

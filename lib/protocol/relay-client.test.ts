@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WSErrorFrame, WSFrame } from "./relay-client";
-import { PendingJobConflictError, RelayClient } from "./relay-client";
+import {
+  PendingJobConflictError,
+  RelayClient,
+  TOMBSTONE_DRAIN_TTL_MS,
+} from "./relay-client";
 
 // relay-client pulls in $http for assistant-message persistence, which drags
 // the next-auth server config into a node test run. None of it is exercised
@@ -362,5 +366,128 @@ describe("RelayClient frame dispatch", () => {
     expect(frames).toEqual([]);
     expect(lifecycle).toHaveLength(1);
     expect(client.hasUnboundPendingJob(SESSION_ID)).toBe(true);
+  });
+});
+
+describe("RelayClient tombstones (aborted submissions)", () => {
+  it("drains the first frame of an aborted delegated submission instead of letting the next prompt adopt it", () => {
+    const { client, socket } = connectClient();
+    const next: number[] = [];
+
+    // Prompt A was aborted after broadcast; its jobId was never learned.
+    client.tombstonePendingSubmission(SESSION_ID);
+
+    // Prompt B subscribes before either job has produced a frame.
+    client.onPendingJob(SESSION_ID, (frame) => next.push(frame.jobId));
+
+    // The orphan job's frames arrive first: drained, and never adopted.
+    deliver(socket, chunkFrame({ jobId: 700, seq: 1 }));
+    deliver(socket, chunkFrame({ jobId: 700, seq: 2 }));
+    expect(next).toEqual([]);
+
+    // The new prompt's own job binds normally once its frames arrive.
+    deliver(socket, chunkFrame({ jobId: 701, seq: 1 }));
+    deliver(socket, chunkFrame({ jobId: 701, seq: 2 }));
+    expect(next).toEqual([701, 701]);
+  });
+
+  it("does not count drains as unbound pending handlers", () => {
+    const { client } = connectClient();
+    client.tombstonePendingSubmission(SESSION_ID);
+    expect(client.hasUnboundPendingJob(SESSION_ID)).toBe(false);
+  });
+
+  it("drains one orphan per armed drain", () => {
+    const { client, socket } = connectClient();
+    const next: number[] = [];
+
+    // Two prompts aborted in a row before either produced a frame.
+    client.tombstonePendingSubmission(SESSION_ID);
+    client.tombstonePendingSubmission(SESSION_ID);
+    client.onPendingJob(SESSION_ID, (frame) => next.push(frame.jobId));
+
+    deliver(socket, chunkFrame({ jobId: 800 }));
+    deliver(socket, chunkFrame({ jobId: 801 }));
+    expect(next).toEqual([]);
+
+    // Drains exhausted: the third unseen job belongs to the live prompt.
+    deliver(socket, chunkFrame({ jobId: 802 }));
+    expect(next).toEqual([802]);
+  });
+
+  it("lets a real pending handler fail on a submit-failure error frame when no drain is armed", () => {
+    const { client, socket } = connectClient();
+    const received: string[] = [];
+    client.onPendingJob(SESSION_ID, (frame) => received.push(frame.type));
+
+    deliver(socket, {
+      type: "error",
+      jobId: 0,
+      sessionId: SESSION_ID,
+      ts: 1_700_000_002,
+    });
+    expect(received).toEqual(["error"]);
+  });
+
+  it("swallows an orphan's submit-failure error frame when a drain is armed", () => {
+    const { client, socket } = connectClient();
+    const next: string[] = [];
+
+    client.tombstonePendingSubmission(SESSION_ID);
+    client.onPendingJob(SESSION_ID, (frame) => next.push(frame.type));
+
+    // The aborted job's tx reverted post-broadcast; its error frame must not
+    // kill the next prompt's stream.
+    deliver(socket, {
+      type: "error",
+      jobId: 0,
+      sessionId: SESSION_ID,
+      ts: 1_700_000_002,
+    });
+    expect(next).toEqual([]);
+  });
+
+  it("expires drains after the TTL so a much-later job is adoptable", () => {
+    vi.useFakeTimers();
+    try {
+      const { client, socket } = connectClient();
+      const next: number[] = [];
+
+      client.tombstonePendingSubmission(SESSION_ID);
+      client.onPendingJob(SESSION_ID, (frame) => next.push(frame.jobId));
+
+      vi.advanceTimersByTime(TOMBSTONE_DRAIN_TTL_MS + 1000);
+      deliver(socket, chunkFrame({ jobId: 900 }));
+      expect(next).toEqual([900]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tombstoneJobId drops late frames of a known aborted job", () => {
+    const { client, socket } = connectClient();
+    const next: number[] = [];
+
+    // Wallet-mode abort: the jobId was learned before the stream closed.
+    client.tombstoneJobId(650);
+    client.onPendingJob(SESSION_ID, (frame) => next.push(frame.jobId));
+
+    deliver(socket, chunkFrame({ jobId: 650, seq: 1 }));
+    expect(next).toEqual([]);
+    expect(client.hasUnboundPendingJob(SESSION_ID)).toBe(true);
+
+    deliver(socket, chunkFrame({ jobId: 651, seq: 1 }));
+    expect(next).toEqual([651]);
+  });
+
+  it("does not drain frames from other sessions", () => {
+    const { client, socket } = connectClient();
+    const next: number[] = [];
+
+    client.tombstonePendingSubmission(SESSION_ID + 1);
+    client.onPendingJob(SESSION_ID, (frame) => next.push(frame.jobId));
+
+    deliver(socket, chunkFrame({ jobId: 910 }));
+    expect(next).toEqual([910]);
   });
 });
