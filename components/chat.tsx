@@ -15,16 +15,19 @@ import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
-import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import {
+  DEFAULT_WEB_SEARCH_MODE,
+  type WebSearchMode,
+} from "@/lib/protocol/search-intent";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
@@ -95,12 +98,14 @@ export function Chat({
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
-  const [enableWebSearch, setEnableWebSearch] = useState(false);
-  const enableWebSearchRef = useRef(enableWebSearch);
+  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
+    DEFAULT_WEB_SEARCH_MODE
+  );
+  const webSearchModeRef = useRef(webSearchMode);
   const { walletClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
@@ -168,30 +173,12 @@ export function Chat({
     timedOutJob,
     retryFailover,
     startNewSession,
-    workerCapabilities,
     claimJobTimeout,
     disputeJob,
+    fetchOnChainJob,
+    fetchWorkerStake,
     clearTimedOutJob,
   } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
-  // Read-only preflight: union of capabilities across all workers eligible
-  // for this model (web-search epic, Story 16). Populates at chat mount via
-  // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
-  // session is bound — fixes the "unlocks after Send" race.
-  const { availableCapabilities } = useModelCapabilities(currentModelId);
-
-  // searchCapable feeds the Switch's disabled state.
-  //   - non-protocol mode: Vercel AI SDK does its own search, always on.
-  //   - protocol mode, post-binding (workerCapabilities populated): the
-  //     bound worker's snapshot is the source of truth; a session bound to
-  //     a non-capable worker MUST lock the toggle off even if other capable
-  //     workers exist (the session can't switch).
-  //   - protocol mode, pre-binding: fall back to availableCapabilities
-  //     from the preflight — "is any capable worker reachable?"
-  const searchCapable = isProtocolMode
-    ? workerCapabilities.length > 0
-      ? workerCapabilities.includes("search")
-      : availableCapabilities.includes("search")
-    : true;
 
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
@@ -216,10 +203,11 @@ export function Chat({
             messages: protocolBody.messages ?? [],
             body: {
               ...protocolBody,
-              // Per-message web-search opt-in (web-search epic, Story 16).
-              // ProtocolTransport forwards this through SessionManager.submitJob
-              // → GatewayClient.uploadBlob → consumer-api side-channel write.
-              enableWebSearch: enableWebSearchRef.current,
+              // Per-message web-search setting (web-search epic, Story 16).
+              // ProtocolTransport resolves the mode against the prompt, then
+              // forwards the decision through SessionManager.submitJob →
+              // GatewayClient.uploadBlob → consumer-api side-channel write.
+              webSearchMode: webSearchModeRef.current,
             },
             signal: init?.signal ?? undefined,
           });
@@ -242,7 +230,7 @@ export function Chat({
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
-            enableWebSearch: enableWebSearchRef.current,
+            webSearchMode: webSearchModeRef.current,
             ...request.body,
           },
         };
@@ -257,14 +245,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -281,8 +269,8 @@ export function Chat({
   }, [systemPrompt]);
 
   useEffect(() => {
-    enableWebSearchRef.current = enableWebSearch;
-  }, [enableWebSearch]);
+    webSearchModeRef.current = webSearchMode;
+  }, [webSearchMode]);
 
   // Show a non-blocking toast when a job's deadline passes with no response
   useEffect(() => {
@@ -303,7 +291,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -323,7 +311,7 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
@@ -376,7 +364,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    fetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -423,6 +411,9 @@ export function Chat({
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
@@ -445,13 +436,11 @@ export function Chat({
               chatId={id}
               disabled={sessionRecovering}
               disabledPlaceholder="Session recovering..."
-              enableWebSearch={enableWebSearch}
               input={input}
               messages={messages}
               onBeforeSubmit={canPrompt}
               onModelChange={setCurrentModelId}
-              onWebSearchToggle={setEnableWebSearch}
-              searchCapable={searchCapable}
+              onWebSearchModeChange={setWebSearchMode}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}
@@ -461,6 +450,7 @@ export function Chat({
               status={status}
               stop={stop}
               usage={usage}
+              webSearchMode={webSearchMode}
             />
           )}
         </div>

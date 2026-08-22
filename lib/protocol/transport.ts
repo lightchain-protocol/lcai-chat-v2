@@ -16,19 +16,80 @@
 
 import type { ProtocolLoadingStatus } from "../types";
 import type { GatewayClient } from "./gateway-client";
+import {
+  buildPromptEnvelope,
+  checkImageBudget,
+  serializePrompt,
+  stripDataUrlPrefix,
+} from "./prompt-envelope";
 import type {
+  GenerationStats,
   LifecycleEvent,
   ProtocolCitationSource,
   WSErrorFrame,
   WSFrame,
 } from "./relay-client";
-import { RelayClient } from "./relay-client";
+import { frameKind, RelayClient } from "./relay-client";
+import {
+  DEFAULT_WEB_SEARCH_MODE,
+  isWebSearchMode,
+  shouldSearch,
+} from "./search-intent";
 import type { OnChainJob, SessionManagerConfig } from "./session";
 import {
   MaxReassignmentsError,
   MissingDisputerKeyError,
   SessionManager,
 } from "./session";
+import { captureResponseProof, decodeBase64ToBytes } from "./verify-response";
+
+/**
+ * Hard ceiling on how long the user-message POST may wait for a jobId before
+ * being written without one. Only reachable when neither the relay nor the
+ * submit call ever answers.
+ */
+const USER_MESSAGE_PERSIST_DEADLINE_MS = 10_000;
+
+/**
+ * How long a stream may wait for its first frame before giving up and saying
+ * so. Without this a prompt that is paid for but never answered leaves an
+ * assistant bubble that is empty forever, with no error anywhere: `start` is
+ * emitted before any token exists, and nothing else is ever emitted.
+ *
+ * The budget has to clear a cold model comfortably. Measured first-token times
+ * on devnet run 6.8s warm to 12.4s for a cold 32B, so this is deliberately far
+ * above the worst case - it is a last resort that should only fire when
+ * delivery is genuinely broken, never merely because a model was slow.
+ */
+const FIRST_FRAME_DEADLINE_MS = 180_000;
+
+/** Shown when the relay reports a failure carrying no message of its own. */
+const UNSPECIFIED_RELAY_ERROR =
+  "The worker reported an error while answering. Please try again.";
+
+/** Shown when a job completes without ever producing any answer text. */
+const EMPTY_ANSWER_ERROR =
+  "The worker finished without returning an answer. Please try again.";
+
+/**
+ * A response stream whose relay subscription is wired up independently of the
+ * submit call, so frames can be consumed before a jobId exists.
+ */
+type ProtocolStream = {
+  stream: ReadableStream<Uint8Array>;
+  /** Subscribe by session, before the jobId is known. Idempotent. */
+  subscribePending: () => void;
+  /** Report the submit result; jobId is null when the API omits it. */
+  onSubmitted: (jobId: number | null) => void;
+  /** Report a failed submit. Ignored once frames have started arriving. */
+  onSubmitFailed: (error: unknown) => void;
+  /**
+   * Publish the browser-side web-search citations for this answer. Rendered
+   * immediately and re-applied to the assistant message once a jobId exists,
+   * so they survive a reload as well.
+   */
+  emitSearchSources: (sources: ProtocolCitationSource[]) => void;
+};
 
 export type FailoverStatus =
   | "none"
@@ -49,6 +110,14 @@ export type TrackedJob = {
   jobId: number;
   sessionId: number;
   chatId: string;
+  /**
+   * The worker that was assigned this job, from on-chain Job.worker.
+   *
+   * Read from the chain rather than taken on trust from the relay: this is
+   * the address the answer is attributed to, so it has to come from the same
+   * place the payment did.
+   */
+  worker: string;
   /** Unix seconds — from on-chain Job.deadline */
   deadline: number;
   /** Unix seconds — from on-chain Job.completedAt (0 if not yet completed) */
@@ -102,8 +171,20 @@ export class ProtocolTransport {
   private onProgressStatusChange?: (status: ProtocolLoadingStatus) => void;
   private failoverPromise: Promise<void> | null = null;
   // ── Per-job timeout tracking ─────────────────────────────────────────────
+  private readonly jobRegistryAddress: `0x${string}`;
+  private readonly chainId: number;
   private readonly activeJobs = new Map<number, TrackedJob>();
   private readonly jobTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  /**
+   * Streams still waiting on an answer. `release()` runs on unmount, and
+   * tearing the relay down there used to orphan an in-flight prompt: the job
+   * was paid for and the worker answered seconds later into a socket nobody
+   * was holding, so the answer was lost and the bubble stayed empty. While
+   * this is non-zero the teardown is deferred, which also lets the assistant
+   * message finish persisting so it is there on the next visit.
+   */
+  private inFlightStreams = 0;
+  private releaseWhenIdle = false;
   private onJobUpdateCallback?: (job: TrackedJob) => void;
   private onJobTimeoutCallback?: (job: TrackedJob) => void;
 
@@ -113,6 +194,10 @@ export class ProtocolTransport {
     this.gateway = sessionConfig.gateway;
     this.persistence = persistence;
     this.registerProtocolSession = registerProtocolSession;
+    this.jobRegistryAddress = sessionConfig.jobRegistryAddress;
+    // The signature the worker produces is domain-separated by chain id, so
+    // recovering the signer needs the same value the worker signed with.
+    this.chainId = sessionConfig.publicClient.chain?.id ?? 0;
   }
 
   setOnSessionStatus(cb: (status: string) => void) {
@@ -164,6 +249,11 @@ export class ProtocolTransport {
     return this.sessionMgr.getJob(jobId);
   }
 
+  /** Returns the stake bonded behind a worker, in wei. */
+  getWorkerStake(worker: string): Promise<bigint> {
+    return this.sessionMgr.getWorkerStake(worker);
+  }
+
   /**
    * The session's bound worker's heartbeat-advertised capability set
    * (web-search epic, Story 16). Empty list = no opt-in capabilities; the
@@ -210,6 +300,10 @@ export class ProtocolTransport {
     this.failoverPromise = null;
     this.setFailoverStatus("none");
     this.setProgressStatus("idle");
+    // Explicit user action, so the teardown is immediate rather than deferred.
+    // Clearing the flag stops a still-running stream from later tripping a
+    // release that is no longer wanted.
+    this.releaseWhenIdle = false;
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.sessionMgr.reset();
@@ -233,14 +327,13 @@ export class ProtocolTransport {
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
     this.setProgressStatus("preparing_chat");
-    // Initialize session on first message. enableWebSearch in the body
-    // doubles as the signal to request a search-capable worker at
-    // session-create time — once the session is bound, the toggle gates
-    // the per-message side-channel (web-search epic, Story 16).
-    const enableWebSearch = options.body?.enableWebSearch === true;
-    await this.sessionMgr.initialize(
-      enableWebSearch ? { requiredCapabilities: ["search"] } : undefined
-    );
+    // Search is resolved in this browser and folded into the prompt before
+    // encryption, so there is no such thing as a search-capable worker any
+    // more. Asking for one would narrow worker selection for no benefit.
+    const webSearchMode = isWebSearchMode(options.body?.webSearchMode)
+      ? options.body.webSearchMode
+      : DEFAULT_WEB_SEARCH_MODE;
+    await this.sessionMgr.initialize();
     this.setProgressStatus("thinking");
 
     // Ensure relay is connected
@@ -255,6 +348,12 @@ export class ProtocolTransport {
     if (!plaintext) {
       throw new Error("No text content in last message");
     }
+    const images = extractImagesFromMessage(lastMessage);
+    const budgetError = checkImageBudget(images);
+    if (budgetError) {
+      throw new Error(budgetError);
+    }
+    const enableWebSearch = shouldSearch(webSearchMode, plaintext);
 
     const chatId = getChatId(options.body);
     if (!chatId) {
@@ -273,25 +372,38 @@ export class ProtocolTransport {
       throw new Error("Session is not ready — recovery may be required");
     }
 
-    // Submit job: encrypt → blob upload → on-chain TX via user's wallet.
-    // searchEnabled rides through SessionManager.submitJob into the gateway
-    // blob upload, which writes the side-channel the dispatcher reads.
-    this.setProgressStatus("submitting_job");
-    const { jobId } = await this.sessionMgr.submitJob(plaintext, {
-      searchEnabled: enableWebSearch,
-    });
-    this.setProgressStatus("waiting_for_relay");
+    const sessionId = this.sessionMgr.sessionId;
+    if (sessionId === null) {
+      throw new Error("Session ID not available after initialization");
+    }
+    const relayClient = this.relayClient;
+    if (!relayClient) {
+      throw new Error("Relay client not connected");
+    }
 
-    // Track job deadline from chain (fire-and-forget — don't block the stream)
-    this.trackJobDeadline(jobId, chatId).catch(() => {
-      // Deadline tracking is best-effort; failure must not block response delivery
-    });
+    // ORDER MATTERS: subscribe first, submit second.
+    //
+    // The relay subscribes this socket by session (session:{id}:responses), so
+    // the worker's chunks for a brand-new job land on the already-open
+    // connection as soon as they exist — which can be before the submit call
+    // returns and, now that consumer-api replies at broadcast, before any
+    // jobId exists on the client. RelayClient drops frames with no subscriber
+    // rather than queueing them, so subscribing after submit would throw away
+    // exactly the chunks this change exists to deliver.
+    //
+    // The one case that cannot be served early: a previous prompt on this
+    // session has a pending handler that has not bound yet. Two unbound
+    // handlers cannot be told apart by the first frame, so rather than guess
+    // we fall back to the legacy "submit, then subscribe by jobId" order for
+    // this message only. See RelayClient.onPendingJob for the guarantees.
+    const canBindOnFirstFrame = !relayClient.hasUnboundPendingJob(sessionId);
 
-    // We persist the user message after the job is submitted to ensure the job ID is available for the assistant message.
-    await this.persistence.persistUserMessage({
+    // Persisting the user message is deferred, not awaited: the POST is the
+    // only place the jobId is still wanted synchronously, and blocking on it
+    // would re-introduce the stall we are removing. See deferUserMessagePersist.
+    const persist = this.deferUserMessagePersist({
       chatId,
-      sessionId: this.sessionMgr.sessionId,
-      jobId,
+      sessionId,
       message: lastMessage,
       selectedVisibilityType:
         typeof options.body?.selectedVisibilityType === "string"
@@ -304,16 +416,134 @@ export class ProtocolTransport {
           : undefined,
     });
 
-    await this.registerProtocolSessionWithServerIfNeeded(chatId);
+    // The chat row is created by the user-message POST, so the session
+    // registration and the assistant POST both have to queue behind it.
+    const prelude = persist.done.then(() =>
+      this.registerProtocolSessionWithServerIfNeeded(chatId).catch((err) => {
+        console.warn("Failed to register protocol session", err);
+      })
+    );
 
-    // Create a streaming response from relay WebSocket frames
-    const stream = this.createResponseStream(jobId, chatId, options.signal);
+    const protocolStream = this.createResponseStream({
+      sessionId,
+      chatId,
+      prelude,
+      signal: options.signal,
+      onJobIdResolved: (jobId) => {
+        persist.settle(jobId);
+        // Deadline tracking is best-effort; failure must not block delivery.
+        this.trackJobDeadline(jobId, chatId).catch(() => {
+          // Best-effort — see trackJobDeadline.
+        });
+      },
+      onTerminated: (jobId) => persist.settle(jobId),
+    });
+
+    // Submit job: encrypt → blob upload → on-chain TX via user's wallet.
+    // searchEnabled rides through SessionManager.submitJob into the gateway
+    // blob upload, which writes the side-channel the dispatcher reads.
+    this.setProgressStatus("submitting_job");
+    try {
+      if (canBindOnFirstFrame) {
+        protocolStream.subscribePending();
+      }
+    } catch (err) {
+      // Nothing was submitted, so drop the queued persist rather than writing
+      // an orphan user message for a prompt that never left the client.
+      persist.cancel();
+      // Closes the stream nobody will read, which also releases the in-flight
+      // count it took when it was created.
+      protocolStream.onSubmitFailed(err);
+      throw err;
+    }
+
+    // Deliberately not awaited — the stream must be able to emit its first
+    // token before this resolves. Both outcomes are routed into the stream.
+    this.buildPrompt(plaintext, enableWebSearch, protocolStream)
+      .then((prompt) =>
+        this.sessionMgr.submitJob(
+          serializePrompt(buildPromptEnvelope(prompt, images)),
+          { searchEnabled: enableWebSearch }
+        )
+      )
+      .then((result) =>
+        protocolStream.onSubmitted(normalizeJobId(result.jobId))
+      )
+      .catch((err) => protocolStream.onSubmitFailed(err));
 
     return {
-      response: new Response(stream, {
-        headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+      response: new Response(protocolStream.stream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          // The AI SDK identifies a UI message stream by this header. Without
+          // it the response is not parsed as one, every chunk arrives as an
+          // empty object, and useChat rejects the lot against its chunk union
+          // while the tokens themselves are perfectly fine.
+          "x-vercel-ai-ui-message-stream": "v1",
+        },
       }),
     };
+  }
+
+  /**
+   * Schedules the user-message POST without blocking the stream.
+   *
+   * `settle` fires the POST exactly once with the best jobId known at that
+   * moment; every subsequent call is a no-op. It is invoked from every path
+   * that can end the send — first relay frame, submit success, submit failure,
+   * stream completion, stream error, abort — plus a wall-clock deadline, so
+   * there is no code path on which the POST is simply never issued. A failing
+   * POST is logged rather than rethrown: the job is already on-chain and the
+   * stream must survive a persistence hiccup.
+   */
+  private deferUserMessagePersist(args: {
+    chatId: string;
+    sessionId: number;
+    message: { role: string; parts?: Array<{ type: string; text?: string }> };
+    selectedVisibilityType?: string;
+    systemPrompt?: string | null;
+  }): {
+    settle: (jobId: number | null) => void;
+    cancel: () => void;
+    done: Promise<void>;
+  } {
+    let settled = false;
+    let markDone!: () => void;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const done = new Promise<void>((resolve) => {
+      markDone = resolve;
+    });
+
+    const settle = (jobId: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (deadline !== undefined) clearTimeout(deadline);
+      try {
+        this.persistence
+          .persistUserMessage({ ...args, jobId })
+          .catch((err) => {
+            console.warn("Failed to persist protocol user message", err);
+          })
+          .finally(() => markDone());
+      } catch (err) {
+        console.warn("Failed to persist protocol user message", err);
+        markDone();
+      }
+    };
+
+    /** Abandons the persist — only valid before the prompt is submitted. */
+    const cancel = () => {
+      if (settled) return;
+      settled = true;
+      if (deadline !== undefined) clearTimeout(deadline);
+      markDone();
+    };
+
+    // Last-resort trigger: if neither a frame nor a submit result ever arrives
+    // we still persist the prompt rather than losing it, jobId or not.
+    deadline = setTimeout(() => settle(null), USER_MESSAGE_PERSIST_DEADLINE_MS);
+
+    return { settle, cancel, done };
   }
 
   /**
@@ -321,6 +551,19 @@ export class ProtocolTransport {
    * sessionStorage — use when switching chats or unmounting the composer.
    */
   release() {
+    // An answer is still on its way. Dropping the socket now would lose it for
+    // a prompt the user has already paid for, so let the stream finish and tear
+    // down in its close handler instead. Every stream is bounded by the
+    // no-answer watchdog, so this cannot keep a connection open indefinitely.
+    if (this.inFlightStreams > 0) {
+      this.releaseWhenIdle = true;
+      return;
+    }
+    this.releaseNow();
+  }
+
+  private releaseNow() {
+    this.releaseWhenIdle = false;
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.lastRegisteredApiSessionId = null;
@@ -331,10 +574,22 @@ export class ProtocolTransport {
     this.sessionMgr.release();
   }
 
+  private streamOpened() {
+    this.inFlightStreams++;
+  }
+
+  private streamClosed() {
+    this.inFlightStreams = Math.max(0, this.inFlightStreams - 1);
+    if (this.inFlightStreams === 0 && this.releaseWhenIdle) {
+      this.releaseNow();
+    }
+  }
+
   /**
    * Disconnects relay and clears persisted protocol state (wallet disconnect).
    */
   destroy() {
+    this.releaseWhenIdle = false;
     this.relayClient?.disconnect();
     this.relayClient = null;
     this.lastRegisteredApiSessionId = null;
@@ -433,6 +688,7 @@ export class ProtocolTransport {
       jobId,
       sessionId: onChain.sessionId,
       chatId,
+      worker: onChain.worker,
       deadline: onChain.deadline,
       completedAt: onChain.completedAt,
       escrowedFee: onChain.escrowedFee,
@@ -603,169 +859,523 @@ export class ProtocolTransport {
    * Creates a ReadableStream that emits AI SDK event stream data as
    * Server-Sent Events (SSE) — the format expected by the AI SDK's
    * parseJsonEventStream / EventSourceParserStream pipeline.
+   *
+   * The stream is built before the jobId is known. It subscribes either by
+   * session (`subscribePending`, the fast path) or by jobId once submit
+   * returns one (`onSubmitted`, the fallback path), and the two converge on a
+   * single subscription — never two.
    */
-  private createResponseStream(
-    jobId: number,
-    chatId: string,
-    signal?: AbortSignal
-  ): ReadableStream<Uint8Array> {
+  /**
+   * Produces the text that will actually be encrypted and sent.
+   *
+   * When search is called for, the results are looked up here and folded into
+   * the prompt, because this is the last point at which the plaintext is
+   * readable — everything downstream sees ciphertext. A failed or unconfigured
+   * search returns the original prompt: the user asked a question and must get
+   * an answer, with or without sources.
+   */
+  /**
+   * Derives and publishes the verification evidence for a settled response.
+   *
+   * Never rejects: a missing proof costs the verification badge, and an answer
+   * the user already has on screen must not be disturbed by it.
+   */
+  private async captureProof(args: {
+    jobId: number;
+    sessionId: number;
+    payload: string;
+    signature: string;
+    relayClient: RelayClient | null;
+    emit: (obj: Record<string, unknown>) => void;
+  }): Promise<void> {
+    try {
+      const proof = await captureResponseProof({
+        chainId: this.chainId,
+        jobRegistryAddress: this.jobRegistryAddress,
+        jobId: args.jobId,
+        sessionId: args.sessionId,
+        ciphertext: decodeBase64ToBytes(args.payload),
+        signature: (args.signature || null) as `0x${string}` | null,
+      });
+      args.relayClient?.setAssistantProof(args.jobId, proof);
+      args.emit({
+        type: "data-responseProof",
+        id: `protocol-proof-${args.jobId}`,
+        data: proof,
+      });
+    } catch {
+      // Intentionally swallowed - see the doc comment.
+    }
+  }
+
+  private async buildPrompt(
+    plaintext: string,
+    enableWebSearch: boolean,
+    stream: ProtocolStream
+  ): Promise<string> {
+    if (!enableWebSearch) return plaintext;
+
+    this.setProgressStatus("searching_web");
+    const sources = await this.gateway.searchWeb(plaintext);
+    if (sources.length === 0) return plaintext;
+
+    stream.emitSearchSources(sources);
+    return buildSearchPreamble(plaintext, sources);
+  }
+
+  private createResponseStream(args: {
+    sessionId: number;
+    chatId: string;
+    /** Resolves once the user message is stored and the session registered. */
+    prelude: Promise<void>;
+    signal?: AbortSignal;
+    /** Fired once, with the first jobId this stream learns about. */
+    onJobIdResolved: (jobId: number) => void;
+    /** Fired once when the stream ends, with the jobId if one was learned. */
+    onTerminated: (jobId: number | null) => void;
+  }): ProtocolStream {
+    const {
+      sessionId,
+      chatId,
+      prelude,
+      signal,
+      onJobIdResolved,
+      onTerminated,
+    } = args;
     const encoder = new TextEncoder();
     const sessionMgr = this.sessionMgr;
     const relayClient = this.relayClient;
-    const partId = `text-${jobId}`;
     const assistantMessageId = crypto.randomUUID();
+    // Keyed off the assistant message rather than the jobId: the first SSE
+    // part id has to be chosen before any jobId exists.
+    const partId = `text-${assistantMessageId}`;
+    const reasoningPartId = `reasoning-${assistantMessageId}`;
+    let boundJobId: number | null = null;
+    // started means "a frame of any kind has arrived", which is what clears
+    // the waiting placeholder. textStarted is separate because a reasoning
+    // model streams thought first, and emitting text-start before any text
+    // would open an empty answer part.
     let started = false;
+    let textStarted = false;
+    let reasoningStarted = false;
     let streamedText = "";
     let suppressRetryChunks = false;
+    // Awaited just before the message is persisted, so the proof is attached
+    // in time to be stored with it.
+    let capturedProof: Promise<void> = Promise.resolve();
+    let closed = false;
+    let unsubscribe: (() => void) | null = null;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let firstFrameTimer: ReturnType<typeof setTimeout> | undefined;
+    let searchSources: ProtocolCitationSource[] = [];
 
     const sse = (obj: Record<string, unknown>): Uint8Array =>
       encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
 
-    return new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        if (!relayClient) {
-          controller.error(new Error("Relay client not connected"));
+    // The consumer may cancel the ReadableStream at any point (useChat abort,
+    // component unmount), after which enqueue/close throw. Frames can still be
+    // in flight at that moment, so both are best-effort.
+    const emit = (obj: Record<string, unknown>) => {
+      if (closed) return;
+      try {
+        controller.enqueue(sse(obj));
+      } catch {
+        closed = true;
+      }
+    };
+
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      clearFirstFrameDeadline();
+      unsubscribe?.();
+      unsubscribe = null;
+      try {
+        controller.close();
+      } catch {
+        // Already cancelled by the consumer.
+      }
+      onTerminated(boundJobId);
+      this.streamClosed();
+    };
+
+    const clearFirstFrameDeadline = () => {
+      if (firstFrameTimer === undefined) return;
+      clearTimeout(firstFrameTimer);
+      firstFrameTimer = undefined;
+    };
+
+    /**
+     * Arms the no-answer watchdog. The job is on chain and paid for by this
+     * point, so the failure being guarded against is delivery, not payment:
+     * either the socket died before the worker published, or the frames went
+     * somewhere this stream is not listening. Either way the user must be told
+     * rather than left watching an empty bubble.
+     */
+    const armFirstFrameDeadline = () => {
+      if (firstFrameTimer !== undefined || closed) return;
+      firstFrameTimer = setTimeout(() => {
+        firstFrameTimer = undefined;
+        if (closed || started) return;
+        const offline = relayClient?.getStatus() !== "connected";
+        fail(
+          offline
+            ? "Lost the connection to the relay before the answer arrived. Your prompt was paid for and may still complete - reload the chat to check."
+            : "No answer came back from the worker in time. Your prompt was paid for and may still complete - reload the chat to check."
+        );
+      }, FIRST_FRAME_DEADLINE_MS);
+    };
+
+    const fail = (message: string) => {
+      if (closed) return;
+      this.setProgressStatus("error");
+      emit({ type: "error", errorText: message });
+      close();
+    };
+
+    const resolveJobId = (candidate: number) => {
+      const jobId = normalizeJobId(candidate);
+      if (jobId === null || boundJobId !== null) return;
+      boundJobId = jobId;
+      // Browser-side search finishes before any jobId exists, so the citations
+      // are held until there is a message to attach them to.
+      if (searchSources.length > 0) {
+        relayClient?.setAssistantSources(jobId, searchSources);
+      }
+      onJobIdResolved(jobId);
+    };
+
+    const emitSearchSources = (sources: ProtocolCitationSource[]) => {
+      if (sources.length === 0 || closed) return;
+      searchSources = sources;
+      emit({
+        type: "data-webSearchSources",
+        id: `protocol-web-search-${assistantMessageId}`,
+        data: { sources },
+      });
+      if (boundJobId !== null) {
+        relayClient?.setAssistantSources(boundJobId, sources);
+      }
+    };
+
+    const handleFrame = async (frame: WSFrame | WSErrorFrame) => {
+      // The watchdog is deliberately not cleared here. A metadata frame proves
+      // the pipe works but not that an answer is coming, and disarming on it
+      // would leave the stream hanging with no deadline at all. It is cleared
+      // when the first payload arrives, and by close() on every terminal path.
+      resolveJobId(frame.jobId);
+      const jobId = boundJobId ?? frame.jobId;
+      try {
+        if (frame.type === "error") {
+          const errorFrame = frame as WSErrorFrame;
+          if (errorFrame.code === "RATE_LIMITED" && errorFrame.droppedSeq > 0) {
+            return;
+          }
+          // consumer-api publishes error frames with no `message` field, which
+          // would otherwise surface as an error with no text at all.
+          fail(errorFrame.message || UNSPECIFIED_RELAY_ERROR);
           return;
         }
 
-        const unsubscribe = relayClient.onJob(
-          jobId,
-          async (frame: WSFrame | WSErrorFrame) => {
-            try {
-              if (frame.type === "error") {
-                const errorFrame = frame as WSErrorFrame;
-                if (
-                  errorFrame.code === "RATE_LIMITED" &&
-                  errorFrame.droppedSeq > 0
-                ) {
-                  return;
-                }
-                this.setProgressStatus("error");
-                controller.enqueue(
-                  sse({ type: "error", errorText: errorFrame.message })
-                );
-                controller.close();
-                unsubscribe();
-                return;
-              }
+        const wsFrame = frame as WSFrame;
 
-              const wsFrame = frame as WSFrame;
-
-              if (wsFrame.type === "metadata") {
-                if (wsFrame.payload) {
-                  const decrypted = await sessionMgr.decryptResponse(
-                    wsFrame.payload
-                  );
-                  const sources = parseWebSearchSources(decrypted);
-                  if (sources.length > 0) {
-                    relayClient.setAssistantSources(jobId, sources);
-                    controller.enqueue(
-                      sse({
-                        type: "data-webSearchSources",
-                        id: `protocol-web-search-${jobId}`,
-                        data: { sources },
-                      })
-                    );
-                  }
-                }
-                return;
-              }
-
-              if (wsFrame.payload && !started) {
-                started = true;
-                this.updateJobStatus(jobId, "streaming");
-                this.setProgressStatus("decoding_prompt");
-                relayClient.beginAssistantMessage({
-                  jobId,
-                  chatId,
-                  messageId: assistantMessageId,
-                  protocolMeta: {
-                    jobId: wsFrame.jobId,
-                    sessionId: wsFrame.sessionId,
-                    correlationId: wsFrame.correlationId,
-                    completedAt: new Date().toISOString(),
-                  },
-                });
-                controller.enqueue(sse({ type: "text-start", id: partId }));
-              }
-
-              if (wsFrame.payload) {
-                const decrypted = await sessionMgr.decryptResponse(
-                  wsFrame.payload
-                );
-                this.setProgressStatus("reasoning");
-                if (wsFrame.type === "complete") {
-                  relayClient.replaceAssistantText(jobId, decrypted);
-                  if (!streamedText) {
-                    streamedText = decrypted;
-                    controller.enqueue(
-                      sse({ type: "text-delta", id: partId, delta: decrypted })
-                    );
-                  } else if (decrypted.startsWith(streamedText)) {
-                    const suffix = decrypted.slice(streamedText.length);
-                    if (suffix) {
-                      streamedText = decrypted;
-                      controller.enqueue(
-                        sse({ type: "text-delta", id: partId, delta: suffix })
-                      );
-                    }
-                  }
-                  controller.enqueue(
-                    sse({
-                      type: "data-protocolFinal",
-                      id: `protocol-final-${jobId}`,
-                      data: { text: decrypted },
-                    })
-                  );
-                } else {
-                  if (wsFrame.seq === 1 && streamedText.length > 0) {
-                    streamedText = "";
-                    relayClient.resetAssistantText(jobId);
-                    suppressRetryChunks = true;
-                  }
-                  streamedText += decrypted;
-                  relayClient.appendAssistantDelta(jobId, decrypted);
-                  if (!suppressRetryChunks) {
-                    controller.enqueue(
-                      sse({ type: "text-delta", id: partId, delta: decrypted })
-                    );
-                  }
-                }
-              }
-
-              if (wsFrame.type === "complete") {
-                if (started) {
-                  this.setProgressStatus("streaming");
-                  controller.enqueue(sse({ type: "text-end", id: partId }));
-                  await relayClient.completeAssistantMessage(jobId);
-                }
-                this.setProgressStatus("completed");
-                this.updateJobStatus(jobId, "completed");
-                this.clearJobTimer(jobId);
-                controller.close();
-                unsubscribe();
-              }
-            } catch (err) {
-              const msg =
-                err instanceof Error ? err.message : "decryption failed";
-              this.setProgressStatus("error");
-              controller.enqueue(sse({ type: "error", errorText: msg }));
-              relayClient.discardAssistantMessage(jobId);
-              controller.close();
-              unsubscribe();
+        if (wsFrame.type === "metadata") {
+          if (wsFrame.payload) {
+            const decrypted = await sessionMgr.decryptResponse(wsFrame.payload);
+            const sources = parseWebSearchSources(decrypted);
+            if (sources.length > 0) {
+              relayClient?.setAssistantSources(jobId, sources);
+              emit({
+                type: "data-webSearchSources",
+                id: `protocol-web-search-${jobId}`,
+                data: { sources },
+              });
             }
           }
-        );
+          return;
+        }
+
+        if (wsFrame.payload && !started) {
+          started = true;
+          clearFirstFrameDeadline();
+          this.updateJobStatus(jobId, "streaming");
+          this.setProgressStatus("decoding_prompt");
+          relayClient?.beginAssistantMessage({
+            jobId,
+            chatId,
+            messageId: assistantMessageId,
+            protocolMeta: {
+              jobId: wsFrame.jobId,
+              sessionId: wsFrame.sessionId,
+              correlationId: wsFrame.correlationId,
+              completedAt: new Date().toISOString(),
+            },
+          });
+        }
+
+        // Non-text channels are demultiplexed here, before the text path.
+        // They must not touch streamedText: that string is reconciled against
+        // the terminal frame, which carries only the answer.
+        const kind = frameKind(wsFrame);
+        if (wsFrame.payload && wsFrame.type !== "complete" && kind !== "text") {
+          const decrypted = await sessionMgr.decryptResponse(wsFrame.payload);
+
+          if (kind === "reasoning") {
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              emit({ type: "reasoning-start", id: reasoningPartId });
+            }
+            this.setProgressStatus("reasoning");
+            emit({
+              type: "reasoning-delta",
+              id: reasoningPartId,
+              delta: decrypted,
+            });
+            return;
+          }
+
+          if (kind === "stats") {
+            try {
+              const stats = JSON.parse(decrypted) as GenerationStats;
+              relayClient?.setAssistantStats(jobId, stats);
+              emit({
+                type: "data-generationStats",
+                id: `protocol-stats-${jobId}`,
+                data: stats,
+              });
+            } catch {
+              // A malformed stats frame costs the user a throughput badge
+              // and nothing else, so it must never break the answer.
+            }
+            return;
+          }
+
+          // artifact / audio frames are carried by the same channel but have
+          // no renderer yet; dropping them here keeps them out of the answer
+          // text rather than corrupting it.
+          return;
+        }
+
+        if (wsFrame.payload && !textStarted) {
+          textStarted = true;
+          emit({ type: "text-start", id: partId });
+        }
+
+        if (wsFrame.payload) {
+          const decrypted = await sessionMgr.decryptResponse(wsFrame.payload);
+          this.setProgressStatus("reasoning");
+          if (wsFrame.type === "complete") {
+            // Capture the verification evidence while the ciphertext is still
+            // in hand. It is never persisted, so this is the only chance to
+            // recover the signer and hash the settled bytes. Deliberately not
+            // awaited: the answer must render immediately, and losing the
+            // proof costs a badge rather than the reply.
+            capturedProof = this.captureProof({
+              jobId,
+              sessionId: wsFrame.sessionId,
+              payload: wsFrame.payload,
+              signature: wsFrame.signature,
+              relayClient,
+              emit,
+            });
+            relayClient?.replaceAssistantText(jobId, decrypted);
+            if (streamedText) {
+              if (decrypted.startsWith(streamedText)) {
+                const suffix = decrypted.slice(streamedText.length);
+                if (suffix) {
+                  streamedText = decrypted;
+                  emit({ type: "text-delta", id: partId, delta: suffix });
+                }
+              }
+            } else {
+              streamedText = decrypted;
+              emit({ type: "text-delta", id: partId, delta: decrypted });
+            }
+            emit({
+              type: "data-protocolFinal",
+              id: `protocol-final-${jobId}`,
+              data: { text: decrypted },
+            });
+          } else {
+            if (wsFrame.seq === 1 && streamedText.length > 0) {
+              streamedText = "";
+              relayClient?.resetAssistantText(jobId);
+              suppressRetryChunks = true;
+            }
+            streamedText += decrypted;
+            relayClient?.appendAssistantDelta(jobId, decrypted);
+            if (!suppressRetryChunks) {
+              emit({ type: "text-delta", id: partId, delta: decrypted });
+            }
+          }
+        }
+
+        if (wsFrame.type === "complete") {
+          // A completion carrying no text is a failure, whichever way it got
+          // here: either no frame ever had a payload, or every payload
+          // decrypted to nothing. Finishing normally would leave a bubble that
+          // renders blank, cannot be copied, and cannot be voted on, because
+          // completeAssistantMessage drops empty text and never writes a row.
+          if (!started || !streamedText.trim()) {
+            console.warn("Protocol stream completed with no answer", {
+              jobId,
+              seq: wsFrame.seq,
+              hadPayload: Boolean(wsFrame.payload),
+              started,
+            });
+            if (reasoningStarted) {
+              // Close the reasoning part even on the failure path, or the UI
+              // is left with a reasoning block that never finishes.
+              emit({ type: "reasoning-end", id: reasoningPartId });
+            }
+            relayClient?.discardAssistantMessage(jobId);
+            // The job did settle on chain, so it stays "completed" and keeps
+            // its dispute affordance — an answer that was paid for and came
+            // back empty is precisely what disputing is for.
+            this.updateJobStatus(jobId, "completed");
+            this.clearJobTimer(jobId);
+            fail(EMPTY_ANSWER_ERROR);
+            return;
+          }
+
+          this.setProgressStatus("streaming");
+          if (reasoningStarted) {
+            emit({ type: "reasoning-end", id: reasoningPartId });
+          }
+          emit({ type: "text-end", id: partId });
+          // The chat row is created by the user-message POST, so the
+          // assistant POST has to wait for it even though nothing else does.
+          await prelude;
+          // Signature recovery is fast but not instant; waiting here is what
+          // gets the proof stored alongside the message rather than arriving
+          // after it has already been written.
+          await capturedProof;
+          await relayClient?.completeAssistantMessage(jobId);
+          this.setProgressStatus("completed");
+          this.updateJobStatus(jobId, "completed");
+          this.clearJobTimer(jobId);
+          // Close the message before the stream itself, so useChat marks the
+          // assistant turn finished rather than leaving it mid-stream.
+          emit({ type: "finish", finishReason: "stop" });
+          close();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "decryption failed";
+        relayClient?.discardAssistantMessage(jobId);
+        fail(msg);
+      }
+    };
+
+    // Frames are processed one at a time. handleFrame awaits decryption, so
+    // without this chain a chunk that decrypts quickly could overtake an
+    // earlier one and corrupt the assembled text.
+    let frameQueue: Promise<void> = Promise.resolve();
+    const enqueueFrame = (frame: WSFrame | WSErrorFrame) => {
+      frameQueue = frameQueue
+        .then(() => handleFrame(frame))
+        .catch((err) => {
+          // Never poison the queue — later frames must still be processed.
+          console.warn("Relay frame handler failed", err);
+        });
+    };
+
+    this.streamOpened();
+
+    const stream = new ReadableStream<Uint8Array>({
+      start: (streamController) => {
+        controller = streamController;
+
+        // Open the message. The SDK's chunk union has an explicit "start"
+        // member and useChat needs it before any text part, otherwise the
+        // text-start below has no message to attach to.
+        emit({ type: "start", messageId: assistantMessageId });
+        // This is exactly the point the empty bubble appears, so it is also
+        // the point the no-answer watchdog has to start counting.
+        armFirstFrameDeadline();
 
         signal?.addEventListener("abort", () => {
+          if (closed) return;
           this.setProgressStatus("idle");
-          relayClient.discardAssistantMessage(jobId);
-          unsubscribe();
-          controller.close();
+          if (boundJobId !== null) {
+            relayClient?.discardAssistantMessage(boundJobId);
+          }
+          close();
         });
       },
     });
+
+    const subscribePending = () => {
+      if (unsubscribe || closed || !relayClient) return;
+      unsubscribe = relayClient.onPendingJob(sessionId, enqueueFrame);
+    };
+
+    const onSubmitted = (jobId: number | null) => {
+      if (closed || !relayClient) return;
+      if (!started) this.setProgressStatus("waiting_for_relay");
+
+      if (jobId === null) {
+        // Consumer-api returned at broadcast without a jobId. If we took the
+        // fallback path we have no subscription yet — retry now that the
+        // predecessor has probably bound.
+        if (!unsubscribe) {
+          try {
+            subscribePending();
+          } catch (err) {
+            fail(
+              err instanceof Error
+                ? `Cannot subscribe to relay: ${err.message}`
+                : "Cannot subscribe to relay"
+            );
+          }
+        }
+        return;
+      }
+
+      if (unsubscribe) {
+        // Converge: promote the existing pending handler instead of adding a
+        // second subscription for the same stream.
+        const binding = relayClient.bindPendingJob(sessionId, jobId);
+        if (binding && !binding.converged) {
+          console.warn(
+            `Relay stream adopted job ${boundJobId} but submit reported job ${jobId}; re-bound to the submitted job`
+          );
+        }
+      } else {
+        unsubscribe = relayClient.onJob(jobId, enqueueFrame);
+      }
+      resolveJobId(jobId);
+    };
+
+    const onSubmitFailed = (error: unknown) => {
+      // Frames already flowing means the job is real and streaming; a late
+      // submit rejection (fallback path, flaky response) must not kill it.
+      if (started || boundJobId !== null) {
+        console.warn("Job submit failed after the relay stream started", error);
+        return;
+      }
+      // close() inside fail() settles the deferred persist with a null jobId.
+      fail(error instanceof Error ? error.message : "Job submission failed");
+    };
+
+    return {
+      stream,
+      subscribePending,
+      onSubmitted,
+      onSubmitFailed,
+      emitSearchSources,
+    };
   }
+}
+
+/**
+ * Guards against a jobId that is absent or unusable. `Number(undefined)` is
+ * NaN, so an API that stops returning jobId surfaces here rather than poisoning
+ * the job maps with a NaN key.
+ */
+function normalizeJobId(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 function parseWebSearchSources(payload: string): ProtocolCitationSource[] {
@@ -808,6 +1418,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/**
+ * Folds search results into the prompt itself.
+ *
+ * Only the latest user message is encrypted and no system prompt travels with
+ * the ciphertext, so a preamble on the plaintext is the one place this can go.
+ * It mirrors the wording of `buildWebSearchSystemPrompt`, adapted from a system
+ * prompt to a preamble since there is no system channel here.
+ */
+function buildSearchPreamble(
+  query: string,
+  sources: ProtocolCitationSource[]
+): string {
+  const context = sources
+    .map((s) => `${s.position}. ${s.title}\n${s.url}\n${s.description}`)
+    .join("\n\n");
+  const references = sources
+    .filter((s) => s.url)
+    .map((s) => `${s.position}. [${s.title}](${s.url})`)
+    .join("\n");
+
+  return `Web search results for this question (treat as ground truth where they conflict with prior knowledge):
+
+${context}
+
+Reference URLs for citation:
+${references || "None available."}
+
+Answer the question below using these results. Prefer the most recent, reputable sources, and note briefly if the results look outdated or insufficient. End your answer with a "Sources:" list of the 3-5 most relevant results as markdown links.
+
+Question: ${query}`;
+}
+
 function getChatId(body?: Record<string, unknown>): string | null {
   if (!body) return null;
   const value = body.id;
@@ -823,4 +1465,23 @@ function extractTextFromMessage(message: {
     .filter((p) => p.type === "text" && p.text)
     .map((p) => p.text);
   return textParts.join("\n") || null;
+}
+
+/**
+ * Pulls image attachments off the outgoing message as bare base64.
+ *
+ * The composer has already downscaled and re-encoded them, so these are data
+ * URLs held in memory rather than links to anything uploaded. Non-image files
+ * are ignored: no model in the fleet can read them, and including them would
+ * spend blob budget on bytes that get thrown away.
+ */
+function extractImagesFromMessage(message: {
+  parts?: Array<{ type: string; mediaType?: string; url?: string }>;
+}): string[] {
+  if (!message.parts) return [];
+  return message.parts
+    .filter(
+      (p) => p.type === "file" && p.mediaType?.startsWith("image/") && p.url
+    )
+    .map((p) => stripDataUrlPrefix(p.url as string));
 }

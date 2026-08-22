@@ -5,6 +5,7 @@ import { ArrowDownIcon } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
+import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import {
   type ChatMessage,
@@ -30,6 +31,10 @@ type MessagesProps = {
   activeJobs?: TrackedJob[];
   claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
   disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
+  /** Reads a job from the chain so a reloaded answer stays verifiable. */
+  fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
+  fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
+  explorerBaseUrl?: string;
 };
 
 function PureMessages({
@@ -45,6 +50,9 @@ function PureMessages({
   activeJobs,
   claimJobTimeout,
   disputeJob,
+  fetchOnChainJob,
+  fetchWorkerStake,
+  explorerBaseUrl,
 }: MessagesProps) {
   const initialScrollChatIdRef = useRef<string | null>(null);
   const {
@@ -58,6 +66,21 @@ function PureMessages({
   });
 
   useDataStream();
+
+  // The protocol transport opens the assistant message as soon as the stream
+  // exists, well before the worker has produced a token - first-token latency
+  // is seconds, and longer on a cold model. useChat leaves "submitted" the
+  // moment that happens, so keying the indicator purely off "submitted" hid it
+  // during the entire wait and left an assistant bubble with no parts on
+  // screen: the blank response. Keep it up until real text arrives.
+  const lastMessage = messages.at(-1);
+  const awaitingFirstToken =
+    status === "streaming" &&
+    lastMessage?.role === "assistant" &&
+    !lastMessage.parts?.some(
+      (part) => part.type === "text" && part.text.trim().length > 0
+    );
+  const showThinking = status === "submitted" || awaitingFirstToken;
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -98,11 +121,18 @@ function PureMessages({
           {messages.length === 0 && <Greeting />}
 
           {messages.map((message, index) => {
+            // The placeholder assistant message is represented by the thinking
+            // indicator below until it has text, so rendering it here too would
+            // stack an empty bubble on top of it.
+            if (awaitingFirstToken && index === messages.length - 1) {
+              return null;
+            }
+
             const jobId =
               typeof message.metadata?.jobId === "number"
                 ? message.metadata.jobId
                 : undefined;
-            const trackedJob = 
+            const trackedJob =
               jobId !== undefined
                 ? activeJobs?.find((j) => j.jobId === jobId)
                 : undefined;
@@ -112,6 +142,9 @@ function PureMessages({
                 chatId={chatId}
                 claimJobTimeout={claimJobTimeout}
                 disputeJob={disputeJob}
+                explorerBaseUrl={explorerBaseUrl}
+                fetchOnChainJob={fetchOnChainJob}
+                fetchWorkerStake={fetchWorkerStake}
                 isLoading={
                   status === "streaming" && messages.length - 1 === index
                 }
@@ -135,7 +168,7 @@ function PureMessages({
           })}
 
           <AnimatePresence mode="wait">
-            {status === "submitted" && (
+            {showThinking && (
               <ThinkingMessage
                 key="thinking"
                 label={

@@ -237,13 +237,7 @@ export function useProtocolSession(
     });
     transportRef.current = transport;
     return transport;
-  }, [
-    chatId,
-    getGateway,
-    resolveModelId,
-    protocolChainId,
-    publicClient,
-  ]);
+  }, [chatId, getGateway, resolveModelId, protocolChainId, publicClient]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */
   const releaseTransport = useCallback(() => {
@@ -327,6 +321,34 @@ export function useProtocolSession(
     return result;
   }, []);
 
+  /**
+   * Reads a job straight from the chain.
+   *
+   * The proof panel needs this rather than the tracked-job cache because that
+   * cache only holds jobs from the current page load — a reloaded conversation
+   * still has to be verifiable.
+   */
+  const fetchOnChainJob = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) return null;
+    try {
+      return await transport.getJob(jobId);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** Stake bonded behind a worker, for the proof panel. Null on failure. */
+  const fetchWorkerStake = useCallback(async (worker: string) => {
+    const transport = transportRef.current;
+    if (!transport) return null;
+    try {
+      return await transport.getWorkerStake(worker);
+    } catch {
+      return null;
+    }
+  }, []);
+
   const clearTimedOutJob = useCallback(() => {
     setTimedOutJob(null);
   }, []);
@@ -345,6 +367,8 @@ export function useProtocolSession(
     startNewSession,
     claimJobTimeout,
     disputeJob,
+    fetchOnChainJob,
+    fetchWorkerStake,
     clearTimedOutJob,
   };
 }

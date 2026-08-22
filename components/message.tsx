@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
 import type { Vote } from "@/lib/db/schema";
+import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
@@ -13,12 +14,14 @@ import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
 import { Response } from "./elements/response";
+import { GenerationStatsBadge } from "./generation-stats";
 import { LCAIIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
 import { MessageJobActions } from "./message-job-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
+import { ResponseProofPanel } from "./response-proof";
 import { SourceLinkChip } from "./source-link-chip";
 import { Weather } from "./weather";
 
@@ -35,6 +38,9 @@ const PurePreviewMessage = ({
   trackedJob,
   claimJobTimeout,
   disputeJob,
+  fetchOnChainJob,
+  fetchWorkerStake,
+  explorerBaseUrl,
 }: {
   chatId: string;
   message: ChatMessage;
@@ -48,15 +54,38 @@ const PurePreviewMessage = ({
   trackedJob?: TrackedJob;
   claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
   disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
+  /** Reads a job from the chain so a reloaded answer stays verifiable. */
+  fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
+  fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
+  explorerBaseUrl?: string;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
 
   const parts = message.parts ?? [];
 
-  const attachmentsFromMessage = parts.filter(
-    (part) => part.type === "file"
-  );
+  const attachmentsFromMessage = parts.filter((part) => part.type === "file");
+
+  // Arrives as a data part both live and after a reload: the worker sends it
+  // on its own frame kind mid-stream, and completeAssistantMessage persists
+  // the same shape, so a refresh keeps the badge.
+  const generationStats = useMemo(() => {
+    for (const part of parts) {
+      if (part.type === "data-generationStats" && part.data) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const responseProof = useMemo(() => {
+    for (const part of parts) {
+      if (part.type === "data-responseProof" && part.data) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
 
   const protocolFinalText = useMemo(() => {
     for (const part of parts) {
@@ -156,9 +185,7 @@ const PurePreviewMessage = ({
             "min-h-96": message.role === "assistant" && requiresScrollPadding,
             "w-full":
               (message.role === "assistant" &&
-                parts.some(
-                  (p) => p.type === "text" && p.text?.trim()
-                )) ||
+                parts.some((p) => p.type === "text" && p.text?.trim())) ||
               mode === "edit",
             "max-w-[calc(100%-2.5rem)] sm:max-w-[min(fit-content,80%)]":
               message.role === "user" && mode !== "edit",
@@ -364,12 +391,34 @@ const PurePreviewMessage = ({
             </div>
           )}
 
+          {message.role === "assistant" && generationStats && !isLoading && (
+            <GenerationStatsBadge
+              stats={generationStats}
+              worker={trackedJob?.worker}
+            />
+          )}
+
+          {message.role === "assistant" &&
+            responseProof &&
+            fetchOnChainJob &&
+            !isLoading && (
+              <ResponseProofPanel
+                explorerBaseUrl={explorerBaseUrl}
+                fetchOnChainJob={fetchOnChainJob}
+                fetchWorkerStake={fetchWorkerStake}
+                proof={responseProof}
+              />
+            )}
+
           {!isReadonly && (
             <MessageActions
               chatId={chatId}
               isLoading={isLoading}
               key={`action-${message.id}`}
               message={message}
+              regenerate={
+                message.role === "assistant" ? () => regenerate() : undefined
+              }
               setMode={setMode}
               vote={vote}
             />
@@ -413,9 +462,11 @@ export const PreviewMessage = memo(
   }
 );
 
+const WWW_PREFIX = /^www\./;
+
 function formatSourceHost(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    return new URL(url).hostname.replace(WWW_PREFIX, "");
   } catch {
     return url;
   }

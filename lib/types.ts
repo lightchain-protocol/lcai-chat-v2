@@ -2,6 +2,8 @@ import type { InferUITool, UIMessage } from "ai";
 import { z } from "zod";
 import type { getWeather } from "./ai/tools/get-weather";
 import type { webSearch } from "./ai/tools/web-search";
+import type { GenerationStats } from "./protocol/relay-client";
+import type { ResponseProof } from "./protocol/verify-response";
 import type { AppUsage } from "./usage";
 
 export type DataPart = { type: "append-message"; message: string };
@@ -33,6 +35,7 @@ export type ProtocolLoadingStatus =
   | "idle"
   | "preparing_chat"
   | "writing_on_chain"
+  | "searching_web"
   | "submitting_job"
   | "waiting_for_relay"
   | "decoding_prompt"
@@ -49,8 +52,12 @@ export const PROTOCOL_LOADING_STATUS_LABELS: Record<
   idle: "Thinking...",
   preparing_chat: "Preparing your chat...",
   writing_on_chain: "Writing on chain...",
+  searching_web: "Searching the web...",
   submitting_job: "Uploading prompt to chain...",
-  waiting_for_relay: "Thinking...",
+  // The longest wait in the whole flow: the worker has the job and is loading
+  // the model. A cold one takes over ten seconds, so this says what is
+  // happening rather than leaving a generic spinner.
+  waiting_for_relay: "Waiting for the worker...",
   decoding_prompt: "Decoding your prompt",
   thinking: "Thinking...",
   reasoning: "Reasoning...",
@@ -72,6 +79,12 @@ export type CustomUIDataTypes = {
   usage: AppUsage;
   webSearchSources: { sources: WebSearchSource[] };
   protocolFinal: { text: string };
+  // What the model itself measured for the generation. Arrives on its own
+  // frame kind from the worker rather than being inferred client-side.
+  generationStats: GenerationStats;
+  // Verification evidence captured from the terminal frame, so the answer can
+  // be checked against the chain long after it was received.
+  responseProof: ResponseProof;
 };
 
 export type ChatMessage = UIMessage<

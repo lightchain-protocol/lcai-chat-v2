@@ -9,12 +9,30 @@
  *
  * Error frame format:
  *   { type: "error", code, jobId, sessionId, droppedSeq, message, ts }
+ *
+ * Subscriptions come in two flavours:
+ *   - onJob(jobId, cb)          — classic, requires the jobId up front.
+ *   - onPendingJob(sessionId, cb) — registers interest before the jobId exists.
+ *     The relay already subscribes us per session, so frames for a job we have
+ *     not heard of yet are already on the wire; a pending handler adopts the
+ *     first such frame instead of letting it be dropped.
  */
 
 import { $http } from "../http";
+import type { ResponseProof } from "./verify-response";
+
+/**
+ * Which content channel a frame carries. Orthogonal to `type`: `type` says
+ * where the frame sits in the response lifecycle, `kind` says what is inside.
+ *
+ * Absent on frames from workers built before typed kinds existed, which is why
+ * every reader must treat undefined as "text".
+ */
+export type FrameKind = "text" | "reasoning" | "artifact" | "audio" | "stats";
 
 export type WSFrame = {
   type: "chunk" | "complete" | "metadata" | "error";
+  kind?: FrameKind;
   jobId: number;
   sessionId: number;
   seq: number;
@@ -23,6 +41,27 @@ export type WSFrame = {
   signature: string;
   correlationId: string;
   ts: number;
+};
+
+/** Normalizes the wire value, mapping the pre-kinds default onto text. */
+export function frameKind(frame: { kind?: FrameKind }): FrameKind {
+  return frame.kind ?? "text";
+}
+
+/**
+ * Payload of a `stats` frame: what the model itself measured for the
+ * generation. The worker used to discard these, so the UI had no way to show
+ * tokens or throughput.
+ */
+export type GenerationStats = {
+  promptTokens: number;
+  evalTokens: number;
+  thinkingBytes?: number;
+  tokensPerSecond: number;
+  loadMs?: number;
+  promptEvalMs: number;
+  evalMs: number;
+  totalMs: number;
 };
 
 export type WSErrorFrame = {
@@ -59,8 +98,59 @@ type PendingAssistantMessage = {
   messageId: string;
   text: string;
   sources: ProtocolCitationSource[];
+  stats: GenerationStats | null;
+  proof: ResponseProof | null;
   protocolMeta: Record<string, unknown>;
 };
+
+/**
+ * A session-scoped subscription registered before its jobId is known.
+ * Becomes an ordinary entry in `jobCallbacks` the moment it binds.
+ */
+type PendingSessionHandler = {
+  callback: FrameCallback;
+  /** null until the handler adopts a jobId. */
+  boundJobId: number | null;
+  /** Set by the unsubscribe function — a cancelled handler never binds. */
+  cancelled: boolean;
+};
+
+export type PendingJobBinding = {
+  /** The jobId the handler is bound to after this call. */
+  jobId: number;
+  /**
+   * false only when the handler had already adopted a *different* jobId from
+   * a first frame and had to be re-bound to the authoritative id supplied by
+   * the caller. A false here means frames from a foreign job may already have
+   * been delivered to this callback.
+   */
+  converged: boolean;
+};
+
+/**
+ * Thrown by `onPendingJob` when the session already has a pending handler that
+ * has not bound yet. Refusing is deliberate: silently replacing the incumbent
+ * would strand its job's frames with no subscriber.
+ */
+export class PendingJobConflictError extends Error {
+  readonly sessionId: number;
+
+  constructor(sessionId: number) {
+    super(
+      `Session ${sessionId} already has an unbound pending job handler; ` +
+        "resolve or unsubscribe it before registering another"
+    );
+    this.name = "PendingJobConflictError";
+    this.sessionId = sessionId;
+  }
+}
+
+/**
+ * Upper bound on remembered jobIds. Only used to stop a pending handler from
+ * adopting a late frame belonging to a job we have already served, so an
+ * approximate, bounded memory is sufficient.
+ */
+const MAX_OBSERVED_JOB_IDS = 1024;
 
 export type ProtocolCitationSource = {
   position: number;
@@ -76,6 +166,13 @@ export type ProtocolCitationSource = {
 export class RelayClient {
   private ws: WebSocket | null = null;
   private readonly jobCallbacks = new Map<number, FrameCallback>();
+  /** At most one entry per session; see onPendingJob. */
+  private readonly pendingSessionHandlers = new Map<
+    number,
+    PendingSessionHandler
+  >();
+  /** Insertion-ordered, capped at MAX_OBSERVED_JOB_IDS. */
+  private readonly observedJobIds = new Set<number>();
   private lifecycleCallback?: (event: LifecycleEvent) => void;
   private reconnectCallback?: () => void;
   private status: RelayStatus = "disconnected";
@@ -169,10 +266,101 @@ export class RelayClient {
    * Returns an unsubscribe function.
    */
   onJob(jobId: number, callback: FrameCallback): () => void {
+    this.observeJobId(jobId);
     this.jobCallbacks.set(jobId, callback);
     return () => {
-      this.jobCallbacks.delete(jobId);
+      if (this.jobCallbacks.get(jobId) === callback) {
+        this.jobCallbacks.delete(jobId);
+      }
     };
+  }
+
+  /**
+   * Registers interest in the *next* job of a session, before its jobId is
+   * known. The handler binds to the first frame on that session carrying a
+   * jobId this client has never observed, after which it behaves exactly like
+   * an `onJob` subscription.
+   *
+   * Guarantees:
+   *  - At most one unbound pending handler per session. A second registration
+   *    throws `PendingJobConflictError` rather than replacing the incumbent,
+   *    so frames can never be silently orphaned. Registering again *after* the
+   *    incumbent has bound is allowed and safe — the incumbent has already
+   *    moved onto the normal per-job path.
+   *  - A handler binds at most once, and only to a jobId never seen by this
+   *    client. Late or duplicate frames from an already-served job are dropped
+   *    instead of hijacking the next prompt's handler.
+   *  - Unsubscribing removes both the pending registration and the per-job
+   *    binding it may have acquired.
+   *
+   * Returns an unsubscribe function, matching `onJob`.
+   *
+   * @throws PendingJobConflictError if the session already has an unbound
+   *   pending handler.
+   */
+  onPendingJob(sessionId: number, callback: FrameCallback): () => void {
+    const incumbent = this.pendingSessionHandlers.get(sessionId);
+    if (incumbent && !incumbent.cancelled && incumbent.boundJobId === null) {
+      throw new PendingJobConflictError(sessionId);
+    }
+
+    const handler: PendingSessionHandler = {
+      callback,
+      boundJobId: null,
+      cancelled: false,
+    };
+    this.pendingSessionHandlers.set(sessionId, handler);
+
+    return () => {
+      handler.cancelled = true;
+      if (this.pendingSessionHandlers.get(sessionId) === handler) {
+        this.pendingSessionHandlers.delete(sessionId);
+      }
+      if (
+        handler.boundJobId !== null &&
+        this.jobCallbacks.get(handler.boundJobId) === handler.callback
+      ) {
+        this.jobCallbacks.delete(handler.boundJobId);
+      }
+    };
+  }
+
+  /** True when `onPendingJob(sessionId, …)` would throw. */
+  hasUnboundPendingJob(sessionId: number): boolean {
+    const handler = this.pendingSessionHandlers.get(sessionId);
+    return (
+      handler !== undefined && !handler.cancelled && handler.boundJobId === null
+    );
+  }
+
+  /**
+   * Binds the session's pending handler to an authoritative jobId — used when
+   * the submit call does return one. Converges with first-frame binding rather
+   * than creating a second subscription:
+   *  - unbound handler        → binds to `jobId`
+   *  - already bound to it    → no-op
+   *  - bound to a different id → re-bound to `jobId`, reported as not converged
+   *
+   * Returns null when the session has no live pending handler.
+   */
+  bindPendingJob(sessionId: number, jobId: number): PendingJobBinding | null {
+    const handler = this.pendingSessionHandlers.get(sessionId);
+    if (!handler || handler.cancelled) return null;
+
+    if (handler.boundJobId === jobId) {
+      return { jobId, converged: true };
+    }
+
+    if (handler.boundJobId === null) {
+      this.bindHandler(handler, jobId);
+      return { jobId, converged: true };
+    }
+
+    if (this.jobCallbacks.get(handler.boundJobId) === handler.callback) {
+      this.jobCallbacks.delete(handler.boundJobId);
+    }
+    this.bindHandler(handler, jobId);
+    return { jobId, converged: false };
   }
 
   /**
@@ -224,6 +412,8 @@ export class RelayClient {
       messageId: args.messageId,
       text: "",
       sources,
+      stats: null,
+      proof: null,
       protocolMeta: args.protocolMeta,
     });
   }
@@ -244,6 +434,29 @@ export class RelayClient {
     const pending = this.pendingAssistantMessages.get(jobId);
     if (!pending) return;
     pending.text = text;
+  }
+
+  /**
+   * Attach the model's own generation stats to the message being assembled.
+   * Stored as a data part on persist, the same way search sources are, so the
+   * token count and throughput survive a reload instead of living only in the
+   * live stream.
+   */
+  setAssistantStats(jobId: number, stats: GenerationStats) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.stats = stats;
+  }
+
+  /**
+   * Attach the verification evidence captured from the terminal frame, so the
+   * proof panel still works after a reload. Small by design — the ciphertext
+   * it was derived from is not kept.
+   */
+  setAssistantProof(jobId: number, proof: ResponseProof) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.proof = proof;
   }
 
   setAssistantSources(jobId: number, sources: ProtocolCitationSource[]) {
@@ -272,6 +485,20 @@ export class RelayClient {
         type: "data-webSearchSources",
         id: `protocol-web-search-${jobId}`,
         data: { sources: pending.sources },
+      });
+    }
+    if (pending.stats) {
+      parts.push({
+        type: "data-generationStats",
+        id: `protocol-stats-${jobId}`,
+        data: pending.stats,
+      });
+    }
+    if (pending.proof) {
+      parts.push({
+        type: "data-responseProof",
+        id: `protocol-proof-${jobId}`,
+        data: pending.proof,
       });
     }
     parts.push({
@@ -318,9 +545,50 @@ export class RelayClient {
     }
 
     const frame = parsed as unknown as WSFrame | WSErrorFrame;
-    const callback = this.jobCallbacks.get(frame.jobId);
-    if (callback) {
-      callback(frame);
+    const callback =
+      this.jobCallbacks.get(frame.jobId) ?? this.adoptFrame(frame);
+    // Frames matching neither a job callback nor a pending handler stay
+    // dropped, exactly as before.
+    callback?.(frame);
+  }
+
+  /**
+   * Offers an unmatched frame to the pending handler of its session. Binds and
+   * returns the callback on success, null when the frame should be dropped.
+   */
+  private adoptFrame(frame: WSFrame | WSErrorFrame): FrameCallback | null {
+    if (
+      typeof frame.jobId !== "number" ||
+      typeof frame.sessionId !== "number"
+    ) {
+      return null;
+    }
+    // Already served this job: its subscriber unsubscribed and this is a late
+    // or duplicate frame. Adopting it would bind the next prompt's handler to
+    // the previous prompt's job.
+    if (this.observedJobIds.has(frame.jobId)) return null;
+
+    const handler = this.pendingSessionHandlers.get(frame.sessionId);
+    if (!handler || handler.cancelled || handler.boundJobId !== null) {
+      return null;
+    }
+
+    this.bindHandler(handler, frame.jobId);
+    return handler.callback;
+  }
+
+  private bindHandler(handler: PendingSessionHandler, jobId: number) {
+    handler.boundJobId = jobId;
+    this.observeJobId(jobId);
+    this.jobCallbacks.set(jobId, handler.callback);
+  }
+
+  private observeJobId(jobId: number) {
+    if (this.observedJobIds.has(jobId)) return;
+    this.observedJobIds.add(jobId);
+    if (this.observedJobIds.size > MAX_OBSERVED_JOB_IDS) {
+      const oldest = this.observedJobIds.values().next().value;
+      if (oldest !== undefined) this.observedJobIds.delete(oldest);
     }
   }
 

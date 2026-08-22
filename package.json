@@ -15,7 +15,9 @@
     "db:check": "drizzle-kit check",
     "db:up": "drizzle-kit up",
     "db:reset": "rm -rf lib/db/migrations && mkdir -p lib/db/migrations/meta && echo '{\"version\":\"7\",\"dialect\":\"postgresql\",\"entries\":[]}' > lib/db/migrations/meta/_journal.json && drizzle-kit generate",
-    "test": "export PLAYWRIGHT=True && pnpm exec playwright test"
+    "test": "export PLAYWRIGHT=True && pnpm exec playwright test",
+    "test:unit": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^1.0.41",
@@ -120,7 +122,8 @@
     "tailwindcss": "^4.1.16",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "ultracite": "5.3.9"
+    "ultracite": "5.3.9",
+    "vitest": "^4.1.11"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

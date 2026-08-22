@@ -4,6 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
+import { Globe } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -14,6 +15,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -21,8 +23,24 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
-import { chatModels } from "@/lib/ai/models";
-import { $http } from "@/lib/http";
+import {
+  chatModels,
+  formatFee,
+  groupModelsBySpecialty,
+  modelSpecialty,
+  modelSpeed,
+  modelSupportsImages,
+  starterPrompts,
+} from "@/lib/ai/models";
+import {
+  checkImageBudget,
+  downscaleImageToBase64,
+  stripDataUrlPrefix,
+} from "@/lib/protocol/prompt-envelope";
+import {
+  DEFAULT_WEB_SEARCH_MODE,
+  type WebSearchMode,
+} from "@/lib/protocol/search-intent";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
@@ -43,10 +61,7 @@ import {
   StopIcon,
 } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
-import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -62,13 +77,11 @@ function PureMultimodalInput({
   setMessages,
   sendMessage,
   className,
-  selectedVisibilityType,
   selectedModelId,
   onModelChange,
   usage,
-  enableWebSearch,
-  onWebSearchToggle,
-  searchCapable,
+  webSearchMode,
+  onWebSearchModeChange,
   disabled,
   disabledPlaceholder,
   onBeforeSubmit,
@@ -88,16 +101,8 @@ function PureMultimodalInput({
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   usage?: AppUsage;
-  enableWebSearch?: boolean;
-  onWebSearchToggle?: (enabled: boolean) => void;
-  /**
-   * Whether the session's bound worker advertises the "search" capability
-   * (web-search epic, Story 16). When false, the Switch is rendered disabled
-   * with a tooltip explaining the constraint — the user must start a new
-   * conversation requesting search up front to enable it. The flag is sourced
-   * from SessionManager.workerCapabilities.
-   */
-  searchCapable?: boolean;
+  webSearchMode?: WebSearchMode;
+  onWebSearchModeChange?: (mode: WebSearchMode) => void;
   disabled?: boolean;
   disabledPlaceholder?: string;
   /**
@@ -212,31 +217,38 @@ function PureMultimodalInput({
     onBeforeSubmit,
   ]);
 
-  const uploadFile = useCallback(async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const response = await $http.request("/api/files/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const { url, pathname, contentType } = data;
-
-        return {
-          url,
-          name: pathname,
-          contentType,
-        };
-      }
-      const { error } = await response.json();
-      toast.custom((id) => <AlertError id={id} title={error} />);
-    } catch (_error) {
+  /**
+   * Prepares an image for sending without uploading it anywhere.
+   *
+   * An attachment is part of the prompt, so it travels inside the encrypted
+   * blob like the text does. Uploading it to object storage first would put
+   * the user's image behind a public URL, which contradicts the end-to-end
+   * encryption the rest of this path is built around.
+   *
+   * Downscaling is not optional: the prompt blob is capped at 126,972 bytes,
+   * and a phone photo is an order of magnitude over that on its own.
+   */
+  const prepareImage = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
       toast.custom((id) => (
-        <AlertError id={id} title="Failed to upload file, please try again!" />
+        <AlertError
+          id={id}
+          title={`${file.name} is not an image. Only images can be sent to a vision model.`}
+        />
+      ));
+      return;
+    }
+    try {
+      const base64 = await downscaleImageToBase64(file);
+      return {
+        url: `data:image/jpeg;base64,${base64}`,
+        name: file.name,
+        contentType: "image/jpeg",
+      };
+    } catch (error) {
+      console.error("Failed to prepare image", error);
+      toast.custom((id) => (
+        <AlertError id={id} title={`Could not read ${file.name}.`} />
       ));
     }
   }, []);
@@ -260,23 +272,31 @@ function PureMultimodalInput({
       setUploadQueue(files.map((file) => file.name));
 
       try {
-        const uploadPromises = files.map((file) => uploadFile(file));
-        const uploadedAttachments = await Promise.all(uploadPromises);
-        const successfullyUploadedAttachments = uploadedAttachments.filter(
+        const prepared = (await Promise.all(files.map(prepareImage))).filter(
           (attachment) => attachment !== undefined
         );
 
-        setAttachments((currentAttachments) => [
-          ...currentAttachments,
-          ...successfullyUploadedAttachments,
-        ]);
+        const next = [...attachments, ...prepared];
+        // Reject the whole batch rather than sending a prompt that will fail
+        // on chain after the consumer has already been charged for it.
+        const budgetError = checkImageBudget(
+          next.map((a) => stripDataUrlPrefix(a.url))
+        );
+        if (budgetError) {
+          toast.custom((id) => <AlertError id={id} title={budgetError} />);
+          return;
+        }
+        setAttachments(next);
       } catch (error) {
-        console.error("Error uploading files!", error);
+        console.error("Error preparing attachments", error);
       } finally {
         setUploadQueue([]);
+        // Clearing the input lets the same file be picked again after a
+        // removal, which otherwise silently does nothing.
+        event.target.value = "";
       }
     },
-    [setAttachments, uploadFile]
+    [attachments, prepareImage, setAttachments]
   );
 
   const showEmptyState =
@@ -288,6 +308,9 @@ function PureMultimodalInput({
   return (
     <div className={cn("relative flex w-full flex-col gap-8", className)}>
       <input
+        // Only vision models exist in this fleet; anything else would be
+        // encrypted into the prompt and then ignored by the model.
+        accept="image/*"
         className="-top-4 -left-4 pointer-events-none fixed size-0.5 opacity-0"
         multiple
         onChange={handleFileChange}
@@ -297,9 +320,30 @@ function PureMultimodalInput({
       />
 
       {showEmptyState && (
-        <h2 className="text-center font-semibold text-2xl text-content-ultra md:text-3xl xl:text-4xl">
-          Start a conversation
-        </h2>
+        <div className="flex flex-col items-center gap-4">
+          <h2 className="text-center font-semibold text-2xl text-content-ultra md:text-3xl xl:text-4xl">
+            Start a conversation
+          </h2>
+          {/* Starters are chosen for the selected model, so a coding model
+              suggests code and a vision model asks for an image. A blank box
+              with no examples was the entire authenticated empty state. */}
+          <div className="flex flex-wrap justify-center gap-2">
+            {starterPrompts(selectedModelId).map((prompt) => (
+              <button
+                className="rounded-full border border-bdr-light px-3 py-1.5 text-content-default text-xs transition-colors hover:bg-surface-base-faint disabled:opacity-50"
+                disabled={disabled || !canUseChat}
+                key={prompt}
+                onClick={() => {
+                  setInput(prompt);
+                  textareaRef.current?.focus();
+                }}
+                type="button"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       <PromptInput
@@ -382,15 +426,12 @@ function PureMultimodalInput({
         </div>
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
-            {/* <AttachmentsButton
-              fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
-              status={status}
-            /> */}
+            {modelSupportsImages(selectedModelId) && (
+              <AttachmentsButton fileInputRef={fileInputRef} status={status} />
+            )}
             <WebSearchToggle
-              enabled={enableWebSearch ?? false}
-              onToggle={onWebSearchToggle}
-              searchCapable={searchCapable ?? false}
+              mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
+              onModeChange={onWebSearchModeChange}
             />
             <ModelSelectorCompact
               onModelChange={onModelChange}
@@ -398,7 +439,10 @@ function PureMultimodalInput({
             />
           </PromptInputTools>
 
-          {status === "submitted" ? (
+          {/* Also while streaming, not just while submitted. A long answer
+              from a 40 tok/s model runs for tens of seconds, and until now
+              there was no way to cut it short. */}
+          {status === "submitted" || status === "streaming" ? (
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
             <PromptInputSubmit
@@ -411,19 +455,6 @@ function PureMultimodalInput({
           )}
         </PromptInputToolbar>
       </PromptInput>
-
-      {messages.length === 0 &&
-        attachments.length === 0 &&
-        uploadQueue.length === 0 &&
-        canUseChat &&
-        !disabled && (
-          <SuggestedActions
-            chatId={chatId}
-            onBeforeSubmit={onBeforeSubmit}
-            selectedVisibilityType={selectedVisibilityType}
-            sendMessage={sendMessage}
-          />
-        )}
     </div>
   );
 }
@@ -446,17 +477,14 @@ export const MultimodalInput = memo(
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
       return false;
     }
-    if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
-      return false;
-    }
-    if (prevProps.searchCapable !== nextProps.searchCapable) {
+    if (prevProps.webSearchMode !== nextProps.webSearchMode) {
       return false;
     }
     if (prevProps.disabled !== nextProps.disabled) {
       return false;
     }
-    // Re-render when the send guard changes identity so submitForm/SuggestedActions
-    // capture the latest readiness closure instead of a stale one.
+    // Re-render when the send guard changes identity so submitForm captures the
+    // latest readiness closure instead of a stale one.
     if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
       return false;
     }
@@ -465,70 +493,84 @@ export const MultimodalInput = memo(
   }
 );
 
+const WEB_SEARCH_LABELS: Record<WebSearchMode, string> = {
+  auto: "Auto",
+  on: "On",
+  off: "Off",
+};
+
+const WEB_SEARCH_TITLES: Record<WebSearchMode, string> = {
+  auto: "Web search: Auto — runs only when the question needs current information. Click to always search.",
+  on: "Web search: On — every prompt is searched. Click to never search.",
+  off: "Web search: Off — never searches. Click to go back to Auto.",
+};
+
+const NEXT_WEB_SEARCH_MODE: Record<WebSearchMode, WebSearchMode> = {
+  auto: "on",
+  on: "off",
+  off: "auto",
+};
+
 /**
- * WebSearchToggle renders the per-message web-search switch (web-search
- * epic, Story 16). When the session's bound worker doesn't advertise the
- * "search" capability, the switch renders disabled and a tooltip explains
- * how to enable it. This mirrors a real-world constraint: the worker's
- * BYOK TAVILY_API_KEY is set at boot, so mid-session capability changes
- * aren't possible without a new session and a new worker binding.
+ * Per-message web-search control. Search is resolved in the browser and folded
+ * into the prompt before it is encrypted, so it works with every model and no
+ * longer depends on the bound worker advertising a "search" capability.
+ *
+ * Three states rather than two: Auto is the default and lets the prompt decide,
+ * while On and Off are the manual overrides for when it decides wrongly.
  */
 function WebSearchToggle({
-  enabled,
-  onToggle,
-  searchCapable,
+  mode,
+  onModeChange,
 }: {
-  enabled: boolean;
-  onToggle?: (enabled: boolean) => void;
-  searchCapable: boolean;
+  mode: WebSearchMode;
+  onModeChange?: (mode: WebSearchMode) => void;
 }) {
-  const inner = (
-    <div className="flex items-center gap-2 px-1 py-1">
-      <Switch
-        checked={searchCapable ? enabled : false}
-        className="rounded-full!"
-        disabled={!searchCapable}
-        onCheckedChange={searchCapable ? onToggle : undefined}
-      />
-      <span className="text-content-secondary text-sm">Web Search</span>
-    </div>
-  );
-
-  if (searchCapable) {
-    return inner;
-  }
-
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{inner}</TooltipTrigger>
-      <TooltipContent>
-        This conversation&apos;s worker doesn&apos;t support web search. Start a
-        new conversation to enable it.
-      </TooltipContent>
-    </Tooltip>
+    <Button
+      className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+      data-testid="web-search-toggle"
+      onClick={() => onModeChange?.(NEXT_WEB_SEARCH_MODE[mode])}
+      title={WEB_SEARCH_TITLES[mode]}
+      type="button"
+      variant="ghost"
+    >
+      <Globe className={cn("size-4", mode === "off" && "opacity-40")} />
+      <span className="text-content-secondary">Web Search</span>
+      <span
+        className={cn(
+          "rounded px-1.5 py-0.5 text-xs",
+          mode === "on" && "bg-primary/10 text-primary",
+          mode === "auto" && "bg-muted text-content-secondary",
+          mode === "off" && "text-content-secondary opacity-60"
+        )}
+      >
+        {WEB_SEARCH_LABELS[mode]}
+      </span>
+    </Button>
   );
 }
 
+// The caller only renders this for models that can read an image, so there is
+// no model check here — see modelSupportsImages in lib/ai/models.
 function PureAttachmentsButton({
   fileInputRef,
   status,
-  selectedModelId,
 }: {
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
   status: UseChatHelpers<ChatMessage>["status"];
-  selectedModelId: string;
 }) {
-  const isReasoningModel = selectedModelId === "chat-model-reasoning";
-
   return (
     <Button
+      aria-label="Attach an image"
       className="aspect-square h-8 rounded-lg p-1 transition-colors hover:bg-accent"
       data-testid="attachments-button"
-      disabled={status !== "ready" || isReasoningModel}
+      disabled={status !== "ready"}
       onClick={(event) => {
         event.preventDefault();
         fileInputRef.current?.click();
       }}
+      title="Attach an image"
       variant="ghost"
     >
       <PaperclipIcon size={14} style={{ width: 14, height: 14 }} />
@@ -536,7 +578,6 @@ function PureAttachmentsButton({
   );
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: This is used in the future
 const AttachmentsButton = memo(PureAttachmentsButton);
 
 function PureModelSelectorCompact({
@@ -547,6 +588,7 @@ function PureModelSelectorCompact({
   onModelChange?: (modelId: string) => void;
 }) {
   const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     setOptimisticModelId(selectedModelId);
@@ -555,6 +597,19 @@ function PureModelSelectorCompact({
   const selectedModel = chatModels.find(
     (model) => model.id === optimisticModelId
   );
+
+  const groups = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const matching = needle
+      ? chatModels.filter(
+          (m) =>
+            m.name.toLowerCase().includes(needle) ||
+            m.description.toLowerCase().includes(needle) ||
+            modelSpecialty(m.id).toLowerCase().includes(needle)
+        )
+      : chatModels;
+    return groupModelsBySpecialty(matching);
+  }, [query]);
 
   return (
     <PromptInputModelSelect
@@ -578,23 +633,59 @@ function PureModelSelectorCompact({
         <span className="hidden font-medium text-xs sm:block">
           {selectedModel?.name}
         </span>
+        {selectedModel && (
+          <span
+            className="hidden text-content-subtle text-xs sm:block"
+            title="Cost of one prompt with this model"
+          >
+            {formatFee(selectedModel.fee)}
+          </span>
+        )}
         <ChevronDownIcon size={16} />
       </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
-        <div className="flex flex-col gap-px">
-          {chatModels.map((model) => (
-            <SelectItem
-              className="rounded-lg"
-              key={model.id}
-              value={model.name}
-            >
-              <h6 className="mb-0.5 truncate font-medium text-xs">
-                {model.name}
-              </h6>
-              <p className="mt-px text-[10px] text-muted-foreground leading-tight">
-                {model.description}
+      <PromptInputModelSelectContent className="max-w-[340px] rounded-lg p-0">
+        {/* Seventeen models in a flat list ran off the bottom of the viewport,
+            which is why this is grouped and filterable rather than a plain
+            list. Fee and speed are on each row because they are what people
+            actually choose on. */}
+        <div className="border-bdr-light border-b p-1.5">
+          <input
+            className="w-full rounded-md bg-surface-base-faint px-2 py-1 text-xs outline-none placeholder:text-content-subtle"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder="Search models"
+            value={query}
+          />
+        </div>
+        <div className="flex max-h-[320px] flex-col gap-px overflow-y-auto p-1">
+          {groups.length === 0 && (
+            <p className="px-2 py-3 text-center text-content-subtle text-xs">
+              No model matches &ldquo;{query}&rdquo;
+            </p>
+          )}
+          {groups.map((group) => (
+            <div key={group.specialty}>
+              <p className="px-2 pt-2 pb-1 font-medium text-[10px] text-content-subtle uppercase tracking-wide">
+                {group.specialty}
               </p>
-            </SelectItem>
+              {group.models.map((model) => (
+                <SelectItem
+                  className="rounded-lg py-1"
+                  key={model.id}
+                  title={model.description}
+                  value={model.name}
+                >
+                  <span className="flex w-full items-baseline justify-between gap-2">
+                    <span className="truncate font-medium text-xs">
+                      {model.name}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-content-subtle">
+                      {modelSpeed(model.id)} · {formatFee(model.fee)}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </div>
           ))}
         </div>
       </PromptInputModelSelectContent>
