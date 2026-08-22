@@ -3,6 +3,16 @@ import { lcai, lcaiLocalhost, lcaiTestnet } from "./chains";
 
 export const isTestnet = process.env.NEXT_PUBLIC_LCAI_IS_TESTNET === "true";
 
+// The [lcaiTestnet.id] keys in the address maps below are written after
+// [lcai.id]. Now that lcaiTestnet.id is build-arg driven, a devnet build that
+// set NEXT_PUBLIC_CHAIN_ID=9200 would overwrite the source-pinned mainnet
+// addresses with testnet ones. Fail the build instead.
+if (isTestnet && lcaiTestnet.id === lcai.id) {
+  throw new Error(
+    `NEXT_PUBLIC_CHAIN_ID=${lcaiTestnet.id} collides with mainnet's chain id; refusing to build.`,
+  );
+}
+
 // Testnet contract addresses are build-arg overridable so local devnets
 // (chainId 8200, freshly-deployed contracts) and forks can point the
 // frontend at their own deployments without a source edit. When the env

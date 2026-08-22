@@ -74,8 +74,11 @@ export const siweConfig = createSIWEConfig({
     // verify if token is valid
     const response = await $http.get("/api/auth/session");
 
-    const data = await response.json();
-    if (!data.user) {
+    // The endpoint replies with a bare `null` body when the bearer token is
+    // missing or rejected, and an edge proxy can substitute a non-JSON body,
+    // so neither the parse nor the result is safe to assume.
+    const data = await response.json().catch(() => null);
+    if (!data?.user) {
       clearAuthToken();
       return null;
     }
