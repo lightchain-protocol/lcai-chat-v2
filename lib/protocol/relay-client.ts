@@ -19,6 +19,7 @@
  */
 
 import { $http } from "../http";
+import type { ArtifactDescriptor, AudioStreamDescriptor } from "./audio-stream";
 import type { SettlementProgress } from "./settlement";
 import type { StreamMetricsSnapshot } from "./stream-metrics";
 import type { ResponseProof } from "./verify-response";
@@ -104,6 +105,13 @@ type PendingAssistantMessage = {
   proof: ResponseProof | null;
   settlement: SettlementProgress | null;
   metrics: StreamMetricsSnapshot | null;
+  /**
+   * Final voice-output descriptor (no PCM — audio is live-only). Persisted so
+   * a reload still shows the delivered-not-settled badge and content hash.
+   */
+  audio: AudioStreamDescriptor | null;
+  /** Artifact descriptors, persisted with the message (small JSON by wire contract). */
+  artifacts: ArtifactDescriptor[];
   protocolMeta: Record<string, unknown>;
 };
 
@@ -483,6 +491,8 @@ export class RelayClient {
       proof: null,
       settlement: null,
       metrics: null,
+      audio: null,
+      artifacts: [],
       protocolMeta: args.protocolMeta,
     });
   }
@@ -558,6 +568,24 @@ export class RelayClient {
     pending.metrics = metrics;
   }
 
+  /**
+   * Attach the voice-output descriptor. Only the descriptor persists — PCM
+   * chunks are live-playback bytes and are gone after reload, exactly like
+   * the response ciphertext.
+   */
+  setAssistantAudio(jobId: number, audio: AudioStreamDescriptor) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.audio = audio;
+  }
+
+  /** Append one artifact descriptor; order matches delivery order. */
+  addAssistantArtifact(jobId: number, artifact: ArtifactDescriptor) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.artifacts.push(artifact);
+  }
+
   discardAssistantMessage(jobId: number) {
     this.pendingAssistantMessages.delete(jobId);
     this.pendingAssistantSources.delete(jobId);
@@ -603,6 +631,20 @@ export class RelayClient {
         type: "data-streamMetrics",
         id: `protocol-metrics-${jobId}`,
         data: pending.metrics,
+      });
+    }
+    if (pending.audio) {
+      parts.push({
+        type: "data-audioStream",
+        id: `protocol-audio-${jobId}`,
+        data: pending.audio,
+      });
+    }
+    for (const [index, artifact] of pending.artifacts.entries()) {
+      parts.push({
+        type: "data-artifact",
+        id: `protocol-artifact-${jobId}-${index}`,
+        data: artifact,
       });
     }
     parts.push({

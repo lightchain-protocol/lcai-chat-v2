@@ -2,6 +2,10 @@ import type { InferUITool, UIMessage } from "ai";
 import { z } from "zod";
 import type { getWeather } from "./ai/tools/get-weather";
 import type { webSearch } from "./ai/tools/web-search";
+import type {
+  ArtifactDescriptor,
+  AudioStreamDescriptor,
+} from "./protocol/audio-stream";
 import type { GenerationStats } from "./protocol/relay-client";
 import type { SettlementProgress } from "./protocol/settlement";
 import type { StreamMetricsSnapshot } from "./protocol/stream-metrics";
@@ -39,6 +43,7 @@ export type ProtocolLoadingStatus =
   | "writing_on_chain"
   | "searching_web"
   | "submitting_job"
+  | "transcribing"
   | "waiting_for_relay"
   | "decoding_prompt"
   | "thinking"
@@ -56,6 +61,11 @@ export const PROTOCOL_LOADING_STATUS_LABELS: Record<
   writing_on_chain: "Writing on chain...",
   searching_web: "Searching the web...",
   submitting_job: "Uploading prompt to chain...",
+  // Voice prompts take an extra worker-side step (whisper STT) inside the
+  // same post-submit wait. Shown only when the prompt carried audio, in place
+  // of waiting_for_relay — the wire gives no separate transcription signal,
+  // so this label covers the whole pre-first-frame phase honestly.
+  transcribing: "Transcribing your voice prompt...",
   // The longest wait in the whole flow: the worker has the job and is loading
   // the model. A cold one takes over ten seconds, so this says what is
   // happening rather than leaving a generic spinner.
@@ -95,6 +105,16 @@ export type CustomUIDataTypes = {
   // Browser-measured timing (TTFT, rolling throughput estimate). The worker's
   // own numbers live in generationStats; these cover the wait before them.
   streamMetrics: StreamMetricsSnapshot;
+  // Live voice-output stream: the descriptor (header, then final with the
+  // content hash) reconciles in place under a stable id. DELIVERED, NOT
+  // SETTLED — audio is outside the settlement commitment until Phase-2.
+  audioStream: AudioStreamDescriptor;
+  // One part per 32 KiB PCM chunk (unique ids, appended). Live playback only —
+  // never persisted with the message, so audio is gone after reload.
+  audioChunk: { seq: number; pcm: string };
+  // One artifact descriptor per artifact frame (unique ids). Persisted with
+  // the message; rendered "delivered, not settled".
+  artifact: ArtifactDescriptor;
 };
 
 export type ChatMessage = UIMessage<

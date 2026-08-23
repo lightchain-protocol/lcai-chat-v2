@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { useLocalStorage } from "usehooks-ts";
 import { useAccount, useBalance } from "wagmi";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
@@ -17,6 +18,7 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { modelSupportsVoice } from "@/lib/ai/models";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
@@ -106,6 +108,17 @@ export function Chat({
     DEFAULT_WEB_SEARCH_MODE
   );
   const webSearchModeRef = useRef(webSearchMode);
+
+  // "Speak responses" opt-in (envelope v2 audioResponse). Persisted per
+  // browser; effective only when the selected model's worker runs the TTS
+  // sidecar — the toggle is hidden otherwise (modelSupportsVoice), and the
+  // double-gate below keeps a stale stored true from reaching a non-voice
+  // model's envelope.
+  const [speakResponses, setSpeakResponses] = useLocalStorage(
+    "speak-responses",
+    false
+  );
+  const speakResponsesRef = useRef(speakResponses);
   const { walletClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
@@ -210,6 +223,11 @@ export function Chat({
               // forwards the decision through SessionManager.submitJob →
               // GatewayClient.uploadBlob → consumer-api side-channel write.
               webSearchMode: webSearchModeRef.current,
+              // Spoken-output opt-in → envelope v2 audioResponse. Gated on
+              // the live model pick, not just the stored preference.
+              audioResponse:
+                speakResponsesRef.current &&
+                modelSupportsVoice(currentModelIdRef.current),
             },
             signal: init?.signal ?? undefined,
           });
@@ -273,6 +291,10 @@ export function Chat({
   useEffect(() => {
     webSearchModeRef.current = webSearchMode;
   }, [webSearchMode]);
+
+  useEffect(() => {
+    speakResponsesRef.current = speakResponses;
+  }, [speakResponses]);
 
   // Show a non-blocking toast when a job's deadline passes with no response
   useEffect(() => {
@@ -444,6 +466,7 @@ export function Chat({
               messages={messages}
               onBeforeSubmit={canPrompt}
               onModelChange={setCurrentModelId}
+              onSpeakResponsesChange={setSpeakResponses}
               onWebSearchModeChange={setWebSearchMode}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
@@ -451,6 +474,7 @@ export function Chat({
               setAttachments={setAttachments}
               setInput={setInput}
               setMessages={setMessages}
+              speakResponses={speakResponses}
               status={status}
               stop={stop}
               usage={usage}

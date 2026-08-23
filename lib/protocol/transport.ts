@@ -15,9 +15,13 @@
  */
 
 import type { ProtocolLoadingStatus } from "../types";
+import type { AudioStreamDescriptor } from "./audio-stream";
+import { parseArtifactDescriptor, parseAudioFrame } from "./audio-stream";
+import { bytesToBase64 } from "./base64";
 import type { GatewayClient } from "./gateway-client";
 import {
   buildPromptEnvelope,
+  checkAudioBudget,
   checkImageBudget,
   serializePrompt,
   stripDataUrlPrefix,
@@ -401,7 +405,10 @@ export class ProtocolTransport {
       throw new Error("No messages provided");
     }
     const plaintext = extractTextFromMessage(lastMessage);
-    if (!plaintext) {
+    const audioBase64 = extractAudioFromMessage(lastMessage);
+    // A voice prompt may carry no text at all: the transcript is produced
+    // worker-side and merged into the prompt there.
+    if (!plaintext && !audioBase64) {
       throw new Error("No text content in last message");
     }
     const images = extractImagesFromMessage(lastMessage);
@@ -409,7 +416,15 @@ export class ProtocolTransport {
     if (budgetError) {
       throw new Error(budgetError);
     }
-    const enableWebSearch = shouldSearch(webSearchMode, plaintext);
+    const audioBudgetError = checkAudioBudget(audioBase64);
+    if (audioBudgetError) {
+      throw new Error(audioBudgetError);
+    }
+    // Opt-in spoken output (composer "speak responses" toggle). The composer
+    // gates the toggle on voice-capable models; a stale body value on a
+    // non-voice worker is a no-op there, not an error.
+    const audioResponse = options.body?.audioResponse === true;
+    const enableWebSearch = shouldSearch(webSearchMode, plaintext ?? "");
 
     const chatId = getChatId(options.body);
     if (!chatId) {
@@ -485,6 +500,7 @@ export class ProtocolTransport {
       chatId,
       prelude,
       signal: options.signal,
+      hasAudioPrompt: audioBase64 !== null,
       onJobIdResolved: (jobId) => {
         persist.settle(jobId);
         // Deadline tracking is best-effort; failure must not block delivery.
@@ -520,10 +536,15 @@ export class ProtocolTransport {
 
     // Deliberately not awaited — the stream must be able to emit its first
     // token before this resolves. Both outcomes are routed into the stream.
-    this.buildPrompt(plaintext, enableWebSearch, protocolStream)
+    this.buildPrompt(plaintext ?? "", enableWebSearch, protocolStream)
       .then((prompt) =>
         this.sessionMgr.submitJob(
-          serializePrompt(buildPromptEnvelope(prompt, images)),
+          serializePrompt(
+            buildPromptEnvelope(prompt, images, {
+              audio: audioBase64 ?? undefined,
+              audioResponse: audioResponse || undefined,
+            })
+          ),
           { searchEnabled: enableWebSearch }
         )
       )
@@ -1025,6 +1046,8 @@ export class ProtocolTransport {
     /** Resolves once the user message is stored and the session registered. */
     prelude: Promise<void>;
     signal?: AbortSignal;
+    /** True when the prompt carried a voice clip (drives the transcribing status). */
+    hasAudioPrompt?: boolean;
     /** Fired once, with the first jobId this stream learns about. */
     onJobIdResolved: (jobId: number) => void;
     /** Fired once when the stream ends, with the jobId if one was learned. */
@@ -1035,6 +1058,7 @@ export class ProtocolTransport {
       chatId,
       prelude,
       signal,
+      hasAudioPrompt = false,
       onJobIdResolved,
       onTerminated,
     } = args;
@@ -1061,6 +1085,12 @@ export class ProtocolTransport {
     // SDK) and are persisted in their final form with the assistant message.
     const metrics = new StreamMetricsTracker(Date.now());
     let settlement: SettlementProgress = { stage: "escrowed" };
+    // Voice-output stream state: the descriptor reconciles in place under a
+    // stable part id (header first, final descriptor merged over it); PCM
+    // chunks append under unique ids. Only the descriptor is persisted.
+    let audioDescriptor: AudioStreamDescriptor | null = null;
+    let audioChunkSeq = 0;
+    let artifactCount = 0;
     // Awaited before persist, like capturedProof: the post-settle chain re-read
     // that fills in the on-chain completion time.
     let capturedSettlement: Promise<void> = Promise.resolve();
@@ -1276,6 +1306,39 @@ export class ProtocolTransport {
         // the terminal frame, which carries only the answer.
         const kind = frameKind(wsFrame);
         if (wsFrame.payload && wsFrame.type !== "complete" && kind !== "text") {
+          // Audio frames carry raw PCM, which is not UTF-8 — decrypting via
+          // the string path would corrupt the samples, so this channel takes
+          // the bytes path and classifies after decryption.
+          if (kind === "audio") {
+            const bytes = await sessionMgr.decryptResponseBytes(
+              wsFrame.payload
+            );
+            const audioFrame = parseAudioFrame(bytes);
+            if (audioFrame.kind === "meta") {
+              // The final descriptor repeats the header fields and adds the
+              // delivery totals + content hash; merging keeps either order.
+              audioDescriptor = audioDescriptor
+                ? { ...audioDescriptor, ...audioFrame.meta }
+                : audioFrame.meta;
+              emit({
+                type: "data-audioStream",
+                id: `protocol-audio-${assistantMessageId}`,
+                data: audioDescriptor,
+              });
+            } else {
+              audioChunkSeq += 1;
+              emit({
+                type: "data-audioChunk",
+                id: `protocol-audio-chunk-${assistantMessageId}-${audioChunkSeq}`,
+                data: {
+                  seq: audioChunkSeq,
+                  pcm: bytesToBase64(audioFrame.pcm),
+                },
+              });
+            }
+            return;
+          }
+
           const decrypted = await sessionMgr.decryptResponse(wsFrame.payload);
 
           if (kind === "reasoning") {
@@ -1308,9 +1371,24 @@ export class ProtocolTransport {
             return;
           }
 
-          // artifact / audio frames are carried by the same channel but have
-          // no renderer yet; dropping them here keeps them out of the answer
-          // text rather than corrupting it.
+          if (kind === "artifact") {
+            const descriptor = parseArtifactDescriptor(decrypted);
+            if (descriptor) {
+              artifactCount += 1;
+              relayClient?.addAssistantArtifact(jobId, descriptor);
+              emit({
+                type: "data-artifact",
+                id: `protocol-artifact-${assistantMessageId}-${artifactCount}`,
+                data: descriptor,
+              });
+            }
+            // A malformed descriptor is dropped: one missing card, never a
+            // broken answer (same best-effort contract as stats frames).
+            return;
+          }
+
+          // Unknown future kinds are dropped here rather than corrupting the
+          // answer text.
           return;
         }
 
@@ -1408,6 +1486,11 @@ export class ProtocolTransport {
           emit({ type: "text-end", id: partId });
           applySettlement({ type: "settled", atMs: Date.now() });
           emitMetrics(true);
+          // Persist the voice descriptor (never the PCM) so a reload keeps
+          // the delivered-not-settled badge and the local content hash.
+          if (audioDescriptor) {
+            relayClient?.setAssistantAudio(jobId, audioDescriptor);
+          }
           // The terminal frame proves delivery; a best-effort chain re-read
           // fills in the on-chain completion time for the persisted timeline.
           // Awaited below, before the message is stored, exactly like the
@@ -1515,7 +1598,14 @@ export class ProtocolTransport {
         return;
       }
 
-      if (!started) this.setProgressStatus("waiting_for_relay");
+      if (!started) {
+        // Voice prompts spend this window in whisper STT on the worker; the
+        // wire gives no separate signal for it, so the label covers the whole
+        // post-submit wait honestly.
+        this.setProgressStatus(
+          hasAudioPrompt ? "transcribing" : "waiting_for_relay"
+        );
+      }
 
       if (jobId === null) {
         // Consumer-api returned at broadcast without a jobId. If we took the
@@ -1689,4 +1779,29 @@ function extractImagesFromMessage(message: {
       (p) => p.type === "file" && p.mediaType?.startsWith("image/") && p.url
     )
     .map((p) => stripDataUrlPrefix(p.url as string));
+}
+
+/**
+ * Pulls the voice-prompt clip off the outgoing message as bare base64.
+ *
+ * Like images, the clip is an in-memory data URL produced by the composer —
+ * it travels inside the encrypted prompt blob, never to public storage. The
+ * envelope carries exactly one audio field, so a second clip is rejected here
+ * rather than silently dropped.
+ */
+function extractAudioFromMessage(message: {
+  parts?: Array<{ type: string; mediaType?: string; url?: string }>;
+}): string | null {
+  if (!message.parts) return null;
+  const clips = message.parts
+    .filter(
+      (p) => p.type === "file" && p.mediaType?.startsWith("audio/") && p.url
+    )
+    .map((p) => stripDataUrlPrefix(p.url as string));
+  if (clips.length > 1) {
+    throw new Error(
+      "One voice clip per message — the prompt envelope carries a single audio field"
+    );
+  }
+  return clips[0] ?? null;
 }

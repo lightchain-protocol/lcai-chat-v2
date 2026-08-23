@@ -4,7 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Globe } from "lucide-react";
+import { Globe, Mic, Square, Volume2 } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -30,8 +30,15 @@ import {
   modelSpecialty,
   modelSpeed,
   modelSupportsImages,
+  modelSupportsVoice,
   starterPrompts,
 } from "@/lib/ai/models";
+import { MAX_VOICE_CLIP_SECONDS } from "@/lib/audio/pcm";
+import {
+  startVoiceRecording,
+  type VoiceClip,
+  type VoiceRecorder,
+} from "@/lib/audio/voice-recorder";
 import {
   checkImageBudget,
   downscaleImageToBase64,
@@ -82,6 +89,8 @@ function PureMultimodalInput({
   usage,
   webSearchMode,
   onWebSearchModeChange,
+  speakResponses,
+  onSpeakResponsesChange,
   disabled,
   disabledPlaceholder,
   onBeforeSubmit,
@@ -103,6 +112,12 @@ function PureMultimodalInput({
   usage?: AppUsage;
   webSearchMode?: WebSearchMode;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
+  /**
+   * "Speak responses" opt-in (envelope v2 audioResponse). Only rendered for
+   * voice-capable models; owned by chat.tsx so it survives composer remounts.
+   */
+  speakResponses?: boolean;
+  onSpeakResponsesChange?: (enabled: boolean) => void;
   disabled?: boolean;
   disabledPlaceholder?: string;
   /**
@@ -164,6 +179,80 @@ function PureMultimodalInput({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
+
+  // Voice-prompt recording. The clip lands as an in-memory audio/wav
+  // attachment — like images, it travels inside the encrypted prompt blob
+  // rather than via any uploaded URL.
+  const recorderRef = useRef<VoiceRecorder | null>(null);
+  const recordStartedAtRef = useRef<number>(0);
+  const [recordingElapsed, setRecordingElapsed] = useState<number | null>(null);
+  const isRecording = recordingElapsed !== null;
+
+  const finalizeClip = useCallback(
+    (clipPromise: Promise<VoiceClip>) => {
+      clipPromise
+        .then((clip) => {
+          setAttachments((current) => [
+            ...current,
+            {
+              url: `data:audio/wav;base64,${clip.wavBase64}`,
+              name: `Voice prompt (${clip.seconds.toFixed(1)}s)`,
+              contentType: "audio/wav",
+            },
+          ]);
+        })
+        .catch((error) => {
+          console.error("Voice recording failed", error);
+          toast.custom((id) => (
+            <AlertError id={id} title="Could not use that recording." />
+          ));
+        })
+        .finally(() => {
+          recorderRef.current = null;
+          setRecordingElapsed(null);
+        });
+    },
+    [setAttachments]
+  );
+
+  const startRecording = useCallback(async () => {
+    try {
+      const recorder = await startVoiceRecording({
+        onAutoStop: (clipPromise) => finalizeClip(clipPromise),
+      });
+      recorderRef.current = recorder;
+      recordStartedAtRef.current = Date.now();
+      setRecordingElapsed(0);
+    } catch (error) {
+      console.error("Microphone unavailable", error);
+      toast.custom((id) => (
+        <AlertError
+          id={id}
+          title="Microphone unavailable — check browser permission."
+        />
+      ));
+    }
+  }, [finalizeClip]);
+
+  const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    finalizeClip(recorder.stop());
+  }, [finalizeClip]);
+
+  // Elapsed-time ticker while recording.
+  useEffect(() => {
+    if (!isRecording) return;
+    const timer = setInterval(() => {
+      setRecordingElapsed((Date.now() - recordStartedAtRef.current) / 1000);
+    }, 200);
+    return () => clearInterval(timer);
+  }, [isRecording]);
+
+  // Abandon an unfinished recording on unmount rather than leaking the mic.
+  useEffect(() => {
+    return () => recorderRef.current?.cancel();
+  }, []);
 
   const submitForm = useCallback(() => {
     // Gate before mutating any state so a blocked send leaves the typed message
@@ -429,6 +518,21 @@ function PureMultimodalInput({
             {modelSupportsImages(selectedModelId) && (
               <AttachmentsButton fileInputRef={fileInputRef} status={status} />
             )}
+            {modelSupportsVoice(selectedModelId) && (
+              <>
+                <VoiceRecordButton
+                  elapsed={recordingElapsed}
+                  isRecording={isRecording}
+                  onStart={startRecording}
+                  onStop={stopRecording}
+                  status={status}
+                />
+                <SpeakResponsesToggle
+                  enabled={speakResponses ?? false}
+                  onChange={onSpeakResponsesChange}
+                />
+              </>
+            )}
             <WebSearchToggle
               mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
               onModeChange={onWebSearchModeChange}
@@ -447,7 +551,12 @@ function PureMultimodalInput({
           ) : (
             <PromptInputSubmit
               className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
-              disabled={disabled || !input.trim() || uploadQueue.length > 0}
+              disabled={
+                disabled ||
+                isRecording ||
+                (!input.trim() && attachments.length === 0) ||
+                uploadQueue.length > 0
+              }
               status={status}
             >
               <ArrowUpIcon size={14} />
@@ -478,6 +587,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.webSearchMode !== nextProps.webSearchMode) {
+      return false;
+    }
+    if (prevProps.speakResponses !== nextProps.speakResponses) {
       return false;
     }
     if (prevProps.disabled !== nextProps.disabled) {
@@ -579,6 +691,117 @@ function PureAttachmentsButton({
 }
 
 const AttachmentsButton = memo(PureAttachmentsButton);
+
+/**
+ * Mic button for voice prompts, shown only for voice-capable models (the
+ * caller gates on modelSupportsVoice). Recording is hard-capped at
+ * MAX_VOICE_CLIP_SECONDS by the envelope's audio budget — the button shows
+ * the countdown so the cutoff never surprises.
+ */
+function PureVoiceRecordButton({
+  isRecording,
+  elapsed,
+  onStart,
+  onStop,
+  status,
+}: {
+  isRecording: boolean;
+  elapsed: number | null;
+  onStart: () => void;
+  onStop: () => void;
+  status: UseChatHelpers<ChatMessage>["status"];
+}) {
+  if (isRecording) {
+    const remaining = Math.max(
+      0,
+      MAX_VOICE_CLIP_SECONDS - Math.floor(elapsed ?? 0)
+    );
+    return (
+      <Button
+        aria-label="Stop recording"
+        className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+        data-testid="voice-record-stop"
+        onClick={(event) => {
+          event.preventDefault();
+          onStop();
+        }}
+        title={`Stop recording (auto-stops at ${MAX_VOICE_CLIP_SECONDS}s — the per-prompt audio limit)`}
+        type="button"
+        variant="ghost"
+      >
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+        </span>
+        <span className="text-content-secondary tabular-nums">
+          {remaining}s
+        </span>
+        <Square size={12} />
+      </Button>
+    );
+  }
+  return (
+    <Button
+      aria-label="Record a voice prompt"
+      className="aspect-square h-8 rounded-lg p-1 transition-colors hover:bg-accent"
+      data-testid="voice-record-button"
+      disabled={status !== "ready"}
+      onClick={(event) => {
+        event.preventDefault();
+        onStart();
+      }}
+      title={`Record a voice prompt (up to ${MAX_VOICE_CLIP_SECONDS}s, transcribed by the worker)`}
+      type="button"
+      variant="ghost"
+    >
+      <Mic size={14} style={{ width: 14, height: 14 }} />
+    </Button>
+  );
+}
+
+const VoiceRecordButton = memo(PureVoiceRecordButton);
+
+/**
+ * "Speak responses" opt-in: sets the envelope's audioResponse flag so the
+ * worker streams a synthesized voice answer alongside the text. Off by
+ * default — audio costs the worker synthesis time inside the job deadline.
+ */
+function PureSpeakResponsesToggle({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange?: (enabled: boolean) => void;
+}) {
+  return (
+    <Button
+      aria-label="Toggle spoken responses"
+      className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+      data-testid="speak-responses-toggle"
+      onClick={(event) => {
+        event.preventDefault();
+        onChange?.(!enabled);
+      }}
+      title="Speak responses: the worker synthesizes the answer as audio (delivered live, not settled on-chain)"
+      type="button"
+      variant="ghost"
+    >
+      <Volume2 className={cn("size-4", !enabled && "opacity-40")} />
+      <span
+        className={cn(
+          "rounded px-1.5 py-0.5 text-xs",
+          enabled
+            ? "bg-primary/10 text-primary"
+            : "text-content-secondary opacity-60"
+        )}
+      >
+        {enabled ? "Speaking" : "Muted"}
+      </span>
+    </Button>
+  );
+}
+
+const SpeakResponsesToggle = memo(PureSpeakResponsesToggle);
 
 function PureModelSelectorCompact({
   selectedModelId,

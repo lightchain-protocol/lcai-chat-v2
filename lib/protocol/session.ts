@@ -522,12 +522,24 @@ export class SessionManager {
    * Decrypts a base64-encoded response payload from the relay.
    */
   async decryptResponse(base64Ciphertext: string): Promise<string> {
+    return new TextDecoder().decode(
+      await this.decryptResponseBytes(base64Ciphertext)
+    );
+  }
+
+  /**
+   * Decrypts a response payload to raw bytes, without UTF-8 decoding.
+   *
+   * `audio`-kind frames carry raw PCM, which is not valid UTF-8 — decoding it
+   * to a string would corrupt the samples. Text-ish kinds keep using
+   * decryptResponse above.
+   */
+  async decryptResponseBytes(base64Ciphertext: string): Promise<Uint8Array> {
     if (!this.sessionKey) {
       throw new Error("Session not initialized — no session key");
     }
     const ciphertext = base64ToUint8(base64Ciphertext);
-    const plaintext = await decrypt(this.sessionKey, ciphertext);
-    return new TextDecoder().decode(plaintext);
+    return await decrypt(this.sessionKey, ciphertext);
   }
 
   /**

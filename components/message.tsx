@@ -10,6 +10,8 @@ import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { Shimmer } from "./ai-elements/shimmer";
+import { ArtifactCard } from "./artifact";
+import { AudioStreamPlayer } from "./audio-stream-player";
 import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
@@ -123,6 +125,28 @@ const PurePreviewMessage = ({
       }
     }
     return null;
+  }, [parts]);
+
+  // Voice output: the descriptor reconciles in place (header, then final);
+  // PCM chunks append under unique ids and are live-only — never persisted,
+  // so after a reload only the descriptor's badge remains.
+  const audioStream = useMemo(() => {
+    for (const part of parts) {
+      if (part.type === "data-audioStream" && part.data) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const audioChunks = useMemo(() => {
+    const collected: Array<{ seq: number; pcm: string }> = [];
+    for (const part of parts) {
+      if (part.type === "data-audioChunk" && part.data) {
+        collected.push(part.data);
+      }
+    }
+    return collected;
   }, [parts]);
 
   const firstTextPartIndex = useMemo(
@@ -246,6 +270,18 @@ const PurePreviewMessage = ({
                   reasoning={part.text}
                 />
               );
+            }
+
+            // Artifact frames render as cards in delivery order. Each card
+            // carries the delivered-not-settled badge itself.
+            if (type === "data-artifact" && part.data) {
+              return <ArtifactCard descriptor={part.data} key={key} />;
+            }
+
+            // Audio parts are consumed once, below, by AudioStreamPlayer —
+            // rendering each chunk here would flood the message body.
+            if (type === "data-audioStream" || type === "data-audioChunk") {
+              return null;
             }
 
             if (type === "text") {
@@ -414,6 +450,15 @@ const PurePreviewMessage = ({
                 ))}
               </div>
             </div>
+          )}
+
+          {message.role === "assistant" && audioStream && (
+            <AudioStreamPlayer
+              chunks={audioChunks}
+              className="mt-2"
+              descriptor={audioStream}
+              live={isLoading}
+            />
           )}
 
           {message.role === "assistant" &&
