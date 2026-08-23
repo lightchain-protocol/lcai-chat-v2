@@ -4,11 +4,14 @@ import equal from "fast-deep-equal";
 import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
+import { isAgentDescriptor } from "@/lib/agent/timeline";
 import type { Vote } from "@/lib/db/schema";
+import type { ArtifactDescriptor } from "@/lib/protocol/audio-stream";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
+import { AgentTimeline } from "./agent-timeline";
 import { Shimmer } from "./ai-elements/shimmer";
 import { ArtifactCard } from "./artifact";
 import { AudioStreamPlayer } from "./audio-stream-player";
@@ -96,6 +99,22 @@ const PurePreviewMessage = ({
     }
     return null;
   }, [parts]);
+
+  // Agent-mode frames render as one step timeline per message, not as
+  // individual artifact cards — pairing tool_call/tool_result needs the
+  // whole set. Other artifact types keep their per-card rendering below.
+  const agentDescriptors = useMemo(
+    () =>
+      parts
+        .filter(
+          (part) =>
+            part.type === "data-artifact" &&
+            part.data &&
+            isAgentDescriptor(part.data)
+        )
+        .map((part) => (part as { data: ArtifactDescriptor }).data),
+    [parts]
+  );
 
   // The settlement journey and browser-measured timing, reconciled in place
   // during the stream (stable part ids) and persisted in final form, so the
@@ -262,6 +281,10 @@ const PurePreviewMessage = ({
             </div>
           )}
 
+          {agentDescriptors.length > 0 && (
+            <AgentTimeline descriptors={agentDescriptors} />
+          )}
+
           {parts.map((part, index) => {
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
@@ -276,9 +299,13 @@ const PurePreviewMessage = ({
               );
             }
 
-            // Artifact frames render as cards in delivery order. Each card
-            // carries the delivered-not-settled badge itself.
+            // Agent frames render together in the timeline above; everything
+            // else renders as cards in delivery order, each carrying its own
+            // delivered-not-settled badge.
             if (type === "data-artifact" && part.data) {
+              if (isAgentDescriptor(part.data)) {
+                return null;
+              }
               return <ArtifactCard descriptor={part.data} key={key} />;
             }
 
