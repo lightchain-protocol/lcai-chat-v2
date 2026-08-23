@@ -388,6 +388,9 @@ export function useProtocolSession(
     activeJobs,
     timedOutJob,
     getTransport,
+    // Exposed for the duel runner: side B needs the same authenticated
+    // gateway client (SIWE-token auth) rather than a second one.
+    getGateway,
     reset: resetForWallet,
     retryFailover,
     startNewSession,

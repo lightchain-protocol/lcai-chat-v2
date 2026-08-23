@@ -2,9 +2,10 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
-import { memo, useEffect, useRef } from "react";
+import { Fragment, memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
+import { getDuelMeta } from "@/lib/protocol/duel";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import {
@@ -13,6 +14,7 @@ import {
   type ProtocolLoadingStatus,
 } from "@/lib/types";
 import { useDataStream } from "./data-stream-provider";
+import { DuelGrid } from "./duel-grid";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
 import { PreviewMessage, ThinkingMessage } from "./message";
@@ -115,6 +117,68 @@ function PureMessages({
     }
   }, [status, messagesContainerRef]);
 
+  // Duel grouping (bc-2 §1): the anchor user message carries
+  // protocolMeta.duel {group, side:"A", model}, side B's assistant answer
+  // carries {group, side:"B", model}. Side A's assistant reply is positional —
+  // the assistant message right after the anchor — so the normal useChat path
+  // needs no duel awareness.
+  const duelSideBByGroup = new Map<string, ChatMessage>();
+  for (const m of messages) {
+    const duel = getDuelMeta(m);
+    if (duel?.side === "B") {
+      duelSideBByGroup.set(duel.group, m);
+    }
+  }
+  const duelSideAIds = new Set<string>();
+  messages.forEach((m, i) => {
+    const duel = getDuelMeta(m);
+    if (m.role !== "user" || duel?.side !== "A") {
+      return;
+    }
+    const next = messages[i + 1];
+    if (next?.role === "assistant" && !getDuelMeta(next)) {
+      duelSideAIds.add(next.id);
+    }
+  });
+
+  const renderPreview = (message: ChatMessage, index: number) => {
+    const jobId =
+      typeof message.metadata?.jobId === "number"
+        ? message.metadata.jobId
+        : undefined;
+    const trackedJob =
+      jobId !== undefined
+        ? activeJobs?.find((j) => j.jobId === jobId)
+        : undefined;
+
+    return (
+      <PreviewMessage
+        chatId={chatId}
+        claimJobTimeout={claimJobTimeout}
+        disputeJob={disputeJob}
+        disputeResponseMismatch={disputeResponseMismatch}
+        explorerBaseUrl={explorerBaseUrl}
+        fetchOnChainJob={fetchOnChainJob}
+        fetchWorkerStake={fetchWorkerStake}
+        hasMismatchEvidence={hasMismatchEvidence}
+        isLoading={status === "streaming" && messages.length - 1 === index}
+        isReadonly={isReadonly}
+        jobId={jobId}
+        key={message.id}
+        message={message}
+        regenerate={regenerate}
+        requiresScrollPadding={hasSentMessage && index === messages.length - 1}
+        setMessages={setMessages}
+        trackedJob={trackedJob}
+        vote={
+          votes
+            ? votes.find((vote) => vote.messageId === message.id)
+            : undefined
+        }
+      />
+    );
+  };
+
   return (
     <div
       className="overscroll-behavior-contain -webkit-overflow-scrolling-touch flex-1 touch-pan-y overflow-y-scroll"
@@ -133,45 +197,44 @@ function PureMessages({
               return null;
             }
 
-            const jobId =
-              typeof message.metadata?.jobId === "number"
-                ? message.metadata.jobId
-                : undefined;
-            const trackedJob =
-              jobId !== undefined
-                ? activeJobs?.find((j) => j.jobId === jobId)
+            const duel = getDuelMeta(message);
+
+            // Duel panes render inside the grid under their anchor, not
+            // standalone in the flow.
+            if (duel?.side === "B" || duelSideAIds.has(message.id)) {
+              return null;
+            }
+
+            if (message.role === "user" && duel?.side === "A") {
+              const sideB = duelSideBByGroup.get(duel.group);
+              const sideA = duelSideAIds.has(messages[index + 1]?.id ?? "")
+                ? messages[index + 1]
                 : undefined;
 
-            return (
-              <PreviewMessage
-                chatId={chatId}
-                claimJobTimeout={claimJobTimeout}
-                disputeJob={disputeJob}
-                disputeResponseMismatch={disputeResponseMismatch}
-                explorerBaseUrl={explorerBaseUrl}
-                fetchOnChainJob={fetchOnChainJob}
-                fetchWorkerStake={fetchWorkerStake}
-                hasMismatchEvidence={hasMismatchEvidence}
-                isLoading={
-                  status === "streaming" && messages.length - 1 === index
-                }
-                isReadonly={isReadonly}
-                jobId={jobId}
-                key={message.id}
-                message={message}
-                regenerate={regenerate}
-                requiresScrollPadding={
-                  hasSentMessage && index === messages.length - 1
-                }
-                setMessages={setMessages}
-                trackedJob={trackedJob}
-                vote={
-                  votes
-                    ? votes.find((vote) => vote.messageId === message.id)
-                    : undefined
-                }
-              />
-            );
+              return (
+                <Fragment key={message.id}>
+                  {renderPreview(message, index)}
+                  {sideB && (
+                    <DuelGrid
+                      modelA={duel.model}
+                      modelB={getDuelMeta(sideB)?.model ?? ""}
+                      paneA={
+                        sideA ? (
+                          renderPreview(sideA, index + 1)
+                        ) : (
+                          <p className="text-content-soft text-sm">
+                            This side didn&apos;t produce an answer.
+                          </p>
+                        )
+                      }
+                      paneB={renderPreview(sideB, index + 2)}
+                    />
+                  )}
+                </Fragment>
+              );
+            }
+
+            return renderPreview(message, index);
           })}
 
           <AnimatePresence mode="wait">

@@ -21,6 +21,8 @@ import useWeb3Clients from "@/hooks/use-web3-clients";
 import { modelSupportsVoice } from "@/lib/ai/models";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import { DUEL_BOTH_FAILED_COPY, duelFailureCopy } from "@/lib/protocol/duel";
+import { runDuelSideB } from "@/lib/protocol/duel-runner";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import {
   DEFAULT_WEB_SEARCH_MODE,
@@ -31,6 +33,7 @@ import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
+import { DuelDialog } from "./duel-dialog";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
@@ -120,7 +123,7 @@ export function Chat({
     false
   );
   const speakResponsesRef = useRef(speakResponses);
-  const { walletClient } = useWeb3Clients();
+  const { walletClient, publicClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
 
@@ -181,6 +184,7 @@ export function Chat({
   // Protocol mode: session management for on-chain encrypted chat
   const {
     getTransport: getProtocolTransport,
+    getGateway,
     failoverStatus,
     progressStatus,
     activeJobs,
@@ -196,7 +200,6 @@ export function Chat({
     fetchWorkerStake,
     clearTimedOutJob,
   } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
-
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
@@ -349,6 +352,13 @@ export function Chat({
       balance.refetch();
     },
     onError: (error: any) => {
+      // A duel's side A runs on the normal useChat path — if it dies while a
+      // duel is in flight, side B's failure copy upgrades to the single
+      // both-failed summary (bc-2 §1.6: one summary, not two popups).
+      if (duelInFlightRef.current) {
+        duelInFlightRef.current.sideAFailed = true;
+      }
+
       if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError
@@ -366,6 +376,126 @@ export function Chat({
       ));
     },
   });
+
+  // --- Multi-model duel (bc-2 §1) -----------------------------------------
+  // The composer Swords button captures the current prompt and opens the
+  // side-B picker. On confirm: side A goes through the normal useChat path
+  // (tagged as the duel anchor via message metadata), side B runs on its own
+  // ProtocolTransport/session via runDuelSideB and streams into a second
+  // assistant message upserted here. Each side settles independently.
+  const [duelPrompt, setDuelPrompt] = useState<string | null>(null);
+  const duelInFlightRef = useRef<{ sideAFailed: boolean } | null>(null);
+
+  const handleOpenDuel = useCallback((prompt: string) => {
+    setDuelPrompt(prompt);
+  }, []);
+
+  const handleDuelConfirm = useCallback(
+    async (modelBId: string) => {
+      const prompt = duelPrompt;
+      setDuelPrompt(null);
+      if (!prompt) {
+        return;
+      }
+      // Same gate as a normal send — the dialog's funding precheck can race a
+      // balance change, and a wallet disconnect must still open AppKit.
+      if (!canPrompt()) {
+        return;
+      }
+      if (!walletClient || !publicClient) {
+        return;
+      }
+
+      setInput("");
+      duelInFlightRef.current = { sideAFailed: false };
+      const groupId = generateUUID();
+      const duelMetaA = {
+        group: groupId,
+        side: "A" as const,
+        model: currentModelIdRef.current,
+      };
+      const duelMetaB = { group: groupId, side: "B" as const, model: modelBId };
+
+      // Side A: normal send, tagged as the duel anchor.
+      sendMessage({
+        id: groupId,
+        role: "user" as const,
+        parts: [{ type: "text", text: prompt }],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          protocolMeta: { duel: duelMetaA },
+        },
+      });
+
+      // Side B: own session, streamed into a second assistant message.
+      let streamStarted = false;
+      let sideBMessageId = `duel-b-${groupId}`;
+      const upsertSideB = (message: ChatMessage) => {
+        setMessages((prev) => {
+          const merged: ChatMessage = {
+            ...message,
+            metadata: {
+              createdAt: new Date().toISOString(),
+              ...message.metadata,
+              protocolMeta: {
+                ...message.metadata?.protocolMeta,
+                duel: duelMetaB,
+              },
+            },
+          };
+          const index = prev.findIndex((m) => m.id === merged.id);
+          if (index === -1) {
+            return [...prev, merged];
+          }
+          const next = [...prev];
+          next[index] = merged;
+          return next;
+        });
+      };
+
+      try {
+        await runDuelSideB({
+          chatId: id,
+          prompt,
+          modelId: modelBId,
+          gateway: getGateway(),
+          walletClient,
+          publicClient,
+          onMessage: (message) => {
+            streamStarted = true;
+            sideBMessageId = message.id;
+            upsertSideB(message);
+          },
+        });
+      } catch {
+        // Submit reverts happen before the stream exists; anything later is a
+        // stream failure. Timeout refunds are claimed per job on chain.
+        const copy = duelInFlightRef.current?.sideAFailed
+          ? DUEL_BOTH_FAILED_COPY
+          : duelFailureCopy(streamStarted ? "stream-error" : "submit-reverted");
+        upsertSideB({
+          id: sideBMessageId,
+          role: "assistant",
+          parts: [{ type: "text", text: copy }],
+          metadata: { createdAt: new Date().toISOString() },
+        });
+      } finally {
+        duelInFlightRef.current = null;
+        prepaid.refetch();
+      }
+    },
+    [
+      duelPrompt,
+      canPrompt,
+      walletClient,
+      publicClient,
+      sendMessage,
+      setMessages,
+      getGateway,
+      id,
+      prepaid,
+    ]
+  );
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
@@ -477,6 +607,7 @@ export function Chat({
               input={input}
               messages={messages}
               onBeforeSubmit={canPrompt}
+              onDuel={isProtocolMode ? handleOpenDuel : undefined}
               onModelChange={setCurrentModelId}
               onSpeakResponsesChange={setSpeakResponses}
               onWebSearchModeChange={setWebSearchMode}
@@ -499,6 +630,21 @@ export function Chat({
       <PrepaidBalanceDialog
         onOpenChange={setPrepaidGateOpen}
         open={prepaidGateOpen}
+      />
+
+      <DuelDialog
+        currentModelId={currentModelId}
+        onConfirm={handleDuelConfirm}
+        onOpenChange={(dialogOpen) => {
+          if (!dialogOpen) {
+            setDuelPrompt(null);
+          }
+        }}
+        onOpenPrepaid={() => {
+          setDuelPrompt(null);
+          setPrepaidGateOpen(true);
+        }}
+        open={duelPrompt !== null}
       />
 
       {/* <AlertDialog
