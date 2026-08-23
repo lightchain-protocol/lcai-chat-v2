@@ -2,9 +2,15 @@
 
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import {
+  GENUI_RENDERER_ENABLED,
+  isGenuiDescriptor,
+  validateGenuiTree,
+} from "@/lib/ai/genui";
 import type { ArtifactDescriptor } from "@/lib/protocol/audio-stream";
 import { cn } from "@/lib/utils";
 import { Response } from "./elements/response";
+import { GenuiRenderer } from "./genui-renderer";
 
 /**
  * Renderer for `artifact`-kind frames (lightchain.genui/tool-trace wire
@@ -146,6 +152,26 @@ function ArtifactBody({ descriptor }: { descriptor: ArtifactDescriptor }) {
   if (artifactType === "key_value" && schema === "lightchain.keyvalue.v1") {
     const kv = asKeyValuePayload(payload);
     if (kv) return <KeyValueCard payload={kv} />;
+  }
+
+  // Generative UI (lightchain.genui.v1): validate → render, or fall back per
+  // the contract's policy. The flag gates only the display path — no frames
+  // exist until the worker-side envelope opt-in ships.
+  if (GENUI_RENDERER_ENABLED && isGenuiDescriptor(descriptor)) {
+    const tree = validateGenuiTree(payload);
+    if (tree) {
+      return <GenuiRenderer node={tree} />;
+    }
+    return (
+      <details className="text-xs" open>
+        <summary className="cursor-pointer text-content-secondary">
+          Invalid lightchain.genui.v1 payload — showing raw
+        </summary>
+        <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-surface-base-faint p-3 font-mono text-content-subtle">
+          {JSON.stringify(payload, null, 2)}
+        </pre>
+      </details>
+    );
   }
 
   // Unknown or shape-mismatched payloads are shown raw, not interpreted —
