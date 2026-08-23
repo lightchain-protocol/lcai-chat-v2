@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
 import config from "@/config";
+import { jobRegistryAbi } from "@/contracts/job-registry-abi";
+import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
@@ -380,28 +382,84 @@ export function useProtocolSession(
    *
    * The proof panel needs this rather than the tracked-job cache because that
    * cache only holds jobs from the current page load — a reloaded conversation
-   * still has to be verifiable.
+   * still has to be verifiable. For the same reason the read must not depend on
+   * a live transport: after a reload there is none until the next send, so we
+   * fall back to a plain publicClient read against the configured JobRegistry.
    */
-  const fetchOnChainJob = useCallback(async (jobId: number) => {
-    const transport = transportRef.current;
-    if (!transport) return null;
-    try {
-      return await transport.getJob(jobId);
-    } catch {
-      return null;
-    }
-  }, []);
+  const fetchOnChainJob = useCallback(
+    async (jobId: number) => {
+      const transport = transportRef.current;
+      if (transport) {
+        try {
+          return await transport.getJob(jobId);
+        } catch {
+          return null;
+        }
+      }
+      const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
+      if (!jobRegistryAddress || jobRegistryAddress === "0x") {
+        console.warn(
+          "[fetchOnChainJob] no registry for chain",
+          protocolChainId
+        );
+        return null;
+      }
+      try {
+        const job = await publicClient.readContract({
+          address: jobRegistryAddress,
+          abi: jobRegistryAbi,
+          functionName: "getJob",
+          args: [BigInt(jobId)],
+        });
+        return {
+          sessionId: Number(job.sessionId),
+          worker: job.worker,
+          state: job.state,
+          escrowedFee: job.escrowedFee,
+          submittedAt: Number(job.submittedAt),
+          completedAt: Number(job.completedAt),
+          deadline: Number(job.deadline),
+          promptBlobHash: job.promptBlobHash,
+          responseBlobHash: job.responseBlobHash,
+          responseCiphertextHash: job.responseCiphertextHash,
+          submitBlockNumber: Number(job.submitBlockNumber),
+          completionBlockNumber: Number(job.completionBlockNumber),
+        };
+      } catch (err) {
+        console.warn("[fetchOnChainJob] read failed", err);
+        return null;
+      }
+    },
+    [protocolChainId, publicClient]
+  );
 
   /** Stake bonded behind a worker, for the proof panel. Null on failure. */
-  const fetchWorkerStake = useCallback(async (worker: string) => {
-    const transport = transportRef.current;
-    if (!transport) return null;
-    try {
-      return await transport.getWorkerStake(worker);
-    } catch {
-      return null;
-    }
-  }, []);
+  const fetchWorkerStake = useCallback(
+    async (worker: string) => {
+      const transport = transportRef.current;
+      if (transport) {
+        try {
+          return await transport.getWorkerStake(worker);
+        } catch {
+          return null;
+        }
+      }
+      const workerRegistryAddress =
+        config.workerRegistryAddress[protocolChainId];
+      if (!workerRegistryAddress || workerRegistryAddress === "0x") return null;
+      try {
+        return await publicClient.readContract({
+          address: workerRegistryAddress,
+          abi: workerRegistryAbi,
+          functionName: "getWorkerStake",
+          args: [worker as `0x${string}`],
+        });
+      } catch {
+        return null;
+      }
+    },
+    [protocolChainId, publicClient]
+  );
 
   const clearTimedOutJob = useCallback(() => {
     setTimedOutJob(null);

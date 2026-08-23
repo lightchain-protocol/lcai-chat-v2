@@ -84,7 +84,7 @@ function PureProvenanceChip({
   const jobId = proof?.jobId ?? jobIdProp ?? null;
 
   useEffect(() => {
-    if (!(proof && fetchOnChainJob)) {
+    if (!(jobId !== null && fetchOnChainJob)) {
       // Nothing to verify against the chain (live stream before the terminal
       // frame, or a legacy answer with no proof part) — render what we have.
       setLoaded(true);
@@ -92,8 +92,10 @@ function PureProvenanceChip({
     }
     let cancelled = false;
     Promise.all([
-      fetchOnChainJob(proof.jobId).catch(() => null),
-      recoverProofSigner(proof).catch(() => null),
+      fetchOnChainJob(jobId).catch(() => null),
+      proof
+        ? recoverProofSigner(proof).catch(() => null)
+        : Promise.resolve(null),
     ]).then(([result, signer]) => {
       if (cancelled) return;
       setJob(result);
@@ -103,7 +105,7 @@ function PureProvenanceChip({
     return () => {
       cancelled = true;
     };
-  }, [proof, fetchOnChainJob]);
+  }, [proof, jobId, fetchOnChainJob]);
 
   // Stake backs the "staked on honesty" line; it is supporting detail, so it
   // is fetched only when the panel is open and the worker is known.

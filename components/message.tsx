@@ -84,7 +84,11 @@ const PurePreviewMessage = ({
   // the same shape, so a refresh keeps the badge.
   const generationStats = useMemo(() => {
     for (const part of parts) {
-      if (part.type === "data-generationStats" && part.data) {
+      if (
+        part.type === "data-generationStats" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
         return part.data;
       }
     }
@@ -93,7 +97,13 @@ const PurePreviewMessage = ({
 
   const responseProof = useMemo(() => {
     for (const part of parts) {
-      if (part.type === "data-responseProof" && part.data) {
+      // Require a real payload: rows persisted while the API stripped unknown
+      // data keys come back as `{}`, which is truthy but carries no proof.
+      if (
+        part.type === "data-responseProof" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
         return part.data;
       }
     }
@@ -121,7 +131,11 @@ const PurePreviewMessage = ({
   // same record renders live and after a reload.
   const settlement = useMemo(() => {
     for (const part of parts) {
-      if (part.type === "data-settlement" && part.data) {
+      if (
+        part.type === "data-settlement" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
         return part.data;
       }
     }
@@ -130,7 +144,11 @@ const PurePreviewMessage = ({
 
   const streamMetrics = useMemo(() => {
     for (const part of parts) {
-      if (part.type === "data-streamMetrics" && part.data) {
+      if (
+        part.type === "data-streamMetrics" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
         return part.data;
       }
     }
@@ -496,7 +514,11 @@ const PurePreviewMessage = ({
             (generationStats ||
               responseProof ||
               settlement ||
-              streamMetrics) && (
+              streamMetrics ||
+              // A paid job with no surviving proof parts (e.g. persisted while
+              // the API stripped data keys) still gets the chip: it shows the
+              // on-chain record honestly as "Not verified" rather than hiding.
+              jobId !== undefined) && (
               <ProvenanceChip
                 disputeResponseMismatch={disputeResponseMismatch}
                 explorerBaseUrl={explorerBaseUrl}

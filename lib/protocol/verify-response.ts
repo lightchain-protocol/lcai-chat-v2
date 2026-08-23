@@ -252,10 +252,11 @@ export function checkProofAgainstChain(
   const settled =
     job.responseCiphertextHash !== ZERO_HASH &&
     job.responseCiphertextHash.length > 2;
-  const ciphertextMatches = settled
-    ? proof.localCiphertextHash.toLowerCase() ===
-      job.responseCiphertextHash.toLowerCase()
-    : null;
+  const ciphertextMatches =
+    settled && proof.localCiphertextHash
+      ? proof.localCiphertextHash.toLowerCase() ===
+        job.responseCiphertextHash.toLowerCase()
+      : null;
   const signatureMatches = signer ? sameAddress(signer, job.worker) : null;
 
   if (ciphertextMatches === false || signatureMatches === false) {
