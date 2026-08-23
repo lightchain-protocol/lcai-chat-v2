@@ -185,6 +185,11 @@ export default function SharePage() {
 
           {transcript.messages.map((message, index) => {
             const entry = entries[index];
+            // Only proof-carrying (assistant) messages get share.renderedText;
+            // plain entries (e.g. user prompts) still carry text — show it
+            // with the same sharer-provided honesty note, or the transcript
+            // loses every prompt.
+            const bodyText = message.share?.renderedText ?? message.text;
             return (
               <div
                 className="rounded-xl border border-bdr-light p-4"
@@ -193,10 +198,10 @@ export default function SharePage() {
                 <p className="mb-1 font-medium text-[10px] text-content-subtle uppercase">
                   {message.role}
                 </p>
-                {message.share?.renderedText && (
+                {bodyText && (
                   <>
                     <p className="whitespace-pre-wrap text-content-default text-sm">
-                      {message.share.renderedText}
+                      {bodyText}
                     </p>
                     {/* Honesty boundary §2.4.1 — rendered on every entry. */}
                     <p className="mt-1 text-[10px] text-content-subtle italic">
