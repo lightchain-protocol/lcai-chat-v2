@@ -19,6 +19,8 @@
  */
 
 import { $http } from "../http";
+import type { SettlementProgress } from "./settlement";
+import type { StreamMetricsSnapshot } from "./stream-metrics";
 import type { ResponseProof } from "./verify-response";
 
 /**
@@ -100,6 +102,8 @@ type PendingAssistantMessage = {
   sources: ProtocolCitationSource[];
   stats: GenerationStats | null;
   proof: ResponseProof | null;
+  settlement: SettlementProgress | null;
+  metrics: StreamMetricsSnapshot | null;
   protocolMeta: Record<string, unknown>;
 };
 
@@ -477,6 +481,8 @@ export class RelayClient {
       sources,
       stats: null,
       proof: null,
+      settlement: null,
+      metrics: null,
       protocolMeta: args.protocolMeta,
     });
   }
@@ -531,6 +537,27 @@ export class RelayClient {
     this.pendingAssistantSources.set(jobId, sources);
   }
 
+  /**
+   * Attach the final settlement timeline (escrow → settle) so the reload view
+   * shows the same completed journey the live stream rendered. Verification is
+   * deliberately excluded — it is recomputed from the proof at render time.
+   */
+  setAssistantSettlement(jobId: number, settlement: SettlementProgress) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.settlement = settlement;
+  }
+
+  /**
+   * Attach the browser-measured timing (TTFT, final rolling rate). The worker's
+   * own throughput is in stats; this covers what only the browser can see.
+   */
+  setAssistantMetrics(jobId: number, metrics: StreamMetricsSnapshot) {
+    const pending = this.pendingAssistantMessages.get(jobId);
+    if (!pending) return;
+    pending.metrics = metrics;
+  }
+
   discardAssistantMessage(jobId: number) {
     this.pendingAssistantMessages.delete(jobId);
     this.pendingAssistantSources.delete(jobId);
@@ -562,6 +589,20 @@ export class RelayClient {
         type: "data-responseProof",
         id: `protocol-proof-${jobId}`,
         data: pending.proof,
+      });
+    }
+    if (pending.settlement) {
+      parts.push({
+        type: "data-settlement",
+        id: `protocol-settlement-${jobId}`,
+        data: pending.settlement,
+      });
+    }
+    if (pending.metrics) {
+      parts.push({
+        type: "data-streamMetrics",
+        id: `protocol-metrics-${jobId}`,
+        data: pending.metrics,
       });
     }
     parts.push({

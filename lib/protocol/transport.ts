@@ -41,6 +41,9 @@ import {
   MissingDisputerKeyError,
   SessionManager,
 } from "./session";
+import type { SettlementEvent, SettlementProgress } from "./settlement";
+import { reduceSettlement } from "./settlement";
+import { StreamMetricsTracker } from "./stream-metrics";
 import { captureResponseProof, decodeBase64ToBytes } from "./verify-response";
 
 /**
@@ -92,6 +95,17 @@ type ProtocolStream = {
    * so they survive a reload as well.
    */
   emitSearchSources: (sources: ProtocolCitationSource[]) => void;
+  /**
+   * Fold the deadline-tracking chain read (worker, escrow, ack state) into the
+   * settlement timeline. May arrive after frames have started; the reducer is
+   * order-tolerant. No-op once the stream is closed.
+   */
+  noteChainObservation: (obs: {
+    worker: string;
+    escrowedFee: bigint;
+    deadline: number;
+    acknowledged: boolean;
+  }) => void;
 };
 
 export type FailoverStatus =
@@ -474,9 +488,14 @@ export class ProtocolTransport {
       onJobIdResolved: (jobId) => {
         persist.settle(jobId);
         // Deadline tracking is best-effort; failure must not block delivery.
-        this.trackJobDeadline(jobId, chatId).catch(() => {
-          // Best-effort — see trackJobDeadline.
-        });
+        // The same read feeds the settlement timeline's escrow/ack evidence.
+        this.trackJobDeadline(jobId, chatId)
+          .then((obs) => {
+            if (obs) protocolStream.noteChainObservation(obs);
+          })
+          .catch(() => {
+            // Best-effort — see trackJobDeadline.
+          });
       },
       onTerminated: (jobId) => persist.settle(jobId),
     });
@@ -719,13 +738,25 @@ export class ProtocolTransport {
    * schedules a timer that fires 2 s after the deadline.  On expiry, the job
    * state is re-verified — if the worker completed in the same block we clear
    * the timer silently.
+   *
+   * Returns the chain observation (worker, escrow, deadline, ack state) so the
+   * response stream can fold it into the settlement timeline; null when the
+   * read failed, which must never block delivery.
    */
-  private async trackJobDeadline(jobId: number, chatId: string): Promise<void> {
+  private async trackJobDeadline(
+    jobId: number,
+    chatId: string
+  ): Promise<{
+    worker: string;
+    escrowedFee: bigint;
+    deadline: number;
+    acknowledged: boolean;
+  } | null> {
     let onChain: OnChainJob;
     try {
       onChain = await this.sessionMgr.getJob(jobId);
     } catch {
-      return; // Best-effort — can't read chain state
+      return null; // Best-effort — can't read chain state
     }
 
     const tracked: TrackedJob = {
@@ -747,15 +778,22 @@ export class ProtocolTransport {
     if (delayMs <= 0) {
       // Already past deadline — fire immediately
       await this.handleJobDeadlineExpiry(jobId);
-      return;
+    } else {
+      const timer = setTimeout(() => {
+        this.handleJobDeadlineExpiry(jobId).catch(() => {
+          // Best-effort
+        });
+      }, delayMs);
+      this.jobTimers.set(jobId, timer);
     }
 
-    const timer = setTimeout(() => {
-      this.handleJobDeadlineExpiry(jobId).catch(() => {
-        // Best-effort
-      });
-    }, delayMs);
-    this.jobTimers.set(jobId, timer);
+    // JobState: 0=Submitted 1=Acknowledged 2=Completed 3=TimedOut
+    return {
+      worker: onChain.worker,
+      escrowedFee: onChain.escrowedFee,
+      deadline: onChain.deadline,
+      acknowledged: onChain.state >= 1,
+    };
   }
 
   private async handleJobDeadlineExpiry(jobId: number): Promise<void> {
@@ -1018,6 +1056,14 @@ export class ProtocolTransport {
     let reasoningStarted = false;
     let streamedText = "";
     let suppressRetryChunks = false;
+    // Browser-measured timing (TTFT, rolling rate) and the settlement journey.
+    // Both emit as reconciled data parts (stable ids, updated in place by the
+    // SDK) and are persisted in their final form with the assistant message.
+    const metrics = new StreamMetricsTracker(Date.now());
+    let settlement: SettlementProgress = { stage: "escrowed" };
+    // Awaited before persist, like capturedProof: the post-settle chain re-read
+    // that fills in the on-chain completion time.
+    let capturedSettlement: Promise<void> = Promise.resolve();
     // Awaited just before the message is persisted, so the proof is attached
     // in time to be stored with it.
     let capturedProof: Promise<void> = Promise.resolve();
@@ -1026,6 +1072,10 @@ export class ProtocolTransport {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let firstFrameTimer: ReturnType<typeof setTimeout> | undefined;
     let searchSources: ProtocolCitationSource[] = [];
+    // Live metrics are emitted at most this often; the final snapshot always
+    // goes out with the terminal frame regardless of throttle.
+    let lastMetricsEmitMs = 0;
+    const METRICS_EMIT_INTERVAL_MS = 500;
 
     const sse = (obj: Record<string, unknown>): Uint8Array =>
       encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
@@ -1040,6 +1090,45 @@ export class ProtocolTransport {
       } catch {
         closed = true;
       }
+    };
+
+    const applySettlement = (event: SettlementEvent) => {
+      settlement = reduceSettlement(settlement, event);
+      emit({
+        type: "data-settlement",
+        id: `protocol-settlement-${assistantMessageId}`,
+        data: settlement,
+      });
+    };
+
+    const noteChainObservation = (obs: {
+      worker: string;
+      escrowedFee: bigint;
+      deadline: number;
+      acknowledged: boolean;
+    }) => {
+      if (closed) return;
+      applySettlement({
+        type: "chainObserved",
+        atMs: Date.now(),
+        worker: obs.worker,
+        escrowedFeeWei: obs.escrowedFee.toString(),
+        deadlineSec: obs.deadline,
+        acknowledged: obs.acknowledged,
+      });
+    };
+
+    const emitMetrics = (force = false) => {
+      const nowMs = Date.now();
+      if (!force && nowMs - lastMetricsEmitMs < METRICS_EMIT_INTERVAL_MS) {
+        return;
+      }
+      lastMetricsEmitMs = nowMs;
+      emit({
+        type: "data-streamMetrics",
+        id: `protocol-metrics-${assistantMessageId}`,
+        data: metrics.snapshot(),
+      });
     };
 
     const close = () => {
@@ -1087,6 +1176,11 @@ export class ProtocolTransport {
     const fail = (message: string) => {
       if (closed) return;
       this.setProgressStatus("error");
+      applySettlement({
+        type: "failed",
+        atMs: Date.now(),
+        reason: message,
+      });
       emit({ type: "error", errorText: message });
       close();
     };
@@ -1095,6 +1189,9 @@ export class ProtocolTransport {
       const jobId = normalizeJobId(candidate);
       if (jobId === null || boundJobId !== null) return;
       boundJobId = jobId;
+      // The jobId existing at all means the escrow landed on chain — this is
+      // the timeline's first milestone, whichever path reported the id.
+      applySettlement({ type: "escrowed", atMs: Date.now() });
       // Browser-side search finishes before any jobId exists, so the citations
       // are held until there is a message to attach them to.
       if (searchSources.length > 0) {
@@ -1158,6 +1255,9 @@ export class ProtocolTransport {
           clearFirstFrameDeadline();
           this.updateJobStatus(jobId, "streaming");
           this.setProgressStatus("decoding_prompt");
+          metrics.markPayload();
+          applySettlement({ type: "firstFrame", atMs: Date.now() });
+          emitMetrics(true);
           relayClient?.beginAssistantMessage({
             jobId,
             chatId,
@@ -1216,6 +1316,7 @@ export class ProtocolTransport {
 
         if (wsFrame.payload && !textStarted) {
           textStarted = true;
+          applySettlement({ type: "firstText", atMs: Date.now() });
           emit({ type: "text-start", id: partId });
         }
 
@@ -1242,11 +1343,13 @@ export class ProtocolTransport {
                 const suffix = decrypted.slice(streamedText.length);
                 if (suffix) {
                   streamedText = decrypted;
+                  metrics.addTextChars(suffix.length);
                   emit({ type: "text-delta", id: partId, delta: suffix });
                 }
               }
             } else {
               streamedText = decrypted;
+              metrics.addTextChars(decrypted.length);
               emit({ type: "text-delta", id: partId, delta: decrypted });
             }
             emit({
@@ -1261,10 +1364,12 @@ export class ProtocolTransport {
               suppressRetryChunks = true;
             }
             streamedText += decrypted;
+            metrics.addTextChars(decrypted.length);
             relayClient?.appendAssistantDelta(jobId, decrypted);
             if (!suppressRetryChunks) {
               emit({ type: "text-delta", id: partId, delta: decrypted });
             }
+            emitMetrics();
           }
         }
 
@@ -1301,6 +1406,27 @@ export class ProtocolTransport {
             emit({ type: "reasoning-end", id: reasoningPartId });
           }
           emit({ type: "text-end", id: partId });
+          applySettlement({ type: "settled", atMs: Date.now() });
+          emitMetrics(true);
+          // The terminal frame proves delivery; a best-effort chain re-read
+          // fills in the on-chain completion time for the persisted timeline.
+          // Awaited below, before the message is stored, exactly like the
+          // proof capture — a failed read costs one timestamp, not the answer.
+          capturedSettlement = (async () => {
+            try {
+              const onChain = await sessionMgr.getJob(jobId);
+              if (onChain.state === 2 && onChain.completedAt > 0) {
+                applySettlement({
+                  type: "chainSettled",
+                  completedAtSec: onChain.completedAt,
+                });
+              }
+            } catch {
+              // Best-effort — see above.
+            }
+            relayClient?.setAssistantSettlement(jobId, settlement);
+            relayClient?.setAssistantMetrics(jobId, metrics.snapshot());
+          })();
           // The chat row is created by the user-message POST, so the
           // assistant POST has to wait for it even though nothing else does.
           await prelude;
@@ -1308,6 +1434,7 @@ export class ProtocolTransport {
           // gets the proof stored alongside the message rather than arriving
           // after it has already been written.
           await capturedProof;
+          await capturedSettlement;
           await relayClient?.completeAssistantMessage(jobId);
           this.setProgressStatus("completed");
           this.updateJobStatus(jobId, "completed");
@@ -1440,6 +1567,7 @@ export class ProtocolTransport {
       onSubmitted,
       onSubmitFailed,
       emitSearchSources,
+      noteChainObservation,
     };
   }
 }

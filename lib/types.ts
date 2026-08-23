@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { getWeather } from "./ai/tools/get-weather";
 import type { webSearch } from "./ai/tools/web-search";
 import type { GenerationStats } from "./protocol/relay-client";
+import type { SettlementProgress } from "./protocol/settlement";
+import type { StreamMetricsSnapshot } from "./protocol/stream-metrics";
 import type { ResponseProof } from "./protocol/verify-response";
 import type { AppUsage } from "./usage";
 
@@ -85,6 +87,14 @@ export type CustomUIDataTypes = {
   // Verification evidence captured from the terminal frame, so the answer can
   // be checked against the chain long after it was received.
   responseProof: ResponseProof;
+  // The answer's on-chain journey (escrow → ack → stream → settle), updated
+  // live during the job and persisted in its final form with the message.
+  // Verification is deliberately not part of this record — it is recomputed
+  // from responseProof at render time.
+  settlement: SettlementProgress;
+  // Browser-measured timing (TTFT, rolling throughput estimate). The worker's
+  // own numbers live in generationStats; these cover the wait before them.
+  streamMetrics: StreamMetricsSnapshot;
 };
 
 export type ChatMessage = UIMessage<

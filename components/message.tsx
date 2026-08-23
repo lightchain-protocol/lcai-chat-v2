@@ -14,14 +14,13 @@ import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
 import { Response } from "./elements/response";
-import { GenerationStatsBadge } from "./generation-stats";
 import { LCAIIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
 import { MessageJobActions } from "./message-job-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
-import { ResponseProofPanel } from "./response-proof";
+import { ProvenanceChip } from "./provenance-chip";
 import { SourceLinkChip } from "./source-link-chip";
 import { Weather } from "./weather";
 
@@ -86,6 +85,27 @@ const PurePreviewMessage = ({
   const responseProof = useMemo(() => {
     for (const part of parts) {
       if (part.type === "data-responseProof" && part.data) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  // The settlement journey and browser-measured timing, reconciled in place
+  // during the stream (stable part ids) and persisted in final form, so the
+  // same record renders live and after a reload.
+  const settlement = useMemo(() => {
+    for (const part of parts) {
+      if (part.type === "data-settlement" && part.data) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const streamMetrics = useMemo(() => {
+    for (const part of parts) {
+      if (part.type === "data-streamMetrics" && part.data) {
         return part.data;
       }
     }
@@ -396,24 +416,24 @@ const PurePreviewMessage = ({
             </div>
           )}
 
-          {message.role === "assistant" && generationStats && !isLoading && (
-            <GenerationStatsBadge
-              stats={generationStats}
-              worker={trackedJob?.worker}
-            />
-          )}
-
           {message.role === "assistant" &&
-            responseProof &&
-            fetchOnChainJob &&
-            !isLoading && (
-              <ResponseProofPanel
+            (generationStats ||
+              responseProof ||
+              settlement ||
+              streamMetrics) && (
+              <ProvenanceChip
                 disputeResponseMismatch={disputeResponseMismatch}
                 explorerBaseUrl={explorerBaseUrl}
+                fallbackWorker={trackedJob?.worker}
                 fetchOnChainJob={fetchOnChainJob}
                 fetchWorkerStake={fetchWorkerStake}
                 hasMismatchEvidence={hasMismatchEvidence}
+                jobId={jobId}
+                live={isLoading}
+                metrics={streamMetrics}
                 proof={responseProof}
+                settlement={settlement}
+                stats={generationStats}
               />
             )}
 
