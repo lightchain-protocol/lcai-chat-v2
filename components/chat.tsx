@@ -9,28 +9,61 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { useLocalStorage } from "usehooks-ts";
 import { useAccount, useBalance } from "wagmi";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
-import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import {
+  AUTO_MODEL_ID,
+  type AutoRoute,
+  routePrompt,
+} from "@/lib/ai/auto-route";
+import { modelSupportsVoice } from "@/lib/ai/models";
+import {
+  addBranch,
+  applyActiveBranches,
+  type BranchStore,
+  forkAt,
+  loadBranchStore,
+  saveBranchStore,
+  switchBranch,
+} from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import {
+  addMemoryEntry,
+  EMPTY_MEMORY_STORE,
+  loadMemoryStore,
+  type MemoryStore,
+  memoryPrefixFromStore,
+  removeMemoryEntry,
+  saveMemoryStore,
+} from "@/lib/memory";
+import { DUEL_BOTH_FAILED_COPY, duelFailureCopy } from "@/lib/protocol/duel";
+import { runDuelSideB } from "@/lib/protocol/duel-runner";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import {
+  DEFAULT_WEB_SEARCH_MODE,
+  type WebSearchMode,
+} from "@/lib/protocol/search-intent";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
+import { DuelDialog } from "./duel-dialog";
 import { JobTimeoutToast } from "./job-timeout-toast";
+import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
+import { ShareTranscriptButton } from "./share-transcript-button";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -92,16 +125,32 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  // Last auto-routing decision, shown as "auto → {model} · {reason}" under
+  // the composer so the heuristic can never silently spend a bigger fee.
+  const [autoRoute, setAutoRoute] = useState<AutoRoute | null>(null);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
-  const [enableWebSearch, setEnableWebSearch] = useState(false);
-  const enableWebSearchRef = useRef(enableWebSearch);
-  const { walletClient } = useWeb3Clients();
+  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
+    DEFAULT_WEB_SEARCH_MODE
+  );
+  const webSearchModeRef = useRef(webSearchMode);
+
+  // "Speak responses" opt-in (envelope v2 audioResponse). Persisted per
+  // browser; effective only when the selected model's worker runs the TTS
+  // sidecar — the toggle is hidden otherwise (modelSupportsVoice), and the
+  // double-gate below keeps a stale stored true from reaching a non-voice
+  // model's envelope.
+  const [speakResponses, setSpeakResponses] = useLocalStorage(
+    "speak-responses",
+    false
+  );
+  const speakResponsesRef = useRef(speakResponses);
+  const { walletClient, publicClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
 
@@ -111,6 +160,32 @@ export function Chat({
   // answered. This dialog is the existing deposit/authorize modal, opened on a
   // blocked send.
   const [prepaidGateOpen, setPrepaidGateOpen] = useState(false);
+
+  // Device-local private memory (lib/memory.ts). The ref feeds the
+  // transport's getMemoryPrefix so the lazily-created protocol transport
+  // always reads the latest store without being recreated. Loaded post-mount
+  // like the branch store, keeping SSR and first client render in agreement.
+  const [memoryStore, setMemoryStore] =
+    useState<MemoryStore>(EMPTY_MEMORY_STORE);
+  const memoryRef = useRef<MemoryStore>(EMPTY_MEMORY_STORE);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const store = loadMemoryStore();
+    memoryRef.current = store;
+    setMemoryStore(store);
+  }, []);
+
+  const updateMemoryStore = useCallback((next: MemoryStore) => {
+    memoryRef.current = next;
+    setMemoryStore(next);
+    saveMemoryStore(next);
+  }, []);
+
+  const getMemoryPrefix = useCallback(
+    () => memoryPrefixFromStore(memoryRef.current),
+    []
+  );
 
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
@@ -162,37 +237,29 @@ export function Chat({
   // Protocol mode: session management for on-chain encrypted chat
   const {
     getTransport: getProtocolTransport,
+    getGateway,
     failoverStatus,
     progressStatus,
     activeJobs,
     timedOutJob,
     retryFailover,
     startNewSession,
-    workerCapabilities,
     claimJobTimeout,
     disputeJob,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
+    getShareEvidence,
+    fetchOnChainJob,
+    fetchWorkerStake,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
-  // Read-only preflight: union of capabilities across all workers eligible
-  // for this model (web-search epic, Story 16). Populates at chat mount via
-  // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
-  // session is bound — fixes the "unlocks after Send" race.
-  const { availableCapabilities } = useModelCapabilities(currentModelId);
-
-  // searchCapable feeds the Switch's disabled state.
-  //   - non-protocol mode: Vercel AI SDK does its own search, always on.
-  //   - protocol mode, post-binding (workerCapabilities populated): the
-  //     bound worker's snapshot is the source of truth; a session bound to
-  //     a non-capable worker MUST lock the toggle off even if other capable
-  //     workers exist (the session can't switch).
-  //   - protocol mode, pre-binding: fall back to availableCapabilities
-  //     from the preflight — "is any capable worker reachable?"
-  const searchCapable = isProtocolMode
-    ? workerCapabilities.length > 0
-      ? workerCapabilities.includes("search")
-      : availableCapabilities.includes("search")
-    : true;
-
+  } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address,
+    id,
+    submitMode,
+    getMemoryPrefix
+  );
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
@@ -200,12 +267,40 @@ export function Chat({
   // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const transport = useMemo(() => {
+    // "Auto" resolves against the actual outgoing message at send time, so a
+    // fresh chat's first send can't race a not-yet-applied setState. The
+    // decision is surfaced via autoRoute for the composer's reveal line.
+    const resolveAutoRoute = (
+      lastMessage:
+        | { role?: string; parts?: Record<string, unknown>[] }
+        | undefined
+    ): string | undefined => {
+      if (currentModelIdRef.current !== AUTO_MODEL_ID) {
+        return;
+      }
+      const parts = lastMessage?.parts ?? [];
+      const prompt = parts
+        .filter((p) => p.type === "text")
+        .map((p) => (typeof p.text === "string" ? p.text : ""))
+        .join("\n");
+      const hasImage = parts.some(
+        (p) =>
+          p.type === "file" &&
+          typeof p.mediaType === "string" &&
+          p.mediaType.startsWith("image/")
+      );
+      const route = routePrompt({ prompt, hasImage });
+      setAutoRoute(route);
+      return route.modelId;
+    };
+
     if (isProtocolMode) {
       return new DefaultChatTransport({
         api: "/protocol",
         async fetch(_url, init) {
-          const t = await getProtocolTransport();
           const body = JSON.parse((init?.body as string) ?? "{}");
+          const modelOverride = resolveAutoRoute((body.messages ?? []).at(-1));
+          const t = await getProtocolTransport(modelOverride);
           const protocolBody = {
             ...body,
             id,
@@ -216,10 +311,16 @@ export function Chat({
             messages: protocolBody.messages ?? [],
             body: {
               ...protocolBody,
-              // Per-message web-search opt-in (web-search epic, Story 16).
-              // ProtocolTransport forwards this through SessionManager.submitJob
-              // → GatewayClient.uploadBlob → consumer-api side-channel write.
-              enableWebSearch: enableWebSearchRef.current,
+              // Per-message web-search setting (web-search epic, Story 16).
+              // ProtocolTransport resolves the mode against the prompt, then
+              // forwards the decision through SessionManager.submitJob →
+              // GatewayClient.uploadBlob → consumer-api side-channel write.
+              webSearchMode: webSearchModeRef.current,
+              // Spoken-output opt-in → envelope v2 audioResponse. Gated on
+              // the live model pick, not just the stored preference.
+              audioResponse:
+                speakResponsesRef.current &&
+                modelSupportsVoice(currentModelIdRef.current),
             },
             signal: init?.signal ?? undefined,
           });
@@ -239,10 +340,14 @@ export function Chat({
           body: {
             id: request.id,
             message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
+            // Non-protocol path: "auto" resolves here, against the outgoing
+            // message, so the API always receives a concrete model id.
+            selectedChatModel:
+              resolveAutoRoute(request.messages.at(-1)) ??
+              currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
-            enableWebSearch: enableWebSearchRef.current,
+            webSearchMode: webSearchModeRef.current,
             ...request.body,
           },
         };
@@ -257,14 +362,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -281,8 +386,12 @@ export function Chat({
   }, [systemPrompt]);
 
   useEffect(() => {
-    enableWebSearchRef.current = enableWebSearch;
-  }, [enableWebSearch]);
+    webSearchModeRef.current = webSearchMode;
+  }, [webSearchMode]);
+
+  useEffect(() => {
+    speakResponsesRef.current = speakResponses;
+  }, [speakResponses]);
 
   // Show a non-blocking toast when a job's deadline passes with no response
   useEffect(() => {
@@ -303,7 +412,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -323,7 +432,7 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
@@ -335,6 +444,13 @@ export function Chat({
       balance.refetch();
     },
     onError: (error: any) => {
+      // A duel's side A runs on the normal useChat path — if it dies while a
+      // duel is in flight, side B's failure copy upgrades to the single
+      // both-failed summary (bc-2 §1.6: one summary, not two popups).
+      if (duelInFlightRef.current) {
+        duelInFlightRef.current.sideAFailed = true;
+      }
+
       if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError
@@ -352,6 +468,210 @@ export function Chat({
       ));
     },
   });
+
+  // --- Multi-model duel (bc-2 §1) -----------------------------------------
+  // The composer Swords button captures the current prompt and opens the
+  // side-B picker. On confirm: side A goes through the normal useChat path
+  // (tagged as the duel anchor via message metadata), side B runs on its own
+  // ProtocolTransport/session via runDuelSideB and streams into a second
+  // assistant message upserted here. Each side settles independently.
+  const [duelPrompt, setDuelPrompt] = useState<string | null>(null);
+  const duelInFlightRef = useRef<{ sideAFailed: boolean } | null>(null);
+
+  const handleOpenDuel = useCallback((prompt: string) => {
+    setDuelPrompt(prompt);
+  }, []);
+
+  const handleDuelConfirm = useCallback(
+    async (modelBId: string) => {
+      const prompt = duelPrompt;
+      setDuelPrompt(null);
+      if (!prompt) {
+        return;
+      }
+      // Same gate as a normal send — the dialog's funding precheck can race a
+      // balance change, and a wallet disconnect must still open AppKit.
+      if (!canPrompt()) {
+        return;
+      }
+      if (!walletClient || !publicClient) {
+        return;
+      }
+
+      setInput("");
+      duelInFlightRef.current = { sideAFailed: false };
+      const groupId = generateUUID();
+      const duelMetaA = {
+        group: groupId,
+        side: "A" as const,
+        model: currentModelIdRef.current,
+      };
+      const duelMetaB = { group: groupId, side: "B" as const, model: modelBId };
+
+      // Side A: normal send, tagged as the duel anchor.
+      sendMessage({
+        id: groupId,
+        role: "user" as const,
+        parts: [{ type: "text", text: prompt }],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          protocolMeta: { duel: duelMetaA },
+        },
+      });
+
+      // Side B: own session, streamed into a second assistant message.
+      let streamStarted = false;
+      let sideBMessageId = `duel-b-${groupId}`;
+      const upsertSideB = (message: ChatMessage) => {
+        setMessages((prev) => {
+          const merged: ChatMessage = {
+            ...message,
+            metadata: {
+              createdAt: new Date().toISOString(),
+              ...message.metadata,
+              protocolMeta: {
+                ...message.metadata?.protocolMeta,
+                duel: duelMetaB,
+              },
+            },
+          };
+          const index = prev.findIndex((m) => m.id === merged.id);
+          if (index === -1) {
+            return [...prev, merged];
+          }
+          const next = [...prev];
+          next[index] = merged;
+          return next;
+        });
+      };
+
+      try {
+        await runDuelSideB({
+          chatId: id,
+          prompt,
+          modelId: modelBId,
+          gateway: getGateway(),
+          walletClient,
+          publicClient,
+          getMemoryPrefix,
+          onMessage: (message) => {
+            streamStarted = true;
+            sideBMessageId = message.id;
+            upsertSideB(message);
+          },
+        });
+      } catch {
+        // Submit reverts happen before the stream exists; anything later is a
+        // stream failure. Timeout refunds are claimed per job on chain.
+        const copy = duelInFlightRef.current?.sideAFailed
+          ? DUEL_BOTH_FAILED_COPY
+          : duelFailureCopy(streamStarted ? "stream-error" : "submit-reverted");
+        upsertSideB({
+          id: sideBMessageId,
+          role: "assistant",
+          parts: [{ type: "text", text: copy }],
+          metadata: { createdAt: new Date().toISOString() },
+        });
+      } finally {
+        duelInFlightRef.current = null;
+        prepaid.refetch();
+      }
+    },
+    [
+      duelPrompt,
+      canPrompt,
+      walletClient,
+      publicClient,
+      sendMessage,
+      setMessages,
+      getGateway,
+      getMemoryPrefix,
+      id,
+      prepaid,
+    ]
+  );
+
+  // --- Conversation branching (device-local, lib/branches.ts) -------------
+  // Loaded post-mount (not in useState) so SSR and the first client render
+  // agree; the branched view is applied once per chat right after.
+  const [branchStore, setBranchStore] = useState<BranchStore>({});
+  const branchesLoadedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (branchesLoadedRef.current === id) {
+      return;
+    }
+    branchesLoadedRef.current = id;
+    const store = loadBranchStore(id);
+    setBranchStore(store);
+    if (Object.keys(store).length > 0) {
+      setMessages((prev) => applyActiveBranches(prev, store));
+    }
+  }, [id, setMessages]);
+
+  const handleFork = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1 || index >= messages.length - 1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = forkAt(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleSwitchBranch = useCallback(
+    (anchorId: string, target: number) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const result = switchBranch(
+        branchStore,
+        anchorId,
+        target,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(result.store);
+      saveBranchStore(id, result.store);
+      setMessages([
+        ...messages.slice(0, index + 1),
+        ...(result.tail as ChatMessage[]),
+      ]);
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleAddBranch = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = addBranch(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
@@ -376,7 +696,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    fetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -395,6 +715,9 @@ export function Chat({
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onOpenMemory={
+            isProtocolMode ? () => setMemoryDialogOpen(true) : undefined
+          }
           onSystemPromptChange={(promptId, prompt) => {
             setSystemPromptId(promptId);
             setSystemPrompt(prompt);
@@ -402,6 +725,16 @@ export function Chat({
           selectedVisibilityType={initialVisibilityType}
           systemPromptId={systemPromptId}
         />
+
+        {!isReadonly && messages.length > 0 && (
+          <div className="flex justify-end px-4 pt-1">
+            <ShareTranscriptButton
+              chatId={id}
+              getShareEvidence={getShareEvidence}
+              messages={messages}
+            />
+          </div>
+        )}
 
         <UsageWarningBanner
           className="mx-6 mt-4"
@@ -420,12 +753,21 @@ export function Chat({
 
         <Messages
           activeJobs={activeJobs}
+          branchStore={isReadonly ? undefined : branchStore}
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          onAddBranch={isReadonly ? undefined : handleAddBranch}
+          onFork={isReadonly ? undefined : handleFork}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
@@ -442,25 +784,32 @@ export function Chat({
           {!isReadonly && (
             <MultimodalInput
               attachments={attachments}
+              autoRoute={autoRoute}
               chatId={id}
               disabled={sessionRecovering}
               disabledPlaceholder="Session recovering..."
-              enableWebSearch={enableWebSearch}
               input={input}
               messages={messages}
               onBeforeSubmit={canPrompt}
+              onDuel={
+                isProtocolMode && currentModelId !== AUTO_MODEL_ID
+                  ? handleOpenDuel
+                  : undefined
+              }
               onModelChange={setCurrentModelId}
-              onWebSearchToggle={setEnableWebSearch}
-              searchCapable={searchCapable}
+              onSpeakResponsesChange={setSpeakResponses}
+              onWebSearchModeChange={setWebSearchMode}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}
               setAttachments={setAttachments}
               setInput={setInput}
               setMessages={setMessages}
+              speakResponses={speakResponses}
               status={status}
               stop={stop}
               usage={usage}
+              webSearchMode={webSearchMode}
             />
           )}
         </div>
@@ -469,6 +818,42 @@ export function Chat({
       <PrepaidBalanceDialog
         onOpenChange={setPrepaidGateOpen}
         open={prepaidGateOpen}
+      />
+
+      <DuelDialog
+        currentModelId={currentModelId}
+        onConfirm={handleDuelConfirm}
+        onOpenChange={(dialogOpen) => {
+          if (!dialogOpen) {
+            setDuelPrompt(null);
+          }
+        }}
+        onOpenPrepaid={() => {
+          setDuelPrompt(null);
+          setPrepaidGateOpen(true);
+        }}
+        open={duelPrompt !== null}
+      />
+
+      <MemoryDialog
+        onAdd={(text) =>
+          updateMemoryStore(
+            addMemoryEntry(
+              memoryStore,
+              text,
+              generateUUID(),
+              new Date().toISOString()
+            )
+          )
+        }
+        onClear={() => updateMemoryStore({ ...memoryStore, entries: [] })}
+        onOpenChange={setMemoryDialogOpen}
+        onRemove={(entryId) =>
+          updateMemoryStore(removeMemoryEntry(memoryStore, entryId))
+        }
+        onToggle={(enabled) => updateMemoryStore({ ...memoryStore, enabled })}
+        open={memoryDialogOpen}
+        store={memoryStore}
       />
 
       {/* <AlertDialog
