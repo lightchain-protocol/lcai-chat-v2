@@ -23,9 +23,11 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
+import { AUTO_MODEL_ID, type AutoRoute } from "@/lib/ai/auto-route";
 import {
   chatModels,
   formatFee,
+  getChatModel,
   groupModelsBySpecialty,
   modelSpecialty,
   modelSpeed,
@@ -95,6 +97,7 @@ function PureMultimodalInput({
   disabledPlaceholder,
   onBeforeSubmit,
   onDuel,
+  autoRoute,
 }: {
   chatId: string;
   input: string;
@@ -134,6 +137,8 @@ function PureMultimodalInput({
    * the button entirely — no teasing a feature the mode can't fund.
    */
   onDuel?: (prompt: string) => void;
+  /** Last auto-routing decision, for the "auto → {model} · {reason}" line. */
+  autoRoute?: AutoRoute | null;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -491,6 +496,15 @@ function PureMultimodalInput({
             ))}
           </div>
         )}
+        {selectedModelId === AUTO_MODEL_ID && autoRoute && (
+          <p
+            className="px-2 pb-1 text-content-light text-xs"
+            data-testid="auto-route-reveal"
+          >
+            auto → {getChatModel(autoRoute.modelId)?.name ?? autoRoute.modelId}{" "}
+            · {autoRoute.reason}
+          </p>
+        )}
         <div className="relative flex flex-row items-start gap-1 sm:gap-2">
           <div className="absolute top-[3px] border-surface-base-extraLight border-r pr-2 sm:top-0.5">
             <Image
@@ -522,7 +536,8 @@ function PureMultimodalInput({
         </div>
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
-            {modelSupportsImages(selectedModelId) && (
+            {(modelSupportsImages(selectedModelId) ||
+              selectedModelId === AUTO_MODEL_ID) && (
               <AttachmentsButton fileInputRef={fileInputRef} status={status} />
             )}
             {modelSupportsVoice(selectedModelId) && (
@@ -631,6 +646,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.onDuel !== nextProps.onDuel) {
+      return false;
+    }
+    if (!equal(prevProps.autoRoute, nextProps.autoRoute)) {
       return false;
     }
 
@@ -870,6 +888,13 @@ function PureModelSelectorCompact({
   return (
     <PromptInputModelSelect
       onValueChange={(modelName) => {
+        // "Auto" is a routing mode, not a model — it never touches the cookie
+        // so a fresh session can't boot into an id no model list knows.
+        if (modelName === "Auto") {
+          setOptimisticModelId(AUTO_MODEL_ID);
+          onModelChange?.(AUTO_MODEL_ID);
+          return;
+        }
         const model = chatModels.find((m) => m.name === modelName);
         if (model) {
           setOptimisticModelId(model.id);
@@ -879,7 +904,7 @@ function PureModelSelectorCompact({
           });
         }
       }}
-      value={selectedModel?.name}
+      value={optimisticModelId === AUTO_MODEL_ID ? "Auto" : selectedModel?.name}
     >
       <Trigger
         className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
@@ -887,7 +912,7 @@ function PureModelSelectorCompact({
       >
         <CpuIcon size={16} />
         <span className="hidden font-medium text-xs sm:block">
-          {selectedModel?.name}
+          {optimisticModelId === AUTO_MODEL_ID ? "Auto" : selectedModel?.name}
         </span>
         {selectedModel && (
           <span
@@ -919,6 +944,18 @@ function PureModelSelectorCompact({
               No model matches &ldquo;{query}&rdquo;
             </p>
           )}
+          <SelectItem
+            className="rounded-lg py-1"
+            title="Picks the model per prompt: images go to vision, code to the coder, long prompts to the long-context model, everything else to the fastest warm model. The pick is shown before the answer streams."
+            value="Auto"
+          >
+            <span className="flex w-full items-baseline justify-between gap-2">
+              <span className="truncate font-medium text-xs">Auto</span>
+              <span className="shrink-0 text-[10px] text-content-subtle">
+                routed per prompt
+              </span>
+            </span>
+          </SelectItem>
           {groups.map((group) => (
             <div key={group.specialty}>
               <p className="px-2 pt-2 pb-1 font-medium text-[10px] text-content-subtle uppercase tracking-wide">

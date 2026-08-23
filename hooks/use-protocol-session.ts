@@ -53,7 +53,10 @@ export function useProtocolSession(
   const [timedOutJob, setTimedOutJob] = useState<TrackedJob | null>(null);
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
-  const resolvedModelIdRef = useRef<string | null>(null);
+  // Resolution cache keyed by the friendly id, so an "auto"-routed send can
+  // pass a per-message override without disturbing the primary session's
+  // cached resolution.
+  const resolvedModelIdCacheRef = useRef<Map<string, string>>(new Map());
   const walletClientRef = useRef(walletClient);
   const addressRef = useRef(address);
   const submitModeRef = useRef<SubmitMode>(submitMode);
@@ -84,180 +87,191 @@ export function useProtocolSession(
     return gatewayRef.current;
   }, []);
 
-  // Resolve local model ID to gateway hex ID (cached after first call)
-  const resolveModelId = useCallback(async (): Promise<string> => {
-    if (resolvedModelIdRef.current) return resolvedModelIdRef.current;
+  // Resolve local model ID to gateway hex ID (cached per friendly id)
+  const resolveModelId = useCallback(
+    async (override?: string): Promise<string> => {
+      const target = (override ?? modelId).toLowerCase();
+      const cached = resolvedModelIdCacheRef.current.get(target);
+      if (cached) {
+        return cached;
+      }
 
-    const gateway = getGateway();
-    const { models } = await gateway.getModels();
+      const gateway = getGateway();
+      const { models } = await gateway.getModels();
 
-    if (models.length === 0) {
-      throw new Error("No models available from gateway");
-    }
+      if (models.length === 0) {
+        throw new Error("No models available from gateway");
+      }
 
-    const match = models.find((m) =>
-      m.name.toLowerCase().includes(modelId.toLowerCase())
-    );
-    const resolved = match?.id ?? models[0].id;
-    resolvedModelIdRef.current = resolved;
-    return resolved;
-  }, [modelId, getGateway]);
+      const match = models.find((m) => m.name.toLowerCase().includes(target));
+      const resolved = match?.id ?? models[0].id;
+      resolvedModelIdCacheRef.current.set(target, resolved);
+      return resolved;
+    },
+    [modelId, getGateway]
+  );
 
-  // Lazily create the transport — returns a promise since model resolution is async
-  const getTransport = useCallback(async () => {
-    if (transportRef.current) return transportRef.current;
+  // Lazily create the transport — returns a promise since model resolution is
+  // async. modelIdOverride lets the "auto" picker resolve the route from the
+  // actual outgoing message at fetch time, avoiding a render-timing race.
+  const getTransport = useCallback(
+    async (modelIdOverride?: string) => {
+      if (transportRef.current) return transportRef.current;
 
-    const client = walletClientRef.current;
-    if (!client?.account) {
-      throw new Error(
-        "Wallet not connected — cannot create protocol transport"
-      );
-    }
-
-    const gateway = getGateway();
-    const hexModelId = await resolveModelId();
-
-    const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
-    const aiConfigAddress = config.aiConfigAddress[protocolChainId];
-
-    if (!jobRegistryAddress || jobRegistryAddress === "0x") {
-      throw new Error(
-        `JobRegistry address not configured for chain ${protocolChainId}`
-      );
-    }
-    if (!aiConfigAddress || aiConfigAddress === "0x") {
-      throw new Error(
-        `AIConfig address not configured for chain ${protocolChainId}`
-      );
-    }
-
-    const workerRegistryAddress = config.workerRegistryAddress[protocolChainId];
-    if (!workerRegistryAddress || workerRegistryAddress === "0x") {
-      throw new Error(
-        `WorkerRegistry address not configured for chain ${protocolChainId}`
-      );
-    }
-
-    const transport = new ProtocolTransport({
-      gateway,
-      modelId: hexModelId,
-      sessionStorageKey: `lc-protocol-session:${chatId}`,
-      walletClient: client,
-      publicClient,
-      jobRegistryAddress,
-      aiConfigAddress,
-      workerRegistryAddress,
-      relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
-      getSubmitMode: () => submitModeRef.current,
-      getMemoryPrefix,
-      registerProtocolSession: async ({
-        chatId: targetChatId,
-        sessionId,
-        modelId: modelIdHex,
-      }) => {
-        const response = await $http.put(
-          `/api/chat/${targetChatId}/protocol-session`,
-          {
-            sessionId,
-            modelId: modelIdHex,
-          }
+      const client = walletClientRef.current;
+      if (!client?.account) {
+        throw new Error(
+          "Wallet not connected — cannot create protocol transport"
         );
-        if (!response.ok) {
-          throw new Error(
-            `Failed to register protocol session: ${response.status} ${response.statusText}`
-          );
-        }
-      },
-      persistence: {
-        persistUserMessage: async ({
-          chatId: messageChatId,
-          message,
-          selectedVisibilityType,
-          systemPrompt,
+      }
+
+      const gateway = getGateway();
+      const hexModelId = await resolveModelId(modelIdOverride);
+
+      const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
+      const aiConfigAddress = config.aiConfigAddress[protocolChainId];
+
+      if (!jobRegistryAddress || jobRegistryAddress === "0x") {
+        throw new Error(
+          `JobRegistry address not configured for chain ${protocolChainId}`
+        );
+      }
+      if (!aiConfigAddress || aiConfigAddress === "0x") {
+        throw new Error(
+          `AIConfig address not configured for chain ${protocolChainId}`
+        );
+      }
+
+      const workerRegistryAddress =
+        config.workerRegistryAddress[protocolChainId];
+      if (!workerRegistryAddress || workerRegistryAddress === "0x") {
+        throw new Error(
+          `WorkerRegistry address not configured for chain ${protocolChainId}`
+        );
+      }
+
+      const transport = new ProtocolTransport({
+        gateway,
+        modelId: hexModelId,
+        sessionStorageKey: `lc-protocol-session:${chatId}`,
+        walletClient: client,
+        publicClient,
+        jobRegistryAddress,
+        aiConfigAddress,
+        workerRegistryAddress,
+        relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
+        getSubmitMode: () => submitModeRef.current,
+        getMemoryPrefix,
+        registerProtocolSession: async ({
+          chatId: targetChatId,
           sessionId,
-          jobId,
+          modelId: modelIdHex,
         }) => {
-          const response = await $http.post(
-            `/api/chat/${messageChatId}/messages`,
+          const response = await $http.put(
+            `/api/chat/${targetChatId}/protocol-session`,
             {
-              id: message.id,
               sessionId,
-              role: "user",
-              parts: message.parts ?? [],
-              attachments: [],
-              selectedVisibilityType,
-              systemPrompt,
-              completionState: "completed",
-              relaySource: "protocol-user",
-              jobId,
-              protocolMeta: { jobId, sessionId },
+              modelId: modelIdHex,
             }
           );
-
           if (!response.ok) {
             throw new Error(
-              `Failed to persist user message: ${response.status} ${response.statusText}`
+              `Failed to register protocol session: ${response.status} ${response.statusText}`
             );
           }
         },
-      },
-    });
-    transport.setOnSessionStatus((s) => {
-      setStatus(s as SessionStatus);
+        persistence: {
+          persistUserMessage: async ({
+            chatId: messageChatId,
+            message,
+            selectedVisibilityType,
+            systemPrompt,
+            sessionId,
+            jobId,
+          }) => {
+            const response = await $http.post(
+              `/api/chat/${messageChatId}/messages`,
+              {
+                id: message.id,
+                sessionId,
+                role: "user",
+                parts: message.parts ?? [],
+                attachments: [],
+                selectedVisibilityType,
+                systemPrompt,
+                completionState: "completed",
+                relaySource: "protocol-user",
+                jobId,
+                protocolMeta: { jobId, sessionId },
+              }
+            );
 
-      if (s === "preparing" || s === "key_exchange") {
-        setProgressStatus("preparing_chat");
-      } else if (s === "creating") {
-        setProgressStatus("writing_on_chain");
-      } else if (s === "ready") {
-        setProgressStatus("thinking");
-      }
+            if (!response.ok) {
+              throw new Error(
+                `Failed to persist user message: ${response.status} ${response.statusText}`
+              );
+            }
+          },
+        },
+      });
+      transport.setOnSessionStatus((s) => {
+        setStatus(s as SessionStatus);
 
-      if (s === "error") {
-        setError("Session initialization failed");
-        setProgressStatus("error");
-      } else {
-        setError(null);
-      }
-      // Refresh capability snapshot — the transport only knows the bound
-      // worker's capabilities after the session reaches "ready". Reading on
-      // every status change keeps the chat input's Switch in sync.
-      setWorkerCapabilities(transport.workerCapabilities);
-    });
-    transport.setOnFailoverStatus(setFailoverStatus);
-    transport.setOnProgressStatus(setProgressStatus);
-    transport.setOnJobUpdate((job) => {
-      setActiveJobs(transport.listJobs());
-      // If the job was updated to completed, clear any pending timedOutJob for it
-      if (
-        job.status === "completed" ||
-        job.status === "claimed" ||
-        job.status === "disputed"
-      ) {
-        setTimedOutJob((prev) => (prev?.jobId === job.jobId ? null : prev));
-      }
-    });
-    transport.setOnJobTimeout((job) => {
-      setActiveJobs(transport.listJobs());
-      setTimedOutJob(job);
-    });
-    transportRef.current = transport;
-    return transport;
-  }, [
-    chatId,
-    getGateway,
-    resolveModelId,
-    protocolChainId,
-    publicClient,
-    getMemoryPrefix,
-  ]);
+        if (s === "preparing" || s === "key_exchange") {
+          setProgressStatus("preparing_chat");
+        } else if (s === "creating") {
+          setProgressStatus("writing_on_chain");
+        } else if (s === "ready") {
+          setProgressStatus("thinking");
+        }
+
+        if (s === "error") {
+          setError("Session initialization failed");
+          setProgressStatus("error");
+        } else {
+          setError(null);
+        }
+        // Refresh capability snapshot — the transport only knows the bound
+        // worker's capabilities after the session reaches "ready". Reading on
+        // every status change keeps the chat input's Switch in sync.
+        setWorkerCapabilities(transport.workerCapabilities);
+      });
+      transport.setOnFailoverStatus(setFailoverStatus);
+      transport.setOnProgressStatus(setProgressStatus);
+      transport.setOnJobUpdate((job) => {
+        setActiveJobs(transport.listJobs());
+        // If the job was updated to completed, clear any pending timedOutJob for it
+        if (
+          job.status === "completed" ||
+          job.status === "claimed" ||
+          job.status === "disputed"
+        ) {
+          setTimedOutJob((prev) => (prev?.jobId === job.jobId ? null : prev));
+        }
+      });
+      transport.setOnJobTimeout((job) => {
+        setActiveJobs(transport.listJobs());
+        setTimedOutJob(job);
+      });
+      transportRef.current = transport;
+      return transport;
+    },
+    [
+      chatId,
+      getGateway,
+      resolveModelId,
+      protocolChainId,
+      publicClient,
+      getMemoryPrefix,
+    ]
+  );
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */
   const releaseTransport = useCallback(() => {
     transportRef.current?.release();
     transportRef.current = null;
     gatewayRef.current = null;
-    resolvedModelIdRef.current = null;
+    resolvedModelIdCacheRef.current.clear();
     setStatus("idle");
     setError(null);
     setProgressStatus("idle");
@@ -270,7 +284,7 @@ export function useProtocolSession(
     transportRef.current?.destroy();
     transportRef.current = null;
     gatewayRef.current = null;
-    resolvedModelIdRef.current = null;
+    resolvedModelIdCacheRef.current.clear();
     setStatus("idle");
     setError(null);
     setFailoverStatus("none");

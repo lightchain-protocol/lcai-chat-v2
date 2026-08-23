@@ -18,6 +18,11 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import {
+  AUTO_MODEL_ID,
+  type AutoRoute,
+  routePrompt,
+} from "@/lib/ai/auto-route";
 import { modelSupportsVoice } from "@/lib/ai/models";
 import {
   addBranch,
@@ -120,6 +125,9 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  // Last auto-routing decision, shown as "auto → {model} · {reason}" under
+  // the composer so the heuristic can never silently spend a bigger fee.
+  const [autoRoute, setAutoRoute] = useState<AutoRoute | null>(null);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
@@ -259,12 +267,40 @@ export function Chat({
   // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const transport = useMemo(() => {
+    // "Auto" resolves against the actual outgoing message at send time, so a
+    // fresh chat's first send can't race a not-yet-applied setState. The
+    // decision is surfaced via autoRoute for the composer's reveal line.
+    const resolveAutoRoute = (
+      lastMessage:
+        | { role?: string; parts?: Record<string, unknown>[] }
+        | undefined
+    ): string | undefined => {
+      if (currentModelIdRef.current !== AUTO_MODEL_ID) {
+        return;
+      }
+      const parts = lastMessage?.parts ?? [];
+      const prompt = parts
+        .filter((p) => p.type === "text")
+        .map((p) => (typeof p.text === "string" ? p.text : ""))
+        .join("\n");
+      const hasImage = parts.some(
+        (p) =>
+          p.type === "file" &&
+          typeof p.mediaType === "string" &&
+          p.mediaType.startsWith("image/")
+      );
+      const route = routePrompt({ prompt, hasImage });
+      setAutoRoute(route);
+      return route.modelId;
+    };
+
     if (isProtocolMode) {
       return new DefaultChatTransport({
         api: "/protocol",
         async fetch(_url, init) {
-          const t = await getProtocolTransport();
           const body = JSON.parse((init?.body as string) ?? "{}");
+          const modelOverride = resolveAutoRoute((body.messages ?? []).at(-1));
+          const t = await getProtocolTransport(modelOverride);
           const protocolBody = {
             ...body,
             id,
@@ -304,7 +340,11 @@ export function Chat({
           body: {
             id: request.id,
             message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
+            // Non-protocol path: "auto" resolves here, against the outgoing
+            // message, so the API always receives a concrete model id.
+            selectedChatModel:
+              resolveAutoRoute(request.messages.at(-1)) ??
+              currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
             webSearchMode: webSearchModeRef.current,
@@ -744,13 +784,18 @@ export function Chat({
           {!isReadonly && (
             <MultimodalInput
               attachments={attachments}
+              autoRoute={autoRoute}
               chatId={id}
               disabled={sessionRecovering}
               disabledPlaceholder="Session recovering..."
               input={input}
               messages={messages}
               onBeforeSubmit={canPrompt}
-              onDuel={isProtocolMode ? handleOpenDuel : undefined}
+              onDuel={
+                isProtocolMode && currentModelId !== AUTO_MODEL_ID
+                  ? handleOpenDuel
+                  : undefined
+              }
               onModelChange={setCurrentModelId}
               onSpeakResponsesChange={setSpeakResponses}
               onWebSearchModeChange={setWebSearchMode}
