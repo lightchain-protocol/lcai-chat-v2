@@ -3,40 +3,34 @@ import type { SettlementProgress } from "@/lib/protocol/settlement";
 import type { StreamMetricsSnapshot } from "@/lib/protocol/stream-metrics";
 import type { ResponseProof } from "@/lib/protocol/verify-response";
 import type { ChatMessage } from "@/lib/types";
+import type { SharedProofPayload } from "./verify-transcript";
 
 /**
- * Shareable verifiable transcript — WAVE-3 SCAFFOLD (pure builder, UNWIRED).
+ * Shareable verifiable transcript — client-side export + self-contained
+ * verifier (no server dependence).
  *
- * This module only knows how to fold a chat's persisted message parts into a
- * portable JSON document. Nothing calls it yet. Remaining wiring, in order:
+ * Product decision (owner-resolved 2026-08-23): sharing is EXPLICIT,
+ * per-conversation consent — "Create public verifiable link" warns that the
+ * conversation's content becomes public. No IPFS pin, no encryption: the
+ * payload travels via URL hash or a downloaded .json file, and the verifier
+ * page (app/share) re-verifies against the chain with a wallet-free public
+ * client. The transcript contains only what the user already saw.
  *
- * TODO(1) Server route `POST /api/chat/export` that pins the built JSON via
- *         the existing `uploadToIPFS` helper (lib/utils/ipfs-helpers.ts).
- *         OPEN PRODUCT DECISION: the current backup flow encrypts the payload
- *         with a wallet-address-derived AES-GCM key before pinning, which is
- *         right for private backups but makes the CID useless to anyone
- *         without the owner's wallet. The design doc's §3.4 public
- *         "verifiable view" link needs a PLAINTEXT pin instead (the transcript
- *         contains no secrets — only what the user already saw — and the whole
- *         point is that a third party can re-verify it). Pick one: a second,
- *         unencrypted pin path for shares, or keep shares encrypted and drop
- *         the public-link goal.
- * TODO(2) Public route `/share/[cid]` that fetches the document and
- *         RE-VERIFIES it client-side: `recoverProofSigner` +
- *         `checkProofAgainstChain` + `fetchOnChainJob` per message. The export
- *         itself proves nothing — it only carries the evidence captured at
- *         receipt (honesty rule: verification is recomputed at view time,
- *         never inherited from the exported file).
- * TODO(3) UI: an export affordance (chat header / message actions) that calls
- *         the route and copies the resulting CID link.
+ * Evidence availability: the full response ciphertext exists only in the
+ * live session's memory (transport.mismatchEvidence — the same window as the
+ * cryptographic dispute). Shares created in that window carry it and can
+ * reach "Verified"; shares created after a reload omit it and the verifier
+ * says "missing evidence" rather than overclaiming.
  *
- * Honesty notes (binding, see lightchain-agents/research/ai-3-nextgen-ux.md):
- * - `settlement` reflects what this client observed at the time, including its
- *   `acknowledgedOnChain`/`settledOnChainSec` distinctions. The share viewer
- *   must present those with the same wording as the in-app timeline.
- * - `streamMetrics` tok/s values are browser estimates (chars/4); the worker's
- *   measured numbers live in `generationStats`. Do not silently upgrade one
- *   into the other when rendering a share.
+ * Honesty notes (binding, see lightchain-agents/research/ai-3-nextgen-ux.md
+ * and bc-2-duel-and-verifier-spec.md §2.4):
+ * - The export proves nothing by itself; verification is recomputed at view
+ *   time (recoverProofSigner-equivalent + chain reads) on the share page.
+ * - renderedText is sharer-provided and NOT independently verifiable — the
+ *   share page labels it exactly so.
+ * - `settlement`/`streamMetrics` reflect what the sharer's client observed;
+ *   non-text content (audio, artifacts) is delivered-not-settled and carries
+ *   no provenance claim.
  */
 
 export type VerifiableTranscriptMessage = {
@@ -49,6 +43,12 @@ export type VerifiableTranscriptMessage = {
   settlement?: SettlementProgress;
   generationStats?: GenerationStats;
   streamMetrics?: StreamMetricsSnapshot;
+  /**
+   * The verifier-page payload (bc-2 spec §2.1): ciphertext + signature when
+   * the share is created in the live session that holds them, plus the
+   * sharer-provided rendering. Omitted for messages without a proof.
+   */
+  share?: SharedProofPayload;
 };
 
 export type VerifiableTranscript = {
@@ -63,6 +63,15 @@ type BuildInput = {
   chatId: string;
   title?: string;
   messages: ChatMessage[];
+  /**
+   * Live-session evidence keyed by jobId (base64 ciphertext + signature from
+   * the terminal frame). Only available before reload — shares created later
+   * simply omit the ciphertext and verify as "missing evidence".
+   */
+  evidence?: ReadonlyMap<
+    number,
+    { ciphertext: string; signature?: string | null }
+  >;
   /** Clock injection for tests; production uses Date.now. */
   now?: () => number;
 };
@@ -85,6 +94,7 @@ export function buildVerifiableTranscript({
   chatId,
   title,
   messages,
+  evidence,
   now = () => Date.now(),
 }: BuildInput): VerifiableTranscript {
   const out: VerifiableTranscriptMessage[] = messages.map((message) => {
@@ -124,6 +134,25 @@ export function buildVerifiableTranscript({
       } else if (part.type === "data-streamMetrics" && part.data) {
         entry.streamMetrics = part.data;
       }
+    }
+
+    // Share payload for the public verifier. Only assistant messages with a
+    // persisted proof get one; the ciphertext rides along only when the live
+    // session still holds it (the same window as the cryptographic dispute).
+    if (entry.proof) {
+      const live = evidence?.get(entry.proof.jobId);
+      entry.share = {
+        jobId: entry.proof.jobId,
+        sessionId: entry.proof.sessionId,
+        ...(live?.ciphertext ? { ciphertext: live.ciphertext } : {}),
+        ...(live?.signature || entry.proof.signature
+          ? {
+              signature: (live?.signature ??
+                entry.proof.signature) as SharedProofPayload["signature"],
+            }
+          : {}),
+        ...(entry.text ? { renderedText: entry.text } : {}),
+      };
     }
 
     return entry;

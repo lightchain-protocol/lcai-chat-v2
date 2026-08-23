@@ -340,6 +340,14 @@ export function useProtocolSession(
   }, []);
 
   /**
+   * Live-session share evidence (ciphertext + signature) for one job, or null
+   * once the window has passed. Backs the verifiable-transcript export.
+   */
+  const getShareEvidence = useCallback((jobId: number) => {
+    return transportRef.current?.getShareEvidence(jobId) ?? null;
+  }, []);
+
+  /**
    * Reads a job straight from the chain.
    *
    * The proof panel needs this rather than the tracked-job cache because that
@@ -387,6 +395,7 @@ export function useProtocolSession(
     disputeJob,
     disputeResponseMismatch,
     hasMismatchEvidence,
+    getShareEvidence,
     fetchOnChainJob,
     fetchWorkerStake,
     clearTimedOutJob,

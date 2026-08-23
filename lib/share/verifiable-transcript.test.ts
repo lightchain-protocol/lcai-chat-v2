@@ -167,4 +167,55 @@ describe("buildVerifiableTranscript", () => {
 
     expect(JSON.parse(JSON.stringify(doc))).toEqual(doc);
   });
+
+  it("builds a share payload from the proof plus live-session evidence", () => {
+    const message = assistantMessage([
+      { type: "text", text: "answer" },
+      { type: "data-responseProof", data: proof },
+    ]);
+
+    const doc = buildVerifiableTranscript({
+      chatId: "chat-1",
+      messages: [message],
+      evidence: new Map([
+        [42, { ciphertext: "Y2lwaGVydGV4dA==", signature: "0xcccc" }],
+      ]),
+    });
+
+    expect(doc.messages[0].share).toEqual({
+      jobId: 42,
+      sessionId: 7,
+      ciphertext: "Y2lwaGVydGV4dA==",
+      signature: "0xcccc",
+      renderedText: "answer",
+    });
+  });
+
+  it("omits the ciphertext when the live session no longer holds it", () => {
+    const message = assistantMessage([
+      { type: "text", text: "answer" },
+      { type: "data-responseProof", data: proof },
+    ]);
+
+    const doc = buildVerifiableTranscript({
+      chatId: "chat-1",
+      messages: [message],
+      evidence: new Map(),
+    });
+
+    const share = doc.messages[0].share;
+    expect(share?.jobId).toBe(42);
+    expect(share && "ciphertext" in share).toBe(false);
+    // The persisted proof's own signature still rides along.
+    expect(share?.signature).toBe("0xcccc");
+  });
+
+  it("adds no share payload to messages without a proof", () => {
+    const message = assistantMessage([{ type: "text", text: "answer" }]);
+    const doc = buildVerifiableTranscript({
+      chatId: "chat-1",
+      messages: [message],
+    });
+    expect(doc.messages[0].share).toBeUndefined();
+  });
 });

@@ -283,6 +283,23 @@ export class ProtocolTransport {
   }
 
   /**
+   * Share evidence for one job: the terminal-frame ciphertext (base64) and
+   * worker signature, from the same live-session store as the cryptographic
+   * dispute. Null after reload or once the bounded FIFO evicted the entry —
+   * shares created then verify as "missing evidence" rather than failing.
+   */
+  getShareEvidence(
+    jobId: number
+  ): { ciphertext: string; signature: string } | null {
+    const evidence = this.mismatchEvidence.get(jobId);
+    if (!evidence) return null;
+    return {
+      ciphertext: bytesToBase64(evidence.ciphertext),
+      signature: evidence.signature,
+    };
+  }
+
+  /**
    * Files disputeResponseMismatch with the ciphertext + signature captured
    * from the terminal frame. Only possible within the live page session —
    * the ciphertext is never persisted, so after a reload this throws and the
