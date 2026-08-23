@@ -30,6 +30,15 @@ import {
 } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import {
+  addMemoryEntry,
+  EMPTY_MEMORY_STORE,
+  loadMemoryStore,
+  type MemoryStore,
+  memoryPrefixFromStore,
+  removeMemoryEntry,
+  saveMemoryStore,
+} from "@/lib/memory";
 import { DUEL_BOTH_FAILED_COPY, duelFailureCopy } from "@/lib/protocol/duel";
 import { runDuelSideB } from "@/lib/protocol/duel-runner";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
@@ -44,6 +53,7 @@ import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
 import { DuelDialog } from "./duel-dialog";
 import { JobTimeoutToast } from "./job-timeout-toast";
+import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
@@ -143,6 +153,32 @@ export function Chat({
   // blocked send.
   const [prepaidGateOpen, setPrepaidGateOpen] = useState(false);
 
+  // Device-local private memory (lib/memory.ts). The ref feeds the
+  // transport's getMemoryPrefix so the lazily-created protocol transport
+  // always reads the latest store without being recreated. Loaded post-mount
+  // like the branch store, keeping SSR and first client render in agreement.
+  const [memoryStore, setMemoryStore] =
+    useState<MemoryStore>(EMPTY_MEMORY_STORE);
+  const memoryRef = useRef<MemoryStore>(EMPTY_MEMORY_STORE);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const store = loadMemoryStore();
+    memoryRef.current = store;
+    setMemoryStore(store);
+  }, []);
+
+  const updateMemoryStore = useCallback((next: MemoryStore) => {
+    memoryRef.current = next;
+    setMemoryStore(next);
+    saveMemoryStore(next);
+  }, []);
+
+  const getMemoryPrefix = useCallback(
+    () => memoryPrefixFromStore(memoryRef.current),
+    []
+  );
+
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
   // stale read or a balance dip falls back to the wallet path gracefully.
@@ -208,7 +244,14 @@ export function Chat({
     fetchOnChainJob,
     fetchWorkerStake,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
+  } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address,
+    id,
+    submitMode,
+    getMemoryPrefix
+  );
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
@@ -470,6 +513,7 @@ export function Chat({
           gateway: getGateway(),
           walletClient,
           publicClient,
+          getMemoryPrefix,
           onMessage: (message) => {
             streamStarted = true;
             sideBMessageId = message.id;
@@ -501,6 +545,7 @@ export function Chat({
       sendMessage,
       setMessages,
       getGateway,
+      getMemoryPrefix,
       id,
       prepaid,
     ]
@@ -630,6 +675,9 @@ export function Chat({
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onOpenMemory={
+            isProtocolMode ? () => setMemoryDialogOpen(true) : undefined
+          }
           onSystemPromptChange={(promptId, prompt) => {
             setSystemPromptId(promptId);
             setSystemPrompt(prompt);
@@ -740,6 +788,27 @@ export function Chat({
           setPrepaidGateOpen(true);
         }}
         open={duelPrompt !== null}
+      />
+
+      <MemoryDialog
+        onAdd={(text) =>
+          updateMemoryStore(
+            addMemoryEntry(
+              memoryStore,
+              text,
+              generateUUID(),
+              new Date().toISOString()
+            )
+          )
+        }
+        onClear={() => updateMemoryStore({ ...memoryStore, entries: [] })}
+        onOpenChange={setMemoryDialogOpen}
+        onRemove={(entryId) =>
+          updateMemoryStore(removeMemoryEntry(memoryStore, entryId))
+        }
+        onToggle={(enabled) => updateMemoryStore({ ...memoryStore, enabled })}
+        open={memoryDialogOpen}
+        store={memoryStore}
       />
 
       {/* <AlertDialog

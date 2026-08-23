@@ -32,6 +32,8 @@ export type DuelSideBInput = {
   publicClient: PublicClient;
   /** Progressive assistant-message snapshots for the duel pane. */
   onMessage: (message: ChatMessage) => void;
+  /** Same device-local memory as side A — same user, same envelope rules. */
+  getMemoryPrefix?: () => string;
   signal?: AbortSignal;
 };
 
@@ -95,6 +97,7 @@ export async function runDuelSideB(input: DuelSideBInput): Promise<void> {
     workerRegistryAddress,
     relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
     getSubmitMode: () => "auto",
+    getMemoryPrefix: input.getMemoryPrefix,
     // Side B must not overwrite the chat's primary-session record.
     registerProtocolSession: async () => {
       /* deliberate no-op — the primary session record stays side A's */

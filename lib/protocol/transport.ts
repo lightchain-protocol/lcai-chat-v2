@@ -14,6 +14,7 @@
  * doesn't support custom headers.
  */
 
+import { withMemoryPrefix } from "../memory";
 import type { ProtocolLoadingStatus } from "../types";
 import type { AudioStreamDescriptor } from "./audio-stream";
 import { parseArtifactDescriptor, parseAudioFrame } from "./audio-stream";
@@ -170,6 +171,13 @@ type ProtocolTransportConfig = SessionManagerConfig & {
     sessionId: number;
     modelId: string;
   }) => Promise<void>;
+  /**
+   * Device-local private memory (lib/memory.ts). Called once per send at
+   * envelope assembly — AFTER the user-message persist has captured the
+   * unmodified message — so memory rides only inside the encrypted envelope
+   * and never lands in the chat database.
+   */
+  getMemoryPrefix?: () => string;
 };
 
 /**
@@ -185,6 +193,7 @@ export class ProtocolTransport {
   private relayClient: RelayClient | null = null;
   private readonly persistence: ProtocolTransportConfig["persistence"];
   private readonly registerProtocolSession?: ProtocolTransportConfig["registerProtocolSession"];
+  private readonly getMemoryPrefix?: ProtocolTransportConfig["getMemoryPrefix"];
   /** Dedupes Consumer API PUTs for the same on-chain session id. */
   private lastRegisteredApiSessionId: number | null = null;
   private onSessionStatus?: (status: string) => void;
@@ -222,11 +231,17 @@ export class ProtocolTransport {
   >();
 
   constructor(config: ProtocolTransportConfig) {
-    const { persistence, registerProtocolSession, ...sessionConfig } = config;
+    const {
+      persistence,
+      registerProtocolSession,
+      getMemoryPrefix,
+      ...sessionConfig
+    } = config;
     this.sessionMgr = new SessionManager(sessionConfig);
     this.gateway = sessionConfig.gateway;
     this.persistence = persistence;
     this.registerProtocolSession = registerProtocolSession;
+    this.getMemoryPrefix = getMemoryPrefix;
     this.jobRegistryAddress = sessionConfig.jobRegistryAddress;
     // The signature the worker produces is domain-separated by chain id, so
     // recovering the signer needs the same value the worker signed with.
@@ -573,7 +588,15 @@ export class ProtocolTransport {
 
     // Deliberately not awaited — the stream must be able to emit its first
     // token before this resolves. Both outcomes are routed into the stream.
-    this.buildPrompt(plaintext ?? "", enableWebSearch, protocolStream)
+    //
+    // Private memory folds in here — envelope assembly, after the deferred
+    // persist above already captured the unmodified user message — so the
+    // prefix exists only inside the encrypted blob, never in chat history.
+    this.buildPrompt(
+      withMemoryPrefix(this.getMemoryPrefix?.() ?? "", plaintext ?? ""),
+      enableWebSearch,
+      protocolStream
+    )
       .then((prompt) =>
         this.sessionMgr.submitJob(
           serializePrompt(
