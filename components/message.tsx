@@ -12,6 +12,7 @@ import { cn, sanitizeText } from "@/lib/utils";
 import { Shimmer } from "./ai-elements/shimmer";
 import { ArtifactCard } from "./artifact";
 import { AudioStreamPlayer } from "./audio-stream-player";
+import { BranchControls, type BranchControlsData } from "./branch-controls";
 import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
@@ -44,6 +45,7 @@ const PurePreviewMessage = ({
   fetchOnChainJob,
   fetchWorkerStake,
   explorerBaseUrl,
+  branch,
 }: {
   chatId: string;
   message: ChatMessage;
@@ -64,6 +66,8 @@ const PurePreviewMessage = ({
   fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
   fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
   explorerBaseUrl?: string;
+  /** Fork + sibling navigator; omitted on read-only views and while loading. */
+  branch?: BranchControlsData;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
@@ -483,17 +487,20 @@ const PurePreviewMessage = ({
             )}
 
           {!isReadonly && (
-            <MessageActions
-              chatId={chatId}
-              isLoading={isLoading}
-              key={`action-${message.id}`}
-              message={message}
-              regenerate={
-                message.role === "assistant" ? () => regenerate() : undefined
-              }
-              setMode={setMode}
-              vote={vote}
-            />
+            <div className="flex items-center gap-1">
+              <MessageActions
+                chatId={chatId}
+                isLoading={isLoading}
+                key={`action-${message.id}`}
+                message={message}
+                regenerate={
+                  message.role === "assistant" ? () => regenerate() : undefined
+                }
+                setMode={setMode}
+                vote={vote}
+              />
+              {branch && !isLoading && <BranchControls branch={branch} />}
+            </div>
           )}
 
           {!isReadonly && jobId !== undefined && (

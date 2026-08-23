@@ -4,6 +4,7 @@ import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
 import { Fragment, memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
+import type { BranchStore } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { getDuelMeta } from "@/lib/protocol/duel";
 import type { OnChainJob } from "@/lib/protocol/session";
@@ -40,6 +41,11 @@ type MessagesProps = {
   fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
   fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
   explorerBaseUrl?: string;
+  /** Device-local conversation branching (lib/branches.ts). */
+  branchStore?: BranchStore;
+  onFork?: (anchorId: string) => void;
+  onSwitchBranch?: (anchorId: string, index: number) => void;
+  onAddBranch?: (anchorId: string) => void;
 };
 
 function PureMessages({
@@ -60,6 +66,10 @@ function PureMessages({
   fetchOnChainJob,
   fetchWorkerStake,
   explorerBaseUrl,
+  branchStore,
+  onFork,
+  onSwitchBranch,
+  onAddBranch,
 }: MessagesProps) {
   const initialScrollChatIdRef = useRef<string | null>(null);
   const {
@@ -150,9 +160,26 @@ function PureMessages({
       jobId !== undefined
         ? activeJobs?.find((j) => j.jobId === jobId)
         : undefined;
+    const anchorEntry = branchStore?.[message.id];
 
     return (
       <PreviewMessage
+        branch={
+          onFork
+            ? {
+                nav: anchorEntry
+                  ? {
+                      index: anchorEntry.activeIndex,
+                      count: anchorEntry.branches.length,
+                    }
+                  : null,
+                canFork: index < messages.length - 1,
+                onFork: () => onFork(message.id),
+                onSwitch: (target) => onSwitchBranch?.(message.id, target),
+                onAdd: () => onAddBranch?.(message.id),
+              }
+            : undefined
+        }
         chatId={chatId}
         claimJobTimeout={claimJobTimeout}
         disputeJob={disputeJob}

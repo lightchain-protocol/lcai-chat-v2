@@ -19,6 +19,15 @@ import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { modelSupportsVoice } from "@/lib/ai/models";
+import {
+  addBranch,
+  applyActiveBranches,
+  type BranchStore,
+  forkAt,
+  loadBranchStore,
+  saveBranchStore,
+  switchBranch,
+} from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { DUEL_BOTH_FAILED_COPY, duelFailureCopy } from "@/lib/protocol/duel";
@@ -497,6 +506,88 @@ export function Chat({
     ]
   );
 
+  // --- Conversation branching (device-local, lib/branches.ts) -------------
+  // Loaded post-mount (not in useState) so SSR and the first client render
+  // agree; the branched view is applied once per chat right after.
+  const [branchStore, setBranchStore] = useState<BranchStore>({});
+  const branchesLoadedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (branchesLoadedRef.current === id) {
+      return;
+    }
+    branchesLoadedRef.current = id;
+    const store = loadBranchStore(id);
+    setBranchStore(store);
+    if (Object.keys(store).length > 0) {
+      setMessages((prev) => applyActiveBranches(prev, store));
+    }
+  }, [id, setMessages]);
+
+  const handleFork = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1 || index >= messages.length - 1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = forkAt(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleSwitchBranch = useCallback(
+    (anchorId: string, target: number) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const result = switchBranch(
+        branchStore,
+        anchorId,
+        target,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(result.store);
+      saveBranchStore(id, result.store);
+      setMessages([
+        ...messages.slice(0, index + 1),
+        ...(result.tail as ChatMessage[]),
+      ]);
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleAddBranch = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = addBranch(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
 
@@ -574,6 +665,7 @@ export function Chat({
 
         <Messages
           activeJobs={activeJobs}
+          branchStore={isReadonly ? undefined : branchStore}
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
@@ -585,6 +677,9 @@ export function Chat({
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          onAddBranch={isReadonly ? undefined : handleAddBranch}
+          onFork={isReadonly ? undefined : handleFork}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
