@@ -15,11 +15,54 @@
 /** Matches promptEnvelope in lightchain-worker/internal/pipeline/prompt.go. */
 export const PROMPT_ENVELOPE_VERSION = 1;
 
+/**
+ * Envelope version once any voice field is in use. A v1 worker decoding a v2
+ * payload drops the voice fields (forward compatible), so the version number
+ * is informational rather than gating.
+ */
+export const PROMPT_ENVELOPE_VERSION_VOICE = 2;
+
 export type PromptEnvelope = {
   v: number;
   text: string;
   images?: string[];
+  /**
+   * Base64-encoded audio clip (no data: prefix) carrying a voice prompt.
+   * The bytes stay inside the encrypted prompt blob — the chain commits the
+   * voice prompt bit-for-bit. WAV only: the whisper sidecar does not decode
+   * other containers (provisioning/worker/voice-sidecars.md).
+   */
+  audio?: string;
+  /** Container/codec of `audio`. The worker's STT path accepts "wav". */
+  audioFormat?: string;
+  /**
+   * Opts in to spoken output: the worker synthesizes the response via the
+   * TTS sidecar and streams it as `audio` frames. Best-effort — a worker
+   * without a voice engine silently skips it, and the text answer is
+   * unaffected either way.
+   */
+  audioResponse?: boolean;
+  /** TTS voice id (sidecar-specific, e.g. a Kokoro voice). Empty = default. */
+  voice?: string;
 };
+
+/**
+ * Voice fields for one prompt. `audio` is bare base64 (no data: prefix);
+ * the composer produces it via lib/audio/voice-recorder.ts.
+ */
+export type VoicePromptOptions = {
+  audio?: string;
+  audioFormat?: "wav";
+  audioResponse?: boolean;
+  voice?: string;
+};
+
+/**
+ * Mirror of maxPromptAudioB64 in the worker (prompt.go) — the base64 char
+ * ceiling for one prompt's audio payload, kept so the size error fires in
+ * the composer instead of after the consumer has paid.
+ */
+export const MAX_PROMPT_AUDIO_B64_CHARS = 131_072;
 
 /**
  * Longest edge, in pixels, that an attached image is scaled down to.
@@ -45,12 +88,27 @@ export const MAX_TOTAL_IMAGE_BYTES = 90_000;
 
 export function buildPromptEnvelope(
   text: string,
-  images: string[]
+  images: string[],
+  voice?: VoicePromptOptions
 ): PromptEnvelope | string {
-  // No images means no envelope. Keeping the plain-string form for ordinary
-  // prompts avoids changing the bytes that go on chain for the common case.
-  if (images.length === 0) return text;
-  return { v: PROMPT_ENVELOPE_VERSION, text, images };
+  const hasVoice =
+    Boolean(voice?.audio) ||
+    voice?.audioResponse === true ||
+    Boolean(voice?.voice);
+  // No images and no voice means no envelope. Keeping the plain-string form
+  // for ordinary prompts avoids changing the bytes that go on chain for the
+  // common case.
+  if (images.length === 0 && !hasVoice) return text;
+  return {
+    v: hasVoice ? PROMPT_ENVELOPE_VERSION_VOICE : PROMPT_ENVELOPE_VERSION,
+    text,
+    ...(images.length > 0 ? { images } : {}),
+    ...(voice?.audio
+      ? { audio: voice.audio, audioFormat: voice.audioFormat ?? "wav" }
+      : {}),
+    ...(voice?.audioResponse ? { audioResponse: true } : {}),
+    ...(voice?.voice ? { voice: voice.voice } : {}),
+  };
 }
 
 export function serializePrompt(envelope: PromptEnvelope | string): string {
@@ -115,4 +173,21 @@ export function checkImageBudget(images: string[]): string | null {
   return `Images total ${Math.round(total / 1024)} KB, over the ${Math.round(
     MAX_TOTAL_IMAGE_BYTES / 1024
   )} KB that fits in one prompt. Remove one or use a smaller image.`;
+}
+
+/**
+ * Rejects a voice clip the worker will refuse (maxPromptAudioB64). Returns
+ * null when fine, or a message to show the user. Same fail-early rationale as
+ * checkImageBudget: the consumer pays for the blob either way.
+ */
+export function checkAudioBudget(
+  audioBase64: string | null | undefined
+): string | null {
+  if (!audioBase64) return null;
+  if (audioBase64.length <= MAX_PROMPT_AUDIO_B64_CHARS) return null;
+  return `The voice clip is too long for one prompt (${Math.round(
+    estimateBase64Bytes(audioBase64) / 1024
+  )} KB over the ${Math.floor(
+    (MAX_PROMPT_AUDIO_B64_CHARS * 3) / 4 / 1024
+  )} KB limit). Record a shorter one.`;
 }

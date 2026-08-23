@@ -21,6 +21,27 @@ export function modelSupportsImages(modelId: string | undefined): boolean {
   return modelId !== undefined && VISION_MODEL_IDS.has(modelId);
 }
 
+/**
+ * Models whose serving worker runs the whisper (STT) and Kokoro (TTS) voice
+ * sidecars. Today that is worker-3's set (A100, sidecars on loopback
+ * 8100/8101 — provisioning/worker/voice-sidecars.md and
+ * provisioning/residency-contract.json).
+ *
+ * Workers do not advertise voice in their heartbeat capabilities yet, so the
+ * signal lives here, mirroring modelSupportsImages. When heartbeat
+ * advertisement lands this should merge with useModelCapabilities rather
+ * than trusting a static list.
+ */
+const VOICE_MODEL_IDS = new Set([
+  "gpt-oss-20b",
+  "qwen3-coder-30b",
+  "devstral-24b",
+]);
+
+export function modelSupportsVoice(modelId: string | undefined): boolean {
+  return modelId !== undefined && VOICE_MODEL_IDS.has(modelId);
+}
+
 export function getChatModel(
   modelId: string | undefined
 ): ChatModel | undefined {
