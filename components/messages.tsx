@@ -129,9 +129,12 @@ function PureMessages({
 
   // Duel grouping (bc-2 §1): the anchor user message carries
   // protocolMeta.duel {group, side:"A", model}, side B's assistant answer
-  // carries {group, side:"B", model}. Side A's assistant reply is positional —
-  // the assistant message right after the anchor — so the normal useChat path
-  // needs no duel awareness.
+  // carries {group, side:"B", model}. Side A's assistant reply carries no
+  // duel meta (normal useChat path) — find it as the first duel-less
+  // assistant message within the anchor's turn. Purely positional pairing
+  // (messages[i+1]) raced side B's upsert: when side B's stream landed
+  // first, side A was pushed to index i+2, the pane falsely read "This side
+  // didn't produce an answer", and side A rendered standalone below the grid.
   const duelSideBByGroup = new Map<string, ChatMessage>();
   for (const m of messages) {
     const duel = getDuelMeta(m);
@@ -140,14 +143,23 @@ function PureMessages({
     }
   }
   const duelSideAIds = new Set<string>();
+  const duelSideAByGroup = new Map<string, ChatMessage>();
   messages.forEach((m, i) => {
     const duel = getDuelMeta(m);
     if (m.role !== "user" || duel?.side !== "A") {
       return;
     }
-    const next = messages[i + 1];
-    if (next?.role === "assistant" && !getDuelMeta(next)) {
-      duelSideAIds.add(next.id);
+    for (
+      let j = i + 1;
+      j < messages.length && messages[j].role !== "user";
+      j++
+    ) {
+      const candidate = messages[j];
+      if (candidate.role === "assistant" && !getDuelMeta(candidate)) {
+        duelSideAIds.add(candidate.id);
+        duelSideAByGroup.set(duel.group, candidate);
+        break;
+      }
     }
   });
 
@@ -234,9 +246,7 @@ function PureMessages({
 
             if (message.role === "user" && duel?.side === "A") {
               const sideB = duelSideBByGroup.get(duel.group);
-              const sideA = duelSideAIds.has(messages[index + 1]?.id ?? "")
-                ? messages[index + 1]
-                : undefined;
+              const sideA = duelSideAByGroup.get(duel.group);
 
               return (
                 <Fragment key={message.id}>
@@ -247,14 +257,14 @@ function PureMessages({
                       modelB={getDuelMeta(sideB)?.model ?? ""}
                       paneA={
                         sideA ? (
-                          renderPreview(sideA, index + 1)
+                          renderPreview(sideA, messages.indexOf(sideA))
                         ) : (
                           <p className="text-content-soft text-sm">
                             This side didn&apos;t produce an answer.
                           </p>
                         )
                       }
-                      paneB={renderPreview(sideB, index + 2)}
+                      paneB={renderPreview(sideB, messages.indexOf(sideB))}
                     />
                   )}
                 </Fragment>
