@@ -49,9 +49,12 @@ describe("catalogue-driven tier resolution", () => {
     expect(hasMaxVariant("other", WITH_MAX)).toBe(false);
     expect(hasAnyMaxVariant(WITH_MAX)).toBe(true);
     expect(hasAnyMaxVariant([])).toBe(false);
-    // The shipped catalogue has no -max entries yet: everything no-ops.
-    expect(hasAnyMaxVariant()).toBe(false);
+    // Post-R8 the shipped catalogue carries two Max entries
+    // (gpt-oss-20b-max, agentworld-35b-max): availability reads true,
+    // bases without a Max entry still no-op.
+    expect(hasAnyMaxVariant()).toBe(true);
     expect(resolveTierModelId("llama3-8b", "max")).toBe("llama3-8b");
+    expect(resolveTierModelId("gpt-oss-20b", "max")).toBe("gpt-oss-20b-max");
   });
 
   it("quotes the fee of the entry that will actually be charged", () => {

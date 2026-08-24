@@ -10,6 +10,7 @@ export type ChatModel = {
   maxOutputTokens: number;
 };
 
+// === BEGIN HAND-WRITTEN HELPERS (preserved across regen by 16-gen-models-ts.mjs — edit freely in lcai-chat-v2, this block is carried forward verbatim) ===
 /**
  * Models that can actually read an image.
  *
@@ -222,6 +223,7 @@ const STARTERS_BY_SPECIALTY: Record<ModelSpecialty, string[]> = {
 export function starterPrompts(modelId: string | undefined): string[] {
   return STARTERS_BY_SPECIALTY[modelId ? modelSpecialty(modelId) : "General"];
 }
+// === END HAND-WRITTEN HELPERS ===
 
 // Kept in sync with the models registered + enabled on AIConfig that have a
 // live, on-chain-eligible worker. Every entry is whitelisted on WorkerRegistry
@@ -270,20 +272,20 @@ export const chatModels: ChatModel[] = [
       "GPT-OSS 20b is an open-weight general-purpose model for chat and reasoning tasks.",
   },
   {
+    id: "gpt-oss-20b-max",
+    name: "gpt-oss-20b-max",
+    fee: 0.1,
+    maxOutputTokens: 6144,
+    description:
+      "GPT-OSS 20B Max is the Max tier of GPT-OSS 20b — same model, higher output budget (6144 tokens) for longer, more complete answers.",
+  },
+  {
     id: "qwen3-coder-30b",
     name: "qwen3-coder-30b",
     fee: 0.05,
     maxOutputTokens: 4096,
     description:
       "Qwen3-Coder 30b is the larger coding model, suited to bigger refactors and whole-file generation.",
-  },
-  {
-    id: "glm-4.7-flash",
-    name: "glm-4.7-flash",
-    fee: 0.05,
-    maxOutputTokens: 4096,
-    description:
-      "GLM 4.7 Flash is tuned for low latency, for quick answers where speed matters most.",
   },
   {
     id: "devstral-24b",
@@ -297,7 +299,7 @@ export const chatModels: ChatModel[] = [
     id: "deepseek-r1-32b",
     name: "deepseek-r1-32b",
     fee: 0.05,
-    maxOutputTokens: 4096,
+    maxOutputTokens: 3000,
     description:
       "DeepSeek-R1 32b is the larger reasoning model, for harder multi-step problems where depth matters more than speed.",
   },
@@ -348,6 +350,14 @@ export const chatModels: ChatModel[] = [
     maxOutputTokens: 4096,
     description:
       "AgentWorld 35b is a mixture-of-experts model built for agentic planning and environment simulation.",
+  },
+  {
+    id: "agentworld-35b-max",
+    name: "agentworld-35b-max",
+    fee: 0.2,
+    maxOutputTokens: 8192,
+    description:
+      "AgentWorld 35B Max is the Max tier of AgentWorld 35b — same agentic model, full 8192-token output budget for demanding multi-step runs.",
   },
   {
     id: "kat-coder-32b",
