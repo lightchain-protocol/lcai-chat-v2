@@ -17,6 +17,12 @@ export const AUTO_MODEL_ID = "auto";
 export type AutoRoute = {
   modelId: string;
   reason: string;
+  /**
+   * Set when the Max tier was armed and the routed model has a Max variant —
+   * the job actually runs as `{modelId}-max`. The reveal line shows it as
+   * "· max" so the higher fee is never a surprise.
+   */
+  tier?: "max";
 };
 
 const VISION_MODEL_ID = "qwen3-vl-8b";

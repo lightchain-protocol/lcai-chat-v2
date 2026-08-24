@@ -1,5 +1,7 @@
 export const DEFAULT_CHAT_MODEL: string = "llama3-8b";
 
+import { baseModelId, isMaxModel, toMaxModelId, type HeatTier } from "./heat-tiers";
+
 export type ChatModel = {
   id: string;
   name: string;
@@ -18,7 +20,7 @@ export type ChatModel = {
 const VISION_MODEL_IDS = new Set(["qwen3-vl-8b"]);
 
 export function modelSupportsImages(modelId: string | undefined): boolean {
-  return modelId !== undefined && VISION_MODEL_IDS.has(modelId);
+  return modelId !== undefined && VISION_MODEL_IDS.has(baseModelId(modelId));
 }
 
 /**
@@ -39,7 +41,7 @@ const VOICE_MODEL_IDS = new Set([
 ]);
 
 export function modelSupportsVoice(modelId: string | undefined): boolean {
-  return modelId !== undefined && VOICE_MODEL_IDS.has(modelId);
+  return modelId !== undefined && VOICE_MODEL_IDS.has(baseModelId(modelId));
 }
 
 export function getChatModel(
@@ -93,11 +95,72 @@ const MODEL_TRAITS: Record<
 };
 
 export function modelSpecialty(modelId: string): ModelSpecialty {
-  return MODEL_TRAITS[modelId]?.specialty ?? "General";
+  return MODEL_TRAITS[baseModelId(modelId)]?.specialty ?? "General";
 }
 
 export function modelSpeed(modelId: string): ModelSpeed {
-  return MODEL_TRAITS[modelId]?.speed ?? "Balanced";
+  return MODEL_TRAITS[baseModelId(modelId)]?.speed ?? "Balanced";
+}
+
+/**
+ * Tier availability is read off the catalogue, never assumed: a model offers
+ * Max only when its `{id}-max` entry is actually present.
+ */
+export function hasMaxVariant(
+  modelId: string,
+  models: ChatModel[] = chatModels
+): boolean {
+  return models.some((m) => m.id === toMaxModelId(baseModelId(modelId)));
+}
+
+/** Used by the Auto route, where the base model isn't known until send. */
+export function hasAnyMaxVariant(models: ChatModel[] = chatModels): boolean {
+  return models.some((m) => isMaxModel(m.id));
+}
+
+/**
+ * What actually gets sent for (model, tier). Falls back to the base id when
+ * the catalogue has no Max entry, so arming Max can never produce an id the
+ * network doesn't know.
+ */
+export function resolveTierModelId(
+  modelId: string,
+  tier: HeatTier,
+  models: ChatModel[] = chatModels
+): string {
+  if (tier !== "max") {
+    return baseModelId(modelId);
+  }
+  const base = baseModelId(modelId);
+  return hasMaxVariant(base, models) ? toMaxModelId(base) : base;
+}
+
+/**
+ * Display names for Max aliases (tier-catalog frontend note): proper-cased
+ * base name + " Max", one mapping line per alias — the catalogue `name` field
+ * is the lowercase id, which reads badly next to a fee.
+ */
+const DISPLAY_NAME_OVERRIDES: Record<string, string> = {
+  "agentworld-35b-max": "AgentWorld 35B Max",
+  "gpt-oss-20b-max": "GPT-OSS 20B Max",
+};
+
+export function displayName(model: ChatModel): string {
+  return DISPLAY_NAME_OVERRIDES[model.id] ?? model.name;
+}
+
+/**
+ * The fee the picker/preview should quote for (model, tier): the Max entry's
+ * own fee when armed and present, the base fee otherwise. Never hardcoded —
+ * always read off the catalogue entry that will actually be charged.
+ */
+export function effectiveFee(
+  modelId: string,
+  tier: HeatTier,
+  models: ChatModel[] = chatModels
+): number | undefined {
+  const resolved = resolveTierModelId(modelId, tier, models);
+  return models.find((m) => m.id === resolved)?.fee;
 }
 
 /** Display order for the grouped picker: everyday choices first. */

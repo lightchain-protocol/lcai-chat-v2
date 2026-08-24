@@ -24,11 +24,16 @@ import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
 import { AUTO_MODEL_ID, type AutoRoute } from "@/lib/ai/auto-route";
+import { type HeatTier, isMaxModel } from "@/lib/ai/heat-tiers";
 import {
   chatModels,
+  displayName,
+  effectiveFee,
   formatFee,
   getChatModel,
   groupModelsBySpecialty,
+  hasAnyMaxVariant,
+  hasMaxVariant,
   modelSpecialty,
   modelSpeed,
   modelSupportsImages,
@@ -62,6 +67,7 @@ import {
   PromptInputToolbar,
   PromptInputTools,
 } from "./elements/prompt-input";
+import { HeatTierChips } from "./heat-tier-chips";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -97,6 +103,8 @@ function PureMultimodalInput({
   disabledPlaceholder,
   onBeforeSubmit,
   autoRoute,
+  heatTier,
+  onHeatTierChange,
 }: {
   chatId: string;
   input: string;
@@ -132,6 +140,12 @@ function PureMultimodalInput({
   onBeforeSubmit?: () => boolean;
   /** Last auto-routing decision, for the "auto → {model} · {reason}" line. */
   autoRoute?: AutoRoute | null;
+  /**
+   * Heat tier (Standard | Max). Owned by chat.tsx so it survives composer
+   * remounts and applies to the send path, not just the picker label.
+   */
+  heatTier?: HeatTier;
+  onHeatTierChange?: (tier: HeatTier) => void;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -399,6 +413,17 @@ function PureMultimodalInput({
     uploadQueue.length === 0 &&
     canUseChat;
 
+  // Heat tier (Standard | Max). Max is armed only when the catalogue actually
+  // has the variant — for Auto that means ANY Max entry, since the routed
+  // model isn't known until send.
+  const isAuto = selectedModelId === AUTO_MODEL_ID;
+  const maxAvailable = isAuto
+    ? hasAnyMaxVariant()
+    : hasMaxVariant(selectedModelId);
+  const maxArmed = heatTier === "max" && maxAvailable;
+  const maxFee =
+    maxArmed && !isAuto ? effectiveFee(selectedModelId, "max") : undefined;
+
   return (
     <div className={cn("relative flex w-full flex-col gap-8", className)}>
       <input
@@ -496,6 +521,21 @@ function PureMultimodalInput({
           >
             auto → {getChatModel(autoRoute.modelId)?.name ?? autoRoute.modelId}{" "}
             · {autoRoute.reason}
+            {autoRoute.tier === "max" ? " · max" : ""}
+          </p>
+        )}
+        {maxArmed && (
+          // Pre-send price honesty: the fee is read off the catalogue entry
+          // that will actually be charged, never hardcoded. For Auto the model
+          // isn't known yet, so the line says where the fee comes from instead
+          // of guessing a number.
+          <p
+            className="px-2 pb-1 text-content-light text-xs"
+            data-testid="heat-tier-price-line"
+          >
+            {maxFee !== undefined
+              ? `Run a Max job (~${formatFee(maxFee)} from your prepaid balance)`
+              : "Max tier armed — the routed model's Max fee applies, from your prepaid balance"}
           </p>
         )}
         <div className="relative flex flex-row items-start gap-1 sm:gap-2">
@@ -552,7 +592,15 @@ function PureMultimodalInput({
               mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
               onModeChange={onWebSearchModeChange}
             />
+            {onHeatTierChange && (
+              <HeatTierChips
+                maxAvailable={maxAvailable}
+                onTierChange={onHeatTierChange}
+                tier={maxArmed ? "max" : "standard"}
+              />
+            )}
             <ModelSelectorCompact
+              heatTier={heatTier}
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
             />
@@ -616,6 +664,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (!equal(prevProps.autoRoute, nextProps.autoRoute)) {
+      return false;
+    }
+    if (prevProps.heatTier !== nextProps.heatTier) {
       return false;
     }
 
@@ -824,9 +875,11 @@ const SpeakResponsesToggle = memo(PureSpeakResponsesToggle);
 function PureModelSelectorCompact({
   selectedModelId,
   onModelChange,
+  heatTier,
 }: {
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
+  heatTier?: HeatTier;
 }) {
   const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
   const [query, setQuery] = useState("");
@@ -835,22 +888,41 @@ function PureModelSelectorCompact({
     setOptimisticModelId(selectedModelId);
   }, [selectedModelId]);
 
-  const selectedModel = chatModels.find(
+  // Max variants are selectable through the tier chips, not as separate
+  // picker rows — listing them too would double the list.
+  const pickerModels = useMemo(
+    () => chatModels.filter((m) => !isMaxModel(m.id)),
+    []
+  );
+
+  const selectedModel = pickerModels.find(
     (model) => model.id === optimisticModelId
   );
+
+  // Armed only when the selected model actually has a Max entry; otherwise the
+  // chip is disabled and the trigger shows the standard fee.
+  const maxArmed =
+    heatTier === "max" &&
+    selectedModel !== undefined &&
+    hasMaxVariant(selectedModel.id);
+  const triggerFee = selectedModel
+    ? (maxArmed
+        ? effectiveFee(selectedModel.id, "max")
+        : undefined) ?? selectedModel.fee
+    : undefined;
 
   const groups = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const matching = needle
-      ? chatModels.filter(
+      ? pickerModels.filter(
           (m) =>
             m.name.toLowerCase().includes(needle) ||
             m.description.toLowerCase().includes(needle) ||
             modelSpecialty(m.id).toLowerCase().includes(needle)
         )
-      : chatModels;
+      : pickerModels;
     return groupModelsBySpecialty(matching);
-  }, [query]);
+  }, [query, pickerModels]);
 
   return (
     <PromptInputModelSelect
@@ -862,7 +934,7 @@ function PureModelSelectorCompact({
           onModelChange?.(AUTO_MODEL_ID);
           return;
         }
-        const model = chatModels.find((m) => m.name === modelName);
+        const model = pickerModels.find((m) => m.name === modelName);
         if (model) {
           setOptimisticModelId(model.id);
           onModelChange?.(model.id);
@@ -879,14 +951,18 @@ function PureModelSelectorCompact({
       >
         <CpuIcon size={16} />
         <span className="hidden font-medium text-xs sm:block">
-          {optimisticModelId === AUTO_MODEL_ID ? "Auto" : selectedModel?.name}
+          {optimisticModelId === AUTO_MODEL_ID
+            ? "Auto"
+            : selectedModel
+              ? `${displayName(selectedModel)}${maxArmed ? " · Max" : ""}`
+              : undefined}
         </span>
-        {selectedModel && (
+        {triggerFee !== undefined && (
           <span
             className="hidden text-content-subtle text-xs sm:block"
             title="Cost of one prompt with this model"
           >
-            {formatFee(selectedModel.fee)}
+            {formatFee(triggerFee)}
           </span>
         )}
         <ChevronDownIcon size={16} />

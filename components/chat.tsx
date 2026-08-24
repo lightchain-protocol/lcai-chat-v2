@@ -18,12 +18,13 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { AUTO_MODEL_ID, type AutoRoute, routePrompt } from "@/lib/ai/auto-route";
+import type { HeatTier } from "@/lib/ai/heat-tiers";
 import {
-  AUTO_MODEL_ID,
-  type AutoRoute,
-  routePrompt,
-} from "@/lib/ai/auto-route";
-import { modelSupportsVoice } from "@/lib/ai/models";
+  hasMaxVariant,
+  modelSupportsVoice,
+  resolveTierModelId,
+} from "@/lib/ai/models";
 import {
   addBranch,
   applyActiveBranches,
@@ -125,6 +126,16 @@ export function Chat({
   // Last auto-routing decision, shown as "auto → {model} · {reason}" under
   // the composer so the heuristic can never silently spend a bigger fee.
   const [autoRoute, setAutoRoute] = useState<AutoRoute | null>(null);
+
+  // Heat tier (Standard | Max), persisted per browser. The ref feeds the
+  // transport closure so the lazily-created transport always reads the live
+  // tier. Arming is sticky across model switches ONLY when the new model has
+  // a Max variant — see handleModelChange.
+  const [heatTier, setHeatTier] = useLocalStorage<HeatTier>(
+    "heat-tier",
+    "standard"
+  );
+  const heatTierRef = useRef(heatTier);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
@@ -263,6 +274,15 @@ export function Chat({
   // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const transport = useMemo(() => {
+    // Max tiering composes with every send path the same way: resolve the
+    // base id, then map it to its `{base}-max` catalogue entry when armed.
+    // resolveTierModelId falls back to the base id when no Max entry exists,
+    // so an armed-but-unavailable tier can never produce an unknown id.
+    const applyTier = (baseId: string): string =>
+      baseId === AUTO_MODEL_ID
+        ? baseId
+        : resolveTierModelId(baseId, heatTierRef.current);
+
     // "Auto" resolves against the actual outgoing message at send time, so a
     // fresh chat's first send can't race a not-yet-applied setState. The
     // decision is surfaced via autoRoute for the composer's reveal line.
@@ -286,8 +306,11 @@ export function Chat({
           p.mediaType.startsWith("image/")
       );
       const route = routePrompt({ prompt, hasImage });
-      setAutoRoute(route);
-      return route.modelId;
+      const tiered = applyTier(route.modelId);
+      setAutoRoute(
+        tiered === route.modelId ? route : { ...route, tier: "max" }
+      );
+      return tiered;
     };
 
     if (isProtocolMode) {
@@ -295,7 +318,9 @@ export function Chat({
         api: "/protocol",
         async fetch(_url, init) {
           const body = JSON.parse((init?.body as string) ?? "{}");
-          const modelOverride = resolveAutoRoute((body.messages ?? []).at(-1));
+          const modelOverride =
+            resolveAutoRoute((body.messages ?? []).at(-1)) ??
+            applyTier(currentModelIdRef.current);
           const t = await getProtocolTransport(modelOverride);
           const protocolBody = {
             ...body,
@@ -313,10 +338,11 @@ export function Chat({
               // GatewayClient.uploadBlob → consumer-api side-channel write.
               webSearchMode: webSearchModeRef.current,
               // Spoken-output opt-in → envelope v2 audioResponse. Gated on
-              // the live model pick, not just the stored preference.
+              // the live model pick, not just the stored preference. (Voice
+              // capability keys off the base id, so a -max id resolves the
+              // same as its base.)
               audioResponse:
-                speakResponsesRef.current &&
-                modelSupportsVoice(currentModelIdRef.current),
+                speakResponsesRef.current && modelSupportsVoice(modelOverride),
             },
             signal: init?.signal ?? undefined,
           });
@@ -340,7 +366,7 @@ export function Chat({
             // message, so the API always receives a concrete model id.
             selectedChatModel:
               resolveAutoRoute(request.messages.at(-1)) ??
-              currentModelIdRef.current,
+              applyTier(currentModelIdRef.current),
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
             webSearchMode: webSearchModeRef.current,
@@ -376,6 +402,10 @@ export function Chat({
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  useEffect(() => {
+    heatTierRef.current = heatTier;
+  }, [heatTier]);
 
   useEffect(() => {
     systemPromptRef.current = systemPrompt;
@@ -576,6 +606,23 @@ export function Chat({
     walletClient,
   });
 
+  // Switching models with Max armed: keep the tier when the new model has a
+  // Max variant, reset visibly to Standard when it doesn't — silently staying
+  // "max" while running standard would misstate what the next job costs.
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      setCurrentModelId(modelId);
+      if (
+        heatTierRef.current === "max" &&
+        modelId !== AUTO_MODEL_ID &&
+        !hasMaxVariant(modelId)
+      ) {
+        setHeatTier("standard");
+      }
+    },
+    [setHeatTier]
+  );
+
   return (
     <>
       <div className="overscroll-behavior-contain flex h-[calc(100svh-58px)] min-w-0 touch-pan-y flex-col bg-background md:h-[calc(100svh-80px)]">
@@ -655,10 +702,12 @@ export function Chat({
               chatId={id}
               disabled={sessionRecovering}
               disabledPlaceholder="Session recovering..."
+              heatTier={heatTier}
               input={input}
               messages={messages}
               onBeforeSubmit={canPrompt}
-              onModelChange={setCurrentModelId}
+              onHeatTierChange={setHeatTier}
+              onModelChange={handleModelChange}
               onSpeakResponsesChange={setSpeakResponses}
               onWebSearchModeChange={setWebSearchMode}
               selectedModelId={currentModelId}
