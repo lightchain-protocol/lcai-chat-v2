@@ -24,16 +24,19 @@ if (isTestnet && lcaiTestnet.id === lcai.id) {
 //
 // Direct `process.env.NEXT_PUBLIC_*` access (not dynamic indexing) is
 // required so Next.js inlines the value into the client bundle.
+// Redeploy 2026-08-24 (redeploy-2026-08-23/deployed-addresses.env): testnet
+// defaults track the R8 fresh proxied deployment; the image build still
+// passes them explicitly as build args (runbook §4 row 7).
 const TESTNET_JOB_REGISTRY =
   (process.env.NEXT_PUBLIC_JOB_REGISTRY_ADDRESS as `0x${string}` | undefined) ??
-  "0x531b3A87c5D785441B9cF55b98169F20FD9056a7";
+  "0x62C01304e05a336fDAf478C7Be255F5297d8dC69";
 const TESTNET_AI_CONFIG =
   (process.env.NEXT_PUBLIC_AI_CONFIG_ADDRESS as `0x${string}` | undefined) ??
-  "0xeCF4Ca5Ba6D97ae586993e170764a1E92231b67e";
+  "0x49392B2f285Ab77f77a7B61545B128A13D1CCCC9";
 const TESTNET_WORKER_REGISTRY =
   (process.env.NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS as
     | `0x${string}`
-    | undefined) ?? "0x0000000000000000000000000000000000001002";
+    | undefined) ?? "0x34BA0f8c7b658d69f3F7A947ca4d0A9FB5779E91";
 
 const config = {
   chains: [isTestnet ? lcaiTestnet : lcai] as [Chain, ...Chain[]],
