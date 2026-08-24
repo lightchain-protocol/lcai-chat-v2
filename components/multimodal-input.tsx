@@ -4,7 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Globe, Mic, Square, Volume2 } from "lucide-react";
+import { Brain, Globe, Mic, Square, Volume2 } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -106,6 +106,8 @@ function PureMultimodalInput({
   autoRoute,
   heatTier,
   onHeatTierChange,
+  memoryActive,
+  onOpenMemory,
 }: {
   chatId: string;
   input: string;
@@ -147,6 +149,12 @@ function PureMultimodalInput({
    */
   heatTier?: HeatTier;
   onHeatTierChange?: (tier: HeatTier) => void;
+  /**
+   * Device-local memory (lib/memory.ts) is enabled and has entries shaping
+   * prompts. Indicator only — click opens the memory dialog (chat.tsx).
+   */
+  memoryActive?: boolean;
+  onOpenMemory?: () => void;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -593,6 +601,25 @@ function PureMultimodalInput({
               mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
               onModeChange={onWebSearchModeChange}
             />
+            {memoryActive && (
+              <Button
+                aria-label="Memory is active"
+                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+                data-testid="memory-active-indicator"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpenMemory?.();
+                }}
+                title="Memory is on — your saved notes shape prompts on this device only (nothing is shared with other devices)"
+                type="button"
+                variant="ghost"
+              >
+                <Brain className="size-4 text-primary" />
+                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
+                  Memory
+                </span>
+              </Button>
+            )}
             {onHeatTierChange && (
               <HeatTierChips
                 maxAvailable={maxAvailable}
@@ -668,6 +695,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.heatTier !== nextProps.heatTier) {
+      return false;
+    }
+    if (prevProps.memoryActive !== nextProps.memoryActive) {
       return false;
     }
 

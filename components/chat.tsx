@@ -720,10 +720,16 @@ export function Chat({
               disabledPlaceholder="Session recovering..."
               heatTier={heatTier}
               input={input}
+              memoryActive={
+                isProtocolMode &&
+                memoryStore.enabled &&
+                memoryStore.entries.length > 0
+              }
               messages={messages}
               onBeforeSubmit={canPrompt}
               onHeatTierChange={setHeatTier}
               onModelChange={handleModelChange}
+              onOpenMemory={() => setMemoryDialogOpen(true)}
               onSpeakResponsesChange={setSpeakResponses}
               onWebSearchModeChange={setWebSearchMode}
               selectedModelId={currentModelId}
