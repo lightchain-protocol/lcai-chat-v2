@@ -155,8 +155,15 @@ const PurePreviewMessage = ({
     return null;
   }, [parts]);
 
-  const protocolFinalText = useMemo(() => {
-    for (const part of parts) {
+  // The friendly catalogue id of the model that served this answer (recorded
+  // by the transport at first frame). Drives tier labels and the Max
+  // progress/settle readouts in the provenance chip.
+  const servedModelId =
+    typeof message.metadata?.protocolMeta?.model === "string"
+      ? message.metadata.protocolMeta.model
+      : undefined;
+
+  const protocolFinalText = useMemo(() => {    for (const part of parts) {
       if (
         part.type === "data-protocolFinal" &&
         part.data &&
@@ -530,6 +537,7 @@ const PurePreviewMessage = ({
                 live={isLoading}
                 metrics={streamMetrics}
                 proof={responseProof}
+                servedModelId={servedModelId}
                 settlement={settlement}
                 stats={generationStats}
               />

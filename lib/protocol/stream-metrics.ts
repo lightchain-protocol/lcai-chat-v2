@@ -28,6 +28,8 @@ export type StreamMetricsSnapshot = {
   ttftMs: number | null;
   /** Answer characters rendered so far (text kind only). */
   textChars: number;
+  /** ms since the user hit send — the "~x / N tokens" progress readout. */
+  elapsedMs: number;
   /** Characters/sec of answer text since the first text frame. */
   charsPerSecond: number | null;
   /** charsPerSecond / CHARS_PER_TOKEN_ESTIMATE. Labelled "~" in the UI. */
@@ -88,6 +90,7 @@ export class StreamMetricsTracker {
       firstPayloadMs,
       ttftMs,
       textChars: this.textChars,
+      elapsedMs: this.now() - this.sentAt,
       charsPerSecond,
       tokensPerSecondEstimate:
         charsPerSecond === null

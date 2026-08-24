@@ -197,6 +197,14 @@ export default function SharePage() {
               >
                 <p className="mb-1 font-medium text-[10px] text-content-subtle uppercase">
                   {message.role}
+                  {message.tier === "max" && (
+                    <span
+                      className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 font-semibold text-primary normal-case"
+                      title={`Served by ${message.model ?? "a Max-tier model"}`}
+                    >
+                      Max
+                    </span>
+                  )}
                 </p>
                 {bodyText && (
                   <>

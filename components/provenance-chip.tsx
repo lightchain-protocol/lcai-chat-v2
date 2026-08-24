@@ -14,9 +14,13 @@ import type { GenerationStats } from "@/lib/protocol/relay-client";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
 import {
+  CHARS_PER_TOKEN_ESTIMATE,
   formatLatencyMs,
   type StreamMetricsSnapshot,
 } from "@/lib/protocol/stream-metrics";
+import { isMaxModel } from "@/lib/ai/heat-tiers";
+import { getChatModel } from "@/lib/ai/models";
+import { DISPUTE_WINDOW_LABEL } from "@/lib/protocol/dispute-window";
 import {
   checkProofAgainstChain,
   type ResponseProof,
@@ -55,6 +59,7 @@ function PureProvenanceChip({
   explorerBaseUrl,
   disputeResponseMismatch,
   hasMismatchEvidence,
+  servedModelId,
 }: {
   stats: GenerationStats | null;
   proof: ResponseProof | null;
@@ -71,6 +76,8 @@ function PureProvenanceChip({
   explorerBaseUrl?: string;
   disputeResponseMismatch?: (jobId: number) => Promise<{ txHash: string }>;
   hasMismatchEvidence?: (jobId: number) => boolean;
+  /** Friendly catalogue id of the serving model, from protocolMeta.model. */
+  servedModelId?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [job, setJob] = useState<OnChainJob | null>(null);
@@ -143,6 +150,17 @@ function PureProvenanceChip({
     job?.worker ?? verificationWorker(proof, freshSigner) ?? fallbackWorker;
   const settled = settlement?.stage === "settled";
   const failed = settlement?.stage === "failed";
+
+  // Heat-tier readouts. isMax comes from the serving model's id suffix, the
+  // fee from the chain record — nothing here trusts a hardcoded price.
+  const isMax = servedModelId !== undefined && isMaxModel(servedModelId);
+  const servedModel = servedModelId ? getChatModel(servedModelId) : undefined;
+  // Live "~x / N tokens" progress: x is the chars-based estimate (same
+  // heuristic as the live tok/s), N is the model's on-chain output cap.
+  const liveTokenEstimate =
+    live && metrics
+      ? Math.floor(metrics.textChars / CHARS_PER_TOKEN_ESTIMATE)
+      : null;
 
   const handleMismatchDispute = async () => {
     if (!(disputeResponseMismatch && proof)) return;
@@ -219,6 +237,19 @@ function PureProvenanceChip({
             </span>
           )
         )}
+        {live &&
+          liveTokenEstimate !== null &&
+          servedModel &&
+          liveTokenEstimate > 0 && (
+            <span
+              className="font-mono text-[11px]"
+              title="Answer tokens rendered so far vs the model's on-chain output cap (chars-based estimate)"
+            >
+              ~{liveTokenEstimate.toLocaleString()}/
+              {servedModel.maxOutputTokens.toLocaleString()} tok ·{" "}
+              {Math.floor((metrics?.elapsedMs ?? 0) / 1000)}s
+            </span>
+          )}
         <ChevronDown
           className={cn("transition-transform", expanded && "rotate-180")}
           size={12}
@@ -235,8 +266,21 @@ function PureProvenanceChip({
             />
           )}
 
-          {stake !== null && worker && (
-            <p className="text-content-subtle">
+          {isMax && settled && job && (
+            // Post-settle Max summary: token count from the worker's own
+            // stats frame, fee from the chain record, "verified" only when
+            // the proof check actually landed green.
+            <p className="text-content-subtle" data-testid="max-settled-line">
+              Max job settled —{" "}
+              {stats && stats.evalTokens > 0
+                ? `${stats.evalTokens.toLocaleString()} tokens delivered, `
+                : ""}
+              fee {formatLcai(job.escrowedFee)}
+              {status === "verified" ? ", verified on-chain" : ""}.
+            </p>
+          )}
+
+          {stake !== null && worker && (            <p className="text-content-subtle">
               This worker has{" "}
               <span className="font-medium font-mono text-content-strong">
                 {formatLcai(stake)}
@@ -281,7 +325,8 @@ function PureProvenanceChip({
               <p className="text-content-subtle">
                 Cryptographic dispute evidence is only kept for the session that
                 received this answer; after a reload only a bond dispute is
-                available.
+                available. Either way, disputes close {DISPUTE_WINDOW_LABEL}{" "}
+                after job completion.
               </p>
             ))}
 
@@ -292,7 +337,10 @@ function PureProvenanceChip({
                 <>
                   {/* What this answer actually cost, read from the chain rather
                       than the model catalogue. */}
-                  <Field label="Paid" value={formatLcai(job.escrowedFee)} />
+                  <Field
+                    label={isMax ? "Paid (Max tier)" : "Paid"}
+                    value={formatLcai(job.escrowedFee)}
+                  />
                   <Field label="Worker" mono value={job.worker} />
                   <Field label="Prompt blob" mono value={job.promptBlobHash} />
                   <Field

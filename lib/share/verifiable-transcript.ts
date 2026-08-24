@@ -1,3 +1,4 @@
+import { isMaxModel } from "@/lib/ai/heat-tiers";
 import type { GenerationStats } from "@/lib/protocol/relay-client";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
 import type { StreamMetricsSnapshot } from "@/lib/protocol/stream-metrics";
@@ -39,6 +40,10 @@ export type VerifiableTranscriptMessage = {
   text: string;
   reasoning?: string;
   jobId?: number;
+  /** Friendly catalogue id of the serving model, when the transport recorded it. */
+  model?: string;
+  /** "max" when the serving model id carries the -max tier suffix. */
+  tier?: "max";
   proof?: ResponseProof;
   settlement?: SettlementProgress;
   generationStats?: GenerationStats;
@@ -116,6 +121,14 @@ export function buildVerifiableTranscript({
     const jobId = message.metadata?.jobId;
     if (typeof jobId === "number") {
       entry.jobId = jobId;
+    }
+
+    const servedModel = message.metadata?.protocolMeta?.model;
+    if (typeof servedModel === "string") {
+      entry.model = servedModel;
+      if (isMaxModel(servedModel)) {
+        entry.tier = "max";
+      }
     }
 
     for (const part of message.parts) {

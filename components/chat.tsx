@@ -327,6 +327,9 @@ export function Chat({
             id,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
+            // Friendly catalogue id of this send's resolved model (base or
+            // -max); the transport records it into protocolMeta.model.
+            friendlyModelId: modelOverride,
           };
           const { response } = await t.sendMessages({
             messages: protocolBody.messages ?? [],

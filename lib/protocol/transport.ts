@@ -533,6 +533,10 @@ export class ProtocolTransport {
       prelude,
       signal: options.signal,
       hasAudioPrompt: audioBase64 !== null,
+      friendlyModelId:
+        typeof options.body?.friendlyModelId === "string"
+          ? options.body.friendlyModelId
+          : undefined,
       onJobIdResolved: (jobId) => {
         persist.settle(jobId);
         // Deadline tracking is best-effort; failure must not block delivery.
@@ -1088,6 +1092,12 @@ export class ProtocolTransport {
     signal?: AbortSignal;
     /** True when the prompt carried a voice clip (drives the transcribing status). */
     hasAudioPrompt?: boolean;
+    /**
+     * Friendly catalogue id of the model this send resolved to
+     * (e.g. "agentworld-35b-max") — recorded into the assistant message's
+     * protocolMeta so tier labels and transcripts name what served it.
+     */
+    friendlyModelId?: string;
     /** Fired once, with the first jobId this stream learns about. */
     onJobIdResolved: (jobId: number) => void;
     /** Fired once when the stream ends, with the jobId if one was learned. */
@@ -1099,6 +1109,7 @@ export class ProtocolTransport {
       prelude,
       signal,
       hasAudioPrompt = false,
+      friendlyModelId,
       onJobIdResolved,
       onTerminated,
     } = args;
@@ -1337,6 +1348,9 @@ export class ProtocolTransport {
               sessionId: wsFrame.sessionId,
               correlationId: wsFrame.correlationId,
               completedAt: new Date().toISOString(),
+              // Friendly catalogue id ("agentworld-35b-max") so tier labels
+              // and transcripts can name what served the answer.
+              model: friendlyModelId,
             },
           });
         }

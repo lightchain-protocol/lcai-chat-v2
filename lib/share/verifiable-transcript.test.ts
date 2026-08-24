@@ -42,6 +42,7 @@ const metrics: StreamMetricsSnapshot = {
   firstPayloadMs: 2000,
   ttftMs: 2500,
   textChars: 400,
+  elapsedMs: 5000,
   charsPerSecond: 80,
   tokensPerSecondEstimate: 20,
 };
@@ -88,8 +89,36 @@ describe("buildVerifiableTranscript", () => {
     expect(entry.streamMetrics).toEqual(metrics);
   });
 
-  it("falls back to protocolFinal text when no text parts are present", () => {
-    const message = assistantMessage([
+  it("carries the serving model and derives the Max tier from its suffix", () => {
+    const maxMessage: ChatMessage = {
+      ...assistantMessage([{ type: "text", text: "deep answer" }]),
+      metadata: {
+        createdAt: "2026-08-23T00:00:00.000Z",
+        jobId: 43,
+        protocolMeta: { model: "agentworld-35b-max" },
+      },
+    };
+    const standardMessage: ChatMessage = {
+      ...assistantMessage([{ type: "text", text: "plain answer" }]),
+      metadata: {
+        createdAt: "2026-08-23T00:00:00.000Z",
+        jobId: 44,
+        protocolMeta: { model: "llama3-8b" },
+      },
+    };
+
+    const doc = buildVerifiableTranscript({
+      chatId: "chat-1",
+      messages: [maxMessage, standardMessage],
+    });
+
+    expect(doc.messages[0].model).toBe("agentworld-35b-max");
+    expect(doc.messages[0].tier).toBe("max");
+    expect(doc.messages[1].model).toBe("llama3-8b");
+    expect(doc.messages[1].tier).toBeUndefined();
+  });
+
+  it("falls back to protocolFinal text when no text parts are present", () => {    const message = assistantMessage([
       { type: "data-protocolFinal", data: { text: "settled plaintext" } },
     ]);
 

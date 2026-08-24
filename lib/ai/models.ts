@@ -1,6 +1,6 @@
-export const DEFAULT_CHAT_MODEL: string = "llama3-8b";
-
 import { baseModelId, isMaxModel, toMaxModelId, type HeatTier } from "./heat-tiers";
+
+export const DEFAULT_CHAT_MODEL: string = "llama3-8b";
 
 export type ChatModel = {
   id: string;

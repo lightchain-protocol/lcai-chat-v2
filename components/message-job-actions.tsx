@@ -8,6 +8,7 @@ import config from "@/config";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { DISPUTE_WINDOW_LABEL } from "@/lib/protocol/dispute-window";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import { getWeb3ErrorMessage } from "@/lib/utils/web3-errors";
 import {
@@ -177,7 +178,8 @@ export function MessageJobActions({
                 </strong>{" "}
                 will be deducted from your wallet. If the worker is found guilty
                 the bond is refunded and the fee is returned to you. If the
-                worker is cleared, the bond is forfeited.
+                worker is cleared, the bond is forfeited. Disputes can only be
+                filed within {DISPUTE_WINDOW_LABEL} of job completion.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
