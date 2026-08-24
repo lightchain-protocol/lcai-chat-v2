@@ -60,6 +60,18 @@ export type UploadBlobResponse = {
   blobHashes: string[];
 };
 
+/**
+ * One web-search result, already in the citation shape the chat UI renders.
+ * Search is proxied rather than called directly so the provider key stays
+ * server-side; see the consumer API's web-search.service.ts.
+ */
+export type WebSearchSource = {
+  position: number;
+  title: string;
+  url: string;
+  description: string;
+};
+
 export type BalanceResponse = {
   /** Prepaid balance in wei, as a decimal string. */
   balance: string;
@@ -70,7 +82,12 @@ export type BalanceResponse = {
 };
 
 export type SubmitMessageResponse = {
-  jobId: string;
+  /**
+   * Null on the delegated path: the API now returns at broadcast (202), before
+   * the JobSubmitted log exists. The jobId arrives later, either on a metadata
+   * frame or on the first chunk, and the client binds by session until then.
+   */
+  jobId: string | null;
   txHash: string;
 };
 
@@ -204,11 +221,43 @@ export class GatewayClient {
     if (opts?.searchEnabled === true) {
       body.searchEnabled = true;
     }
-    return await this.post<UploadBlobResponse>(
-      "/api/blobs",
-      body,
-      { protected: true, bearerOnly: true }
-    );
+    return await this.post<UploadBlobResponse>("/api/blobs", body, {
+      protected: true,
+      bearerOnly: true,
+    });
+  }
+
+  /**
+   * Runs a web search for the prompt about to be sent. The caller folds the
+   * results into the plaintext before encrypting it, because the prompt is
+   * end-to-end encrypted and no server downstream of here can read it.
+   *
+   * Never throws: an unavailable or unconfigured search must degrade to
+   * sending the original prompt, not block the send.
+   */
+  async searchWeb(query: string, maxResults = 5): Promise<WebSearchSource[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/websearch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await this.getRequestHeaders({
+            protected: true,
+            bearerOnly: true,
+          })),
+        },
+        body: JSON.stringify({ query, maxResults }),
+      });
+      if (!res.ok) {
+        console.warn(`Web search unavailable (${res.status})`);
+        return [];
+      }
+      const data = (await res.json()) as { sources?: WebSearchSource[] };
+      return Array.isArray(data.sources) ? data.sources : [];
+    } catch (err) {
+      console.warn("Web search failed", err);
+      return [];
+    }
   }
 
   /**

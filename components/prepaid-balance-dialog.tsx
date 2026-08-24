@@ -35,6 +35,10 @@ export function PrepaidBalanceDialog(props: DialogProps) {
 
   const balanceLCAI = formatEther(pb.balance);
   const allowanceLCAI = formatEther(pb.allowance);
+  // Re-authorizing an already-funded balance is the only case where a standalone
+  // authorize is worth a confirmation — it is the path back after a revoke,
+  // without depositing again.
+  const showAuthorize = !pb.isAuthorized && pb.balance > 0n;
   const busy =
     pb.depositAndAuthorizeMutation.isPending ||
     pb.withdrawMutation.isPending ||
@@ -310,24 +314,33 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                   <p className="text-content-light text-xs">
                     {pb.isAuthorized
                       ? "Revoke to require a wallet signature per prompt again."
-                      : "Authorize so the API can submit prompts within your spending limit."}
+                      : showAuthorize
+                        ? "Authorize so the API can submit prompts within your spending limit."
+                        : "Your first deposit authorizes the delegate in the same transaction."}
                   </p>
                 </div>
-                <Button
-                  className="shrink-0"
-                  disabled={busy}
-                  onClick={onToggleDelegate}
-                  variant={pb.isAuthorized ? "outline" : "default"}
-                >
-                  {pb.authorizeMutation.isPending ||
-                  pb.revokeMutation.isPending ? (
-                    <Loader2Icon className="size-4 animate-spin" />
-                  ) : pb.isAuthorized ? (
-                    "Revoke"
-                  ) : (
-                    "Authorize"
-                  )}
-                </Button>
+                {/* Deliberately no Authorize button at a zero balance. It would
+                    authorize with no allowance, leaving prompts still gated,
+                    and the deposit above already authorizes as part of the same
+                    transaction — so offering it here costs a confirmation and
+                    buys nothing. */}
+                {(pb.isAuthorized || showAuthorize) && (
+                  <Button
+                    className="shrink-0"
+                    disabled={busy}
+                    onClick={onToggleDelegate}
+                    variant={pb.isAuthorized ? "outline" : "default"}
+                  >
+                    {pb.authorizeMutation.isPending ||
+                    pb.revokeMutation.isPending ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : pb.isAuthorized ? (
+                      "Revoke"
+                    ) : (
+                      "Authorize"
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           ) : (

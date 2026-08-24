@@ -8,6 +8,7 @@ import config from "@/config";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { DISPUTE_WINDOW_LABEL } from "@/lib/protocol/dispute-window";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import { getWeb3ErrorMessage } from "@/lib/utils/web3-errors";
 import {
@@ -89,107 +90,108 @@ export function MessageJobActions({
   }
 
   // ── Dispute (assistant message, job completed within window) ─────────────
-  if (messageRole === "assistant" && onDisputeJob) {
-    // Only show button when the job is completed and we haven't already disputed
-    if (
-      trackedJob &&
-      (trackedJob.status === "completed" || trackedJob.status === "streaming")
-    ) {
-      const openDisputeDialog = async () => {
-        if (!publicClient || !jobRegistryAddress || !aiConfigAddress) return;
+  // Only show the button when the job is completed and not already disputed.
+  if (
+    messageRole === "assistant" &&
+    onDisputeJob &&
+    trackedJob &&
+    (trackedJob.status === "completed" || trackedJob.status === "streaming")
+  ) {
+    const openDisputeDialog = async () => {
+      if (!publicClient || !jobRegistryAddress || !aiConfigAddress) return;
 
-        try {
-          const [job, multiplier] = await Promise.all([
-            publicClient.readContract({
-              address: jobRegistryAddress,
-              abi: jobRegistryAbi,
-              functionName: "getJob",
-              args: [BigInt(jobId)],
-            }),
-            publicClient.readContract({
-              address: aiConfigAddress,
-              abi: aiConfigAbi,
-              functionName: "getDisputeBondMultiplier",
-            }),
-          ]);
-
-          // JobState.Completed == 2
-          if (job.state !== 2) return;
-
-          const disputeWindow = await publicClient.readContract({
+      try {
+        const [job, multiplier] = await Promise.all([
+          publicClient.readContract({
+            address: jobRegistryAddress,
+            abi: jobRegistryAbi,
+            functionName: "getJob",
+            args: [BigInt(jobId)],
+          }),
+          publicClient.readContract({
             address: aiConfigAddress,
             abi: aiConfigAbi,
-            functionName: "getDisputeWindow",
-          });
+            functionName: "getDisputeBondMultiplier",
+          }),
+        ]);
 
-          const windowEnd = Number(job.completedAt) + Number(disputeWindow);
-          if (Date.now() / 1000 >= windowEnd) return; // window closed
+        // JobState.Completed == 2
+        if (job.state !== 2) return;
 
-          const bond = (job.escrowedFee * multiplier) / 10_000n;
-          setDisputeBond(bond);
-          setShowDisputeDialog(true);
-        } catch {
-          // Job not readable — don't show button
-        }
-      };
+        const disputeWindow = await publicClient.readContract({
+          address: aiConfigAddress,
+          abi: aiConfigAbi,
+          functionName: "getDisputeWindow",
+        });
 
-      const handleDispute = async () => {
-        setShowDisputeDialog(false);
-        setDisputePending(true);
-        try {
-          await onDisputeJob(jobId);
-          toast.success("Dispute filed successfully.");
-        } catch (err) {
-          toast.error(`Dispute failed: ${getWeb3ErrorMessage(err)}`);
-        } finally {
-          setDisputePending(false);
-        }
-      };
+        const windowEnd = Number(job.completedAt) + Number(disputeWindow);
+        if (Date.now() / 1000 >= windowEnd) return; // window closed
 
-      return (
-        <>
-          <div className="mt-1 flex items-center gap-2">
-            <Button
-              className="h-6 gap-1 border-blue-300 px-2 text-blue-700 text-xs hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
-              disabled={disputePending}
-              onClick={openDisputeDialog}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <ShieldAlert className="size-3" />
-              {disputePending ? "Disputing…" : "Dispute Response"}
-            </Button>
-          </div>
+        const bond = (job.escrowedFee * multiplier) / 10_000n;
+        setDisputeBond(bond);
+        setShowDisputeDialog(true);
+      } catch {
+        // Job not readable — don't show button
+      }
+    };
 
-          <AlertDialog
-            onOpenChange={setShowDisputeDialog}
-            open={showDisputeDialog}
+    const handleDispute = async () => {
+      setShowDisputeDialog(false);
+      setDisputePending(true);
+      try {
+        await onDisputeJob(jobId);
+        toast.success("Dispute filed successfully.");
+      } catch (err) {
+        toast.error(`Dispute failed: ${getWeb3ErrorMessage(err)}`);
+      } finally {
+        setDisputePending(false);
+      }
+    };
+
+    return (
+      <>
+        <div className="mt-1 flex items-center gap-2">
+          <Button
+            className="h-6 gap-1 border-blue-300 px-2 text-blue-700 text-xs hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
+            disabled={disputePending}
+            onClick={openDisputeDialog}
+            size="sm"
+            type="button"
+            variant="outline"
           >
-            <AlertDialogContent className="sm:rounded-3xl">
-              <AlertDialogHeader>
-                <AlertDialogTitle>File a Dispute?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  You are disputing job #{jobId}. A bond of{" "}
-                  <strong>
-                    {disputeBond !== null ? formatEther(disputeBond) : "…"} LCAI
-                  </strong>{" "}
-                  will be deducted from your wallet. If the worker is found
-                  guilty the bond is refunded and the fee is returned to you. If
-                  the worker is cleared, the bond is forfeited.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDispute}>
-                  Confirm Dispute
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </>
-      );
-    }
+            <ShieldAlert className="size-3" />
+            {disputePending ? "Disputing…" : "Dispute Response"}
+          </Button>
+        </div>
+
+        <AlertDialog
+          onOpenChange={setShowDisputeDialog}
+          open={showDisputeDialog}
+        >
+          <AlertDialogContent className="sm:rounded-3xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>File a Dispute?</AlertDialogTitle>
+              <AlertDialogDescription>
+                You are disputing job #{jobId}. A bond of{" "}
+                <strong>
+                  {disputeBond !== null ? formatEther(disputeBond) : "…"} LCAI
+                </strong>{" "}
+                will be deducted from your wallet. If the worker is found guilty
+                the bond is refunded and the fee is returned to you. If the
+                worker is cleared, the bond is forfeited. Disputes can only be
+                filed within {DISPUTE_WINDOW_LABEL} of job completion.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDispute}>
+                Confirm Dispute
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
+    );
   }
 
   return null;

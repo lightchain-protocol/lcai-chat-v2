@@ -4,11 +4,19 @@ import equal from "fast-deep-equal";
 import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
+import { isAgentDescriptor } from "@/lib/agent/timeline";
+import { servedModelIdFromMessage } from "@/lib/ai/heat-tiers";
 import type { Vote } from "@/lib/db/schema";
+import type { ArtifactDescriptor } from "@/lib/protocol/audio-stream";
+import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
+import { AgentTimeline } from "./agent-timeline";
 import { Shimmer } from "./ai-elements/shimmer";
+import { ArtifactCard } from "./artifact";
+import { AudioStreamPlayer } from "./audio-stream-player";
+import { BranchControls, type BranchControlsData } from "./branch-controls";
 import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
@@ -19,6 +27,7 @@ import { MessageEditor } from "./message-editor";
 import { MessageJobActions } from "./message-job-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
+import { ProvenanceChip } from "./provenance-chip";
 import { SourceLinkChip } from "./source-link-chip";
 import { Weather } from "./weather";
 
@@ -35,6 +44,12 @@ const PurePreviewMessage = ({
   trackedJob,
   claimJobTimeout,
   disputeJob,
+  disputeResponseMismatch,
+  hasMismatchEvidence,
+  fetchOnChainJob,
+  fetchWorkerStake,
+  explorerBaseUrl,
+  branch,
 }: {
   chatId: string;
   message: ChatMessage;
@@ -48,15 +63,105 @@ const PurePreviewMessage = ({
   trackedJob?: TrackedJob;
   claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
   disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
+  /** Files disputeResponseMismatch with live-session evidence, if retained. */
+  disputeResponseMismatch?: (jobId: number) => Promise<{ txHash: string }>;
+  hasMismatchEvidence?: (jobId: number) => boolean;
+  /** Reads a job from the chain so a reloaded answer stays verifiable. */
+  fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
+  fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
+  explorerBaseUrl?: string;
+  /** Fork + sibling navigator; omitted on read-only views and while loading. */
+  branch?: BranchControlsData;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
 
   const parts = message.parts ?? [];
 
-  const attachmentsFromMessage = parts.filter(
-    (part) => part.type === "file"
+  const attachmentsFromMessage = parts.filter((part) => part.type === "file");
+
+  // Arrives as a data part both live and after a reload: the worker sends it
+  // on its own frame kind mid-stream, and completeAssistantMessage persists
+  // the same shape, so a refresh keeps the badge.
+  const generationStats = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-generationStats" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const responseProof = useMemo(() => {
+    for (const part of parts) {
+      // Require a real payload: rows persisted while the API stripped unknown
+      // data keys come back as `{}`, which is truthy but carries no proof.
+      if (
+        part.type === "data-responseProof" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  // Agent-mode frames render as one step timeline per message, not as
+  // individual artifact cards — pairing tool_call/tool_result needs the
+  // whole set. Other artifact types keep their per-card rendering below.
+  const agentDescriptors = useMemo(
+    () =>
+      parts
+        .filter(
+          (part) =>
+            part.type === "data-artifact" &&
+            part.data &&
+            isAgentDescriptor(part.data)
+        )
+        .map((part) => (part as { data: ArtifactDescriptor }).data),
+    [parts]
   );
+
+  // The settlement journey and browser-measured timing, reconciled in place
+  // during the stream (stable part ids) and persisted in final form, so the
+  // same record renders live and after a reload.
+  const settlement = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-settlement" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const streamMetrics = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-streamMetrics" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  // The friendly catalogue id of the model that served this answer — from
+  // metadata.protocolMeta after a reload, from the data-protocolMeta part
+  // while the stream is still live (the row's metadata only exists after the
+  // persist round trip). Drives tier labels and the Max readouts in the
+  // provenance chip.
+  const servedModelId = servedModelIdFromMessage(message);
 
   const protocolFinalText = useMemo(() => {
     for (const part of parts) {
@@ -69,6 +174,28 @@ const PurePreviewMessage = ({
       }
     }
     return null;
+  }, [parts]);
+
+  // Voice output: the descriptor reconciles in place (header, then final);
+  // PCM chunks append under unique ids and are live-only — never persisted,
+  // so after a reload only the descriptor's badge remains.
+  const audioStream = useMemo(() => {
+    for (const part of parts) {
+      if (part.type === "data-audioStream" && part.data) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const audioChunks = useMemo(() => {
+    const collected: Array<{ seq: number; pcm: string }> = [];
+    for (const part of parts) {
+      if (part.type === "data-audioChunk" && part.data) {
+        collected.push(part.data);
+      }
+    }
+    return collected;
   }, [parts]);
 
   const firstTextPartIndex = useMemo(
@@ -156,9 +283,7 @@ const PurePreviewMessage = ({
             "min-h-96": message.role === "assistant" && requiresScrollPadding,
             "w-full":
               (message.role === "assistant" &&
-                parts.some(
-                  (p) => p.type === "text" && p.text?.trim()
-                )) ||
+                parts.some((p) => p.type === "text" && p.text?.trim())) ||
               mode === "edit",
             "max-w-[calc(100%-2.5rem)] sm:max-w-[min(fit-content,80%)]":
               message.role === "user" && mode !== "edit",
@@ -182,6 +307,10 @@ const PurePreviewMessage = ({
             </div>
           )}
 
+          {agentDescriptors.length > 0 && (
+            <AgentTimeline descriptors={agentDescriptors} />
+          )}
+
           {parts.map((part, index) => {
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
@@ -194,6 +323,22 @@ const PurePreviewMessage = ({
                   reasoning={part.text}
                 />
               );
+            }
+
+            // Agent frames render together in the timeline above; everything
+            // else renders as cards in delivery order, each carrying its own
+            // delivered-not-settled badge.
+            if (type === "data-artifact" && part.data) {
+              if (isAgentDescriptor(part.data)) {
+                return null;
+              }
+              return <ArtifactCard descriptor={part.data} key={key} />;
+            }
+
+            // Audio parts are consumed once, below, by AudioStreamPlayer —
+            // rendering each chunk here would flood the message body.
+            if (type === "data-audioStream" || type === "data-audioChunk") {
+              return null;
             }
 
             if (type === "text") {
@@ -364,15 +509,56 @@ const PurePreviewMessage = ({
             </div>
           )}
 
-          {!isReadonly && (
-            <MessageActions
-              chatId={chatId}
-              isLoading={isLoading}
-              key={`action-${message.id}`}
-              message={message}
-              setMode={setMode}
-              vote={vote}
+          {message.role === "assistant" && audioStream && (
+            <AudioStreamPlayer
+              chunks={audioChunks}
+              className="mt-2"
+              descriptor={audioStream}
+              live={isLoading}
             />
+          )}
+
+          {message.role === "assistant" &&
+            (generationStats ||
+              responseProof ||
+              settlement ||
+              streamMetrics ||
+              // A paid job with no surviving proof parts (e.g. persisted while
+              // the API stripped data keys) still gets the chip: it shows the
+              // on-chain record honestly as "Not verified" rather than hiding.
+              jobId !== undefined) && (
+              <ProvenanceChip
+                disputeResponseMismatch={disputeResponseMismatch}
+                explorerBaseUrl={explorerBaseUrl}
+                fallbackWorker={trackedJob?.worker}
+                fetchOnChainJob={fetchOnChainJob}
+                fetchWorkerStake={fetchWorkerStake}
+                hasMismatchEvidence={hasMismatchEvidence}
+                jobId={jobId}
+                live={isLoading}
+                metrics={streamMetrics}
+                proof={responseProof}
+                servedModelId={servedModelId}
+                settlement={settlement}
+                stats={generationStats}
+              />
+            )}
+
+          {!isReadonly && (
+            <div className="flex items-center gap-1">
+              <MessageActions
+                chatId={chatId}
+                isLoading={isLoading}
+                key={`action-${message.id}`}
+                message={message}
+                regenerate={
+                  message.role === "assistant" ? () => regenerate() : undefined
+                }
+                setMode={setMode}
+                vote={vote}
+              />
+              {branch && !isLoading && <BranchControls branch={branch} />}
+            </div>
           )}
 
           {!isReadonly && jobId !== undefined && (
@@ -413,9 +599,11 @@ export const PreviewMessage = memo(
   }
 );
 
+const WWW_PREFIX = /^www\./;
+
 function formatSourceHost(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    return new URL(url).hostname.replace(WWW_PREFIX, "");
   } catch {
     return url;
   }

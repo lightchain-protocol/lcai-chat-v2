@@ -2,6 +2,14 @@ import type { InferUITool, UIMessage } from "ai";
 import { z } from "zod";
 import type { getWeather } from "./ai/tools/get-weather";
 import type { webSearch } from "./ai/tools/web-search";
+import type {
+  ArtifactDescriptor,
+  AudioStreamDescriptor,
+} from "./protocol/audio-stream";
+import type { GenerationStats } from "./protocol/relay-client";
+import type { SettlementProgress } from "./protocol/settlement";
+import type { StreamMetricsSnapshot } from "./protocol/stream-metrics";
+import type { ResponseProof } from "./protocol/verify-response";
 import type { AppUsage } from "./usage";
 
 export type DataPart = { type: "append-message"; message: string };
@@ -33,7 +41,9 @@ export type ProtocolLoadingStatus =
   | "idle"
   | "preparing_chat"
   | "writing_on_chain"
+  | "searching_web"
   | "submitting_job"
+  | "transcribing"
   | "waiting_for_relay"
   | "decoding_prompt"
   | "thinking"
@@ -49,8 +59,17 @@ export const PROTOCOL_LOADING_STATUS_LABELS: Record<
   idle: "Thinking...",
   preparing_chat: "Preparing your chat...",
   writing_on_chain: "Writing on chain...",
+  searching_web: "Searching the web...",
   submitting_job: "Uploading prompt to chain...",
-  waiting_for_relay: "Thinking...",
+  // Voice prompts take an extra worker-side step (whisper STT) inside the
+  // same post-submit wait. Shown only when the prompt carried audio, in place
+  // of waiting_for_relay — the wire gives no separate transcription signal,
+  // so this label covers the whole pre-first-frame phase honestly.
+  transcribing: "Transcribing your voice prompt...",
+  // The longest wait in the whole flow: the worker has the job and is loading
+  // the model. A cold one takes over ten seconds, so this says what is
+  // happening rather than leaving a generic spinner.
+  waiting_for_relay: "Waiting for the worker...",
   decoding_prompt: "Decoding your prompt",
   thinking: "Thinking...",
   reasoning: "Reasoning...",
@@ -72,6 +91,41 @@ export type CustomUIDataTypes = {
   usage: AppUsage;
   webSearchSources: { sources: WebSearchSource[] };
   protocolFinal: { text: string };
+  // The job's protocol record (jobId, sessionId, serving model's friendly
+  // catalogue id). Emitted live at first frame — the row's
+  // metadata.protocolMeta only exists after the persist round trip — and
+  // persisted with the message so live and reload views match.
+  protocolMeta: {
+    jobId: number;
+    sessionId: number;
+    correlationId?: string;
+    completedAt?: string;
+    model?: string;
+  };
+  // What the model itself measured for the generation. Arrives on its own
+  // frame kind from the worker rather than being inferred client-side.
+  generationStats: GenerationStats;
+  // Verification evidence captured from the terminal frame, so the answer can
+  // be checked against the chain long after it was received.
+  responseProof: ResponseProof;
+  // The answer's on-chain journey (escrow → ack → stream → settle), updated
+  // live during the job and persisted in its final form with the message.
+  // Verification is deliberately not part of this record — it is recomputed
+  // from responseProof at render time.
+  settlement: SettlementProgress;
+  // Browser-measured timing (TTFT, rolling throughput estimate). The worker's
+  // own numbers live in generationStats; these cover the wait before them.
+  streamMetrics: StreamMetricsSnapshot;
+  // Live voice-output stream: the descriptor (header, then final with the
+  // content hash) reconciles in place under a stable id. DELIVERED, NOT
+  // SETTLED — audio is outside the settlement commitment until Phase-2.
+  audioStream: AudioStreamDescriptor;
+  // One part per 32 KiB PCM chunk (unique ids, appended). Live playback only —
+  // never persisted with the message, so audio is gone after reload.
+  audioChunk: { seq: number; pcm: string };
+  // One artifact descriptor per artifact frame (unique ids). Persisted with
+  // the message; rendered "delivered, not settled".
+  artifact: ArtifactDescriptor;
 };
 
 export type ChatMessage = UIMessage<

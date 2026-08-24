@@ -9,28 +9,60 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { useLocalStorage } from "usehooks-ts";
 import { useAccount, useBalance } from "wagmi";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
-import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { AUTO_MODEL_ID, type AutoRoute, routePrompt } from "@/lib/ai/auto-route";
+import { recordModelOutcome } from "@/lib/ai/availability";
+import type { HeatTier } from "@/lib/ai/heat-tiers";
+import {
+  hasMaxVariant,
+  modelSupportsVoice,
+  resolveTierModelId,
+} from "@/lib/ai/models";
+import {
+  addBranch,
+  applyActiveBranches,
+  type BranchStore,
+  forkAt,
+  loadBranchStore,
+  saveBranchStore,
+  switchBranch,
+} from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import {
+  addMemoryEntry,
+  EMPTY_MEMORY_STORE,
+  loadMemoryStore,
+  type MemoryStore,
+  memoryPrefixFromStore,
+  removeMemoryEntry,
+  saveMemoryStore,
+} from "@/lib/memory";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import {
+  DEFAULT_WEB_SEARCH_MODE,
+  type WebSearchMode,
+} from "@/lib/protocol/search-intent";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
+import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
+import { ShareTranscriptButton } from "./share-transcript-button";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -92,15 +124,44 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  // Last auto-routing decision, shown as "auto → {model} · {reason}" under
+  // the composer so the heuristic can never silently spend a bigger fee.
+  const [autoRoute, setAutoRoute] = useState<AutoRoute | null>(null);
+
+  // Heat tier (Standard | Max), persisted per browser. The ref feeds the
+  // transport closure so the lazily-created transport always reads the live
+  // tier. Arming is sticky across model switches ONLY when the new model has
+  // a Max variant — see handleModelChange.
+  const [heatTier, setHeatTier] = useLocalStorage<HeatTier>(
+    "heat-tier",
+    "standard"
+  );
+  const heatTierRef = useRef(heatTier);
+  // The catalogue id (base or -max) of the in-flight send, recorded into the
+  // device-local availability heuristic on finish/error.
+  const lastSentModelRef = useRef<string | null>(null);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
-  const [enableWebSearch, setEnableWebSearch] = useState(false);
-  const enableWebSearchRef = useRef(enableWebSearch);
+  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
+    DEFAULT_WEB_SEARCH_MODE
+  );
+  const webSearchModeRef = useRef(webSearchMode);
+
+  // "Speak responses" opt-in (envelope v2 audioResponse). Persisted per
+  // browser; effective only when the selected model's worker runs the TTS
+  // sidecar — the toggle is hidden otherwise (modelSupportsVoice), and the
+  // double-gate below keeps a stale stored true from reaching a non-voice
+  // model's envelope.
+  const [speakResponses, setSpeakResponses] = useLocalStorage(
+    "speak-responses",
+    false
+  );
+  const speakResponsesRef = useRef(speakResponses);
   const { walletClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
@@ -111,6 +172,32 @@ export function Chat({
   // answered. This dialog is the existing deposit/authorize modal, opened on a
   // blocked send.
   const [prepaidGateOpen, setPrepaidGateOpen] = useState(false);
+
+  // Device-local private memory (lib/memory.ts). The ref feeds the
+  // transport's getMemoryPrefix so the lazily-created protocol transport
+  // always reads the latest store without being recreated. Loaded post-mount
+  // like the branch store, keeping SSR and first client render in agreement.
+  const [memoryStore, setMemoryStore] =
+    useState<MemoryStore>(EMPTY_MEMORY_STORE);
+  const memoryRef = useRef<MemoryStore>(EMPTY_MEMORY_STORE);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const store = loadMemoryStore();
+    memoryRef.current = store;
+    setMemoryStore(store);
+  }, []);
+
+  const updateMemoryStore = useCallback((next: MemoryStore) => {
+    memoryRef.current = next;
+    setMemoryStore(next);
+    saveMemoryStore(next);
+  }, []);
+
+  const getMemoryPrefix = useCallback(
+    () => memoryPrefixFromStore(memoryRef.current),
+    []
+  );
 
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
@@ -168,31 +255,22 @@ export function Chat({
     timedOutJob,
     retryFailover,
     startNewSession,
-    workerCapabilities,
     claimJobTimeout,
     disputeJob,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
+    getShareEvidence,
+    fetchOnChainJob,
+    fetchWorkerStake,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
-  // Read-only preflight: union of capabilities across all workers eligible
-  // for this model (web-search epic, Story 16). Populates at chat mount via
-  // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
-  // session is bound — fixes the "unlocks after Send" race.
-  const { availableCapabilities } = useModelCapabilities(currentModelId);
-
-  // searchCapable feeds the Switch's disabled state.
-  //   - non-protocol mode: Vercel AI SDK does its own search, always on.
-  //   - protocol mode, post-binding (workerCapabilities populated): the
-  //     bound worker's snapshot is the source of truth; a session bound to
-  //     a non-capable worker MUST lock the toggle off even if other capable
-  //     workers exist (the session can't switch).
-  //   - protocol mode, pre-binding: fall back to availableCapabilities
-  //     from the preflight — "is any capable worker reachable?"
-  const searchCapable = isProtocolMode
-    ? workerCapabilities.length > 0
-      ? workerCapabilities.includes("search")
-      : availableCapabilities.includes("search")
-    : true;
-
+  } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address,
+    id,
+    submitMode,
+    getMemoryPrefix
+  );
   const sessionRecovering = isProtocolMode && failoverStatus !== "none";
 
   // Build the transport — protocol mode uses DefaultChatTransport with a custom
@@ -200,26 +278,79 @@ export function Chat({
   // DefaultChatTransport handles Response → UIMessageChunk stream conversion.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const transport = useMemo(() => {
+    // Max tiering composes with every send path the same way: resolve the
+    // base id, then map it to its `{base}-max` catalogue entry when armed.
+    // resolveTierModelId falls back to the base id when no Max entry exists,
+    // so an armed-but-unavailable tier can never produce an unknown id.
+    const applyTier = (baseId: string): string =>
+      baseId === AUTO_MODEL_ID
+        ? baseId
+        : resolveTierModelId(baseId, heatTierRef.current);
+
+    // "Auto" resolves against the actual outgoing message at send time, so a
+    // fresh chat's first send can't race a not-yet-applied setState. The
+    // decision is surfaced via autoRoute for the composer's reveal line.
+    const resolveAutoRoute = (
+      lastMessage:
+        | { role?: string; parts?: Record<string, unknown>[] }
+        | undefined
+    ): string | undefined => {
+      if (currentModelIdRef.current !== AUTO_MODEL_ID) {
+        return;
+      }
+      const parts = lastMessage?.parts ?? [];
+      const prompt = parts
+        .filter((p) => p.type === "text")
+        .map((p) => (typeof p.text === "string" ? p.text : ""))
+        .join("\n");
+      const hasImage = parts.some(
+        (p) =>
+          p.type === "file" &&
+          typeof p.mediaType === "string" &&
+          p.mediaType.startsWith("image/")
+      );
+      const route = routePrompt({ prompt, hasImage });
+      const tiered = applyTier(route.modelId);
+      setAutoRoute(
+        tiered === route.modelId ? route : { ...route, tier: "max" }
+      );
+      return tiered;
+    };
+
     if (isProtocolMode) {
       return new DefaultChatTransport({
         api: "/protocol",
         async fetch(_url, init) {
-          const t = await getProtocolTransport();
           const body = JSON.parse((init?.body as string) ?? "{}");
+          const modelOverride =
+            resolveAutoRoute((body.messages ?? []).at(-1)) ??
+            applyTier(currentModelIdRef.current);
+          lastSentModelRef.current = modelOverride;
+          const t = await getProtocolTransport(modelOverride);
           const protocolBody = {
             ...body,
             id,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
+            // Friendly catalogue id of this send's resolved model (base or
+            // -max); the transport records it into protocolMeta.model.
+            friendlyModelId: modelOverride,
           };
           const { response } = await t.sendMessages({
             messages: protocolBody.messages ?? [],
             body: {
               ...protocolBody,
-              // Per-message web-search opt-in (web-search epic, Story 16).
-              // ProtocolTransport forwards this through SessionManager.submitJob
-              // → GatewayClient.uploadBlob → consumer-api side-channel write.
-              enableWebSearch: enableWebSearchRef.current,
+              // Per-message web-search setting (web-search epic, Story 16).
+              // ProtocolTransport resolves the mode against the prompt, then
+              // forwards the decision through SessionManager.submitJob →
+              // GatewayClient.uploadBlob → consumer-api side-channel write.
+              webSearchMode: webSearchModeRef.current,
+              // Spoken-output opt-in → envelope v2 audioResponse. Gated on
+              // the live model pick, not just the stored preference. (Voice
+              // capability keys off the base id, so a -max id resolves the
+              // same as its base.)
+              audioResponse:
+                speakResponsesRef.current && modelSupportsVoice(modelOverride),
             },
             signal: init?.signal ?? undefined,
           });
@@ -235,14 +366,20 @@ export function Chat({
           ...init,
         }),
       prepareSendMessagesRequest(request) {
+        // Non-protocol path: "auto" resolves here, against the outgoing
+        // message, so the API always receives a concrete model id.
+        const selectedChatModel =
+          resolveAutoRoute(request.messages.at(-1)) ??
+          applyTier(currentModelIdRef.current);
+        lastSentModelRef.current = selectedChatModel;
         return {
           body: {
             id: request.id,
             message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
+            selectedChatModel,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
-            enableWebSearch: enableWebSearchRef.current,
+            webSearchMode: webSearchModeRef.current,
             ...request.body,
           },
         };
@@ -257,14 +394,14 @@ export function Chat({
       const response = await $http.get(url);
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -277,12 +414,20 @@ export function Chat({
   }, [currentModelId]);
 
   useEffect(() => {
+    heatTierRef.current = heatTier;
+  }, [heatTier]);
+
+  useEffect(() => {
     systemPromptRef.current = systemPrompt;
   }, [systemPrompt]);
 
   useEffect(() => {
-    enableWebSearchRef.current = enableWebSearch;
-  }, [enableWebSearch]);
+    webSearchModeRef.current = webSearchMode;
+  }, [webSearchMode]);
+
+  useEffect(() => {
+    speakResponsesRef.current = speakResponses;
+  }, [speakResponses]);
 
   // Show a non-blocking toast when a job's deadline passes with no response
   useEffect(() => {
@@ -303,7 +448,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -323,7 +468,7 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
@@ -333,8 +478,14 @@ export function Chat({
       mutate(unstable_serialize(getChatHistoryPaginationKey));
       prepaid.refetch();
       balance.refetch();
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "completed");
+      }
     },
     onError: (error: any) => {
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "failed");
+      }
       if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError
@@ -352,6 +503,88 @@ export function Chat({
       ));
     },
   });
+
+  // --- Conversation branching (device-local, lib/branches.ts) -------------
+  // Loaded post-mount (not in useState) so SSR and the first client render
+  // agree; the branched view is applied once per chat right after.
+  const [branchStore, setBranchStore] = useState<BranchStore>({});
+  const branchesLoadedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (branchesLoadedRef.current === id) {
+      return;
+    }
+    branchesLoadedRef.current = id;
+    const store = loadBranchStore(id);
+    setBranchStore(store);
+    if (Object.keys(store).length > 0) {
+      setMessages((prev) => applyActiveBranches(prev, store));
+    }
+  }, [id, setMessages]);
+
+  const handleFork = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1 || index >= messages.length - 1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = forkAt(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleSwitchBranch = useCallback(
+    (anchorId: string, target: number) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const result = switchBranch(
+        branchStore,
+        anchorId,
+        target,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(result.store);
+      saveBranchStore(id, result.store);
+      setMessages([
+        ...messages.slice(0, index + 1),
+        ...(result.tail as ChatMessage[]),
+      ]);
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleAddBranch = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = addBranch(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
@@ -376,7 +609,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    fetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -389,12 +622,32 @@ export function Chat({
     walletClient,
   });
 
+  // Switching models with Max armed: keep the tier when the new model has a
+  // Max variant, reset visibly to Standard when it doesn't — silently staying
+  // "max" while running standard would misstate what the next job costs.
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      setCurrentModelId(modelId);
+      if (
+        heatTierRef.current === "max" &&
+        modelId !== AUTO_MODEL_ID &&
+        !hasMaxVariant(modelId)
+      ) {
+        setHeatTier("standard");
+      }
+    },
+    [setHeatTier]
+  );
+
   return (
     <>
       <div className="overscroll-behavior-contain flex h-[calc(100svh-58px)] min-w-0 touch-pan-y flex-col bg-background md:h-[calc(100svh-80px)]">
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onOpenMemory={
+            isProtocolMode ? () => setMemoryDialogOpen(true) : undefined
+          }
           onSystemPromptChange={(promptId, prompt) => {
             setSystemPromptId(promptId);
             setSystemPrompt(prompt);
@@ -402,6 +655,16 @@ export function Chat({
           selectedVisibilityType={initialVisibilityType}
           systemPromptId={systemPromptId}
         />
+
+        {!isReadonly && messages.length > 0 && (
+          <div className="flex justify-end px-4 pt-1">
+            <ShareTranscriptButton
+              chatId={id}
+              getShareEvidence={getShareEvidence}
+              messages={messages}
+            />
+          </div>
+        )}
 
         <UsageWarningBanner
           className="mx-6 mt-4"
@@ -420,12 +683,21 @@ export function Chat({
 
         <Messages
           activeJobs={activeJobs}
+          branchStore={isReadonly ? undefined : branchStore}
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          onAddBranch={isReadonly ? undefined : handleAddBranch}
+          onFork={isReadonly ? undefined : handleFork}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
@@ -442,25 +714,35 @@ export function Chat({
           {!isReadonly && (
             <MultimodalInput
               attachments={attachments}
+              autoRoute={autoRoute}
               chatId={id}
               disabled={sessionRecovering}
               disabledPlaceholder="Session recovering..."
-              enableWebSearch={enableWebSearch}
+              heatTier={heatTier}
               input={input}
+              memoryActive={
+                isProtocolMode &&
+                memoryStore.enabled &&
+                memoryStore.entries.length > 0
+              }
               messages={messages}
               onBeforeSubmit={canPrompt}
-              onModelChange={setCurrentModelId}
-              onWebSearchToggle={setEnableWebSearch}
-              searchCapable={searchCapable}
+              onHeatTierChange={setHeatTier}
+              onModelChange={handleModelChange}
+              onOpenMemory={() => setMemoryDialogOpen(true)}
+              onSpeakResponsesChange={setSpeakResponses}
+              onWebSearchModeChange={setWebSearchMode}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}
               setAttachments={setAttachments}
               setInput={setInput}
               setMessages={setMessages}
+              speakResponses={speakResponses}
               status={status}
               stop={stop}
               usage={usage}
+              webSearchMode={webSearchMode}
             />
           )}
         </div>
@@ -469,6 +751,27 @@ export function Chat({
       <PrepaidBalanceDialog
         onOpenChange={setPrepaidGateOpen}
         open={prepaidGateOpen}
+      />
+
+      <MemoryDialog
+        onAdd={(text) =>
+          updateMemoryStore(
+            addMemoryEntry(
+              memoryStore,
+              text,
+              generateUUID(),
+              new Date().toISOString()
+            )
+          )
+        }
+        onClear={() => updateMemoryStore({ ...memoryStore, entries: [] })}
+        onOpenChange={setMemoryDialogOpen}
+        onRemove={(entryId) =>
+          updateMemoryStore(removeMemoryEntry(memoryStore, entryId))
+        }
+        onToggle={(enabled) => updateMemoryStore({ ...memoryStore, enabled })}
+        open={memoryDialogOpen}
+        store={memoryStore}
       />
 
       {/* <AlertDialog

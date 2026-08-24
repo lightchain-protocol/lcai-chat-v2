@@ -21,7 +21,19 @@ export type OnChainJob = {
   submittedAt: number;
   completedAt: number;
   deadline: number;
+  /**
+   * Settlement commitments. These used to be dropped on the floor here, which
+   * left the client unable to check that the answer it rendered is the answer
+   * the chain was told about — the one thing this protocol exists to make
+   * checkable.
+   */
+  promptBlobHash: `0x${string}`;
+  responseBlobHash: `0x${string}`;
+  responseCiphertextHash: `0x${string}`;
+  submitBlockNumber: number;
+  completionBlockNumber: number;
 };
+
 import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 
 import {
@@ -80,7 +92,7 @@ export class MaxReassignmentsError extends Error {
 export class MissingDisputerKeyError extends Error {
   constructor() {
     super(
-      "Disputer encryption key not available — session cannot be recovered",
+      "Disputer encryption key not available — session cannot be recovered"
     );
     this.name = "MissingDisputerKeyError";
   }
@@ -292,7 +304,7 @@ export class SessionManager {
         sessionId = await this.createSessionOnChain(
           modelIdBytes32,
           { ...selected, signature: prepared.signature },
-          keyExchange,
+          keyExchange
         );
       } catch (err) {
         // Retry once on stale dispatcher signature (nonce consumed, or the
@@ -320,7 +332,7 @@ export class SessionManager {
           sessionId = await this.createSessionOnChain(
             modelIdBytes32,
             { ...selected, signature: prepared.signature },
-            keyExchange,
+            keyExchange
           );
         } else {
           throw err;
@@ -372,7 +384,7 @@ export class SessionManager {
   async submitJob(
     plaintext: string,
     opts?: { searchEnabled?: boolean }
-  ): Promise<{ jobId: number; txHash: string }> {
+  ): Promise<{ jobId: number | null; txHash: string }> {
     if (!this.sessionKey) {
       throw new Error("Session not initialized — no session key");
     }
@@ -402,7 +414,7 @@ export class SessionManager {
     }
     if (blobHashes.length > 1) {
       throw new Error(
-        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`,
+        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`
       );
     }
 
@@ -412,10 +424,15 @@ export class SessionManager {
       try {
         const result = await this.gateway.submitMessage(
           this.state.sessionId,
-          blobHashes[0],
+          blobHashes[0]
         );
 
-        return { jobId: Number(result.jobId), txHash: result.txHash };
+        // Do NOT coerce with Number(): Number(null) is 0, which would bind the
+        // stream to job 0 instead of leaving it to the session-scoped handler.
+        return {
+          jobId: result.jobId === null ? null : Number(result.jobId),
+          txHash: result.txHash,
+        };
       } catch (err) {
         const recoverable =
           err instanceof DelegateNotAuthorizedError ||
@@ -433,7 +450,7 @@ export class SessionManager {
 
   /** Wallet-signed submitJob path (legacy / fallback). */
   private async submitJobViaWallet(
-    blobHash: `0x${string}`,
+    blobHash: `0x${string}`
   ): Promise<{ jobId: number; txHash: string }> {
     if (this.state.sessionId === null) {
       throw new Error("Session ID not available");
@@ -505,12 +522,24 @@ export class SessionManager {
    * Decrypts a base64-encoded response payload from the relay.
    */
   async decryptResponse(base64Ciphertext: string): Promise<string> {
+    return new TextDecoder().decode(
+      await this.decryptResponseBytes(base64Ciphertext)
+    );
+  }
+
+  /**
+   * Decrypts a response payload to raw bytes, without UTF-8 decoding.
+   *
+   * `audio`-kind frames carry raw PCM, which is not valid UTF-8 — decoding it
+   * to a string would corrupt the samples. Text-ish kinds keep using
+   * decryptResponse above.
+   */
+  async decryptResponseBytes(base64Ciphertext: string): Promise<Uint8Array> {
     if (!this.sessionKey) {
       throw new Error("Session not initialized — no session key");
     }
     const ciphertext = base64ToUint8(base64Ciphertext);
-    const plaintext = await decrypt(this.sessionKey, ciphertext);
-    return new TextDecoder().decode(plaintext);
+    return await decrypt(this.sessionKey, ciphertext);
   }
 
   /**
@@ -574,7 +603,7 @@ export class SessionManager {
       if (isMaxReassignmentsError(err)) {
         throw new MaxReassignmentsError(
           this.state.sessionId,
-          extractMaxFromError(err),
+          extractMaxFromError(err)
         );
       }
       throw err;
@@ -601,7 +630,7 @@ export class SessionManager {
       const workerPub = await importPublicKey(workerPubRaw);
       const encWorkerKeyBytes = await encryptSessionKey(
         this.sessionKey,
-        workerPub,
+        workerPub
       );
 
       if (!this.disputerEncryptionKey) throw new MissingDisputerKeyError();
@@ -609,7 +638,7 @@ export class SessionManager {
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         this.sessionKey,
-        disputerPub,
+        disputerPub
       );
 
       const encWorkerKeyHex = toHex(encWorkerKeyBytes);
@@ -677,7 +706,28 @@ export class SessionManager {
       submittedAt: Number(job.submittedAt),
       completedAt: Number(job.completedAt),
       deadline: Number(job.deadline),
+      promptBlobHash: job.promptBlobHash,
+      responseBlobHash: job.responseBlobHash,
+      responseCiphertextHash: job.responseCiphertextHash,
+      submitBlockNumber: Number(job.submitBlockNumber),
+      completionBlockNumber: Number(job.completionBlockNumber),
     };
+  }
+
+  /**
+   * Reads the stake bonded behind a worker.
+   *
+   * Shown next to an answer so the user can see what the worker actually has
+   * at risk — that stake is what a successful dispute slashes, so it is the
+   * concrete measure of how much the answer is backed by.
+   */
+  async getWorkerStake(worker: string): Promise<bigint> {
+    return await this.publicClient.readContract({
+      address: this.workerRegistryAddress,
+      abi: workerRegistryAbi,
+      functionName: "getWorkerStake",
+      args: [worker as `0x${string}`],
+    });
   }
 
   /**
@@ -752,6 +802,48 @@ export class SessionManager {
   }
 
   /**
+   * Calls disputeResponseMismatch(jobId, ciphertext, signature) on-chain.
+   *
+   * The cryptographic remedy for a settled answer that is not what the worker
+   * committed to: the contract re-derives the signer from (ciphertext,
+   * signature) and slashes the worker when keccak256(ciphertext) differs from
+   * the committed responseCiphertextHash. Unlike disputeJob there is no bond —
+   * the evidence is self-verifying.
+   *
+   * The ciphertext is only available to the client that received the terminal
+   * frame (it is never persisted), so this is callable only within the live
+   * page session that got the answer.
+   */
+  async disputeResponseMismatch(args: {
+    jobId: number;
+    ciphertext: Uint8Array;
+    signature: `0x${string}`;
+  }): Promise<{ txHash: string }> {
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const callParams = {
+      account,
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "disputeResponseMismatch",
+      args: [BigInt(args.jobId), toHex(args.ciphertext), args.signature],
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
+      gas: (gasEstimate * 120n) / 100n,
+    });
+    const hash = await this.walletClient.writeContract(request);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`disputeResponseMismatch TX reverted (tx ${hash})`);
+    }
+    return { txHash: hash };
+  }
+
+  /**
    * Clears in-memory session material and notifies idle.
    * Does not remove the persisted snapshot in sessionStorage — use when
    * tearing down the transport so returning to this chat can tryRestore().
@@ -788,7 +880,7 @@ export class SessionManager {
   private async createSessionOnChain(
     modelIdBytes32: `0x${string}`,
     prepared: PrepareSessionResponse,
-    keyExchange: { encWorkerKey: string; encDisputerKey: string },
+    keyExchange: { encWorkerKey: string; encDisputerKey: string }
   ): Promise<number> {
     const account = this.walletClient.account;
 
@@ -852,7 +944,7 @@ export class SessionManager {
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         sessionKey,
-        disputerPub,
+        disputerPub
       );
       encDisputerKey = uint8ToBase64(encDisputerKeyBytes);
     }
@@ -1090,7 +1182,7 @@ function isSelectionSuperseded(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 function isReadyTokenResponse(
-  response: TokenResponse | PendingTokenResponse,
+  response: TokenResponse | PendingTokenResponse
 ): response is TokenResponse {
   return "token" in response && Boolean(response.token);
 }

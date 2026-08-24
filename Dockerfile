@@ -34,6 +34,7 @@ ARG NEXT_PUBLIC_AI_CONFIG_ADDRESS
 ARG NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS
 ARG NEXT_PUBLIC_RELAY_URL
 ARG NEXT_PUBLIC_RPC_URL
+ARG NEXT_PUBLIC_CHAIN_ID
 ENV NEXT_PUBLIC_USE_PROTOCOL=${NEXT_PUBLIC_USE_PROTOCOL} \
     NEXT_PUBLIC_LCAI_IS_TESTNET=${NEXT_PUBLIC_LCAI_IS_TESTNET} \
     NEXT_PUBLIC_CONSUMER_API_URL=${NEXT_PUBLIC_CONSUMER_API_URL} \
@@ -42,7 +43,8 @@ ENV NEXT_PUBLIC_USE_PROTOCOL=${NEXT_PUBLIC_USE_PROTOCOL} \
     NEXT_PUBLIC_AI_CONFIG_ADDRESS=${NEXT_PUBLIC_AI_CONFIG_ADDRESS} \
     NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS=${NEXT_PUBLIC_WORKER_REGISTRY_ADDRESS} \
     NEXT_PUBLIC_RELAY_URL=${NEXT_PUBLIC_RELAY_URL} \
-    NEXT_PUBLIC_RPC_URL=${NEXT_PUBLIC_RPC_URL}
+    NEXT_PUBLIC_RPC_URL=${NEXT_PUBLIC_RPC_URL} \
+    NEXT_PUBLIC_CHAIN_ID=${NEXT_PUBLIC_CHAIN_ID}
 
 COPY . .
 # Skip next.js telemetry during build
@@ -67,4 +69,8 @@ COPY --from=builder /app/lib/db/migrate.ts ./lib/db/migrate.ts
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 
 EXPOSE 3000
-CMD ["pnpm", "start"]
+# Run next directly: `pnpm start` depends on the corepack shim resolving a
+# pnpm version at container start (no packageManager field is pinned), which
+# fails in the bare image. The compose override has always used this path;
+# make it the image default so the image runs correctly without an override.
+CMD ["node_modules/.bin/next", "start"]
