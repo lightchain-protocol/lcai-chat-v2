@@ -19,6 +19,7 @@ import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { AUTO_MODEL_ID, type AutoRoute, routePrompt } from "@/lib/ai/auto-route";
+import { recordModelOutcome } from "@/lib/ai/availability";
 import type { HeatTier } from "@/lib/ai/heat-tiers";
 import {
   hasMaxVariant,
@@ -136,6 +137,9 @@ export function Chat({
     "standard"
   );
   const heatTierRef = useRef(heatTier);
+  // The catalogue id (base or -max) of the in-flight send, recorded into the
+  // device-local availability heuristic on finish/error.
+  const lastSentModelRef = useRef<string | null>(null);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
@@ -321,6 +325,7 @@ export function Chat({
           const modelOverride =
             resolveAutoRoute((body.messages ?? []).at(-1)) ??
             applyTier(currentModelIdRef.current);
+          lastSentModelRef.current = modelOverride;
           const t = await getProtocolTransport(modelOverride);
           const protocolBody = {
             ...body,
@@ -361,15 +366,17 @@ export function Chat({
           ...init,
         }),
       prepareSendMessagesRequest(request) {
+        // Non-protocol path: "auto" resolves here, against the outgoing
+        // message, so the API always receives a concrete model id.
+        const selectedChatModel =
+          resolveAutoRoute(request.messages.at(-1)) ??
+          applyTier(currentModelIdRef.current);
+        lastSentModelRef.current = selectedChatModel;
         return {
           body: {
             id: request.id,
             message: request.messages.at(-1),
-            // Non-protocol path: "auto" resolves here, against the outgoing
-            // message, so the API always receives a concrete model id.
-            selectedChatModel:
-              resolveAutoRoute(request.messages.at(-1)) ??
-              applyTier(currentModelIdRef.current),
+            selectedChatModel,
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
             webSearchMode: webSearchModeRef.current,
@@ -471,8 +478,14 @@ export function Chat({
       mutate(unstable_serialize(getChatHistoryPaginationKey));
       prepaid.refetch();
       balance.refetch();
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "completed");
+      }
     },
     onError: (error: any) => {
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "failed");
+      }
       if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError
