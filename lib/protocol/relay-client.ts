@@ -633,6 +633,16 @@ export class RelayClient {
         data: pending.metrics,
       });
     }
+    // The protocol record rides as a part too: the live stream emitted it at
+    // first frame, and persisting it keeps the reload view identical to the
+    // live one (the metadata column alone only re-hydrates on a full reload).
+    if (pending.protocolMeta && Object.keys(pending.protocolMeta).length > 0) {
+      parts.push({
+        type: "data-protocolMeta",
+        id: `protocol-meta-${jobId}`,
+        data: pending.protocolMeta,
+      });
+    }
     if (pending.audio) {
       parts.push({
         type: "data-audioStream",

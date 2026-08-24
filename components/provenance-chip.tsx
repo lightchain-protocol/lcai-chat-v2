@@ -10,6 +10,9 @@ import {
 import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { Address } from "viem";
+import { isMaxModel } from "@/lib/ai/heat-tiers";
+import { getChatModel } from "@/lib/ai/models";
+import { DISPUTE_WINDOW_LABEL } from "@/lib/protocol/dispute-window";
 import type { GenerationStats } from "@/lib/protocol/relay-client";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
@@ -18,9 +21,6 @@ import {
   formatLatencyMs,
   type StreamMetricsSnapshot,
 } from "@/lib/protocol/stream-metrics";
-import { isMaxModel } from "@/lib/ai/heat-tiers";
-import { getChatModel } from "@/lib/ai/models";
-import { DISPUTE_WINDOW_LABEL } from "@/lib/protocol/dispute-window";
 import {
   checkProofAgainstChain,
   type ResponseProof,
@@ -98,19 +98,38 @@ function PureProvenanceChip({
       return;
     }
     let cancelled = false;
-    Promise.all([
-      fetchOnChainJob(jobId).catch(() => null),
-      proof
-        ? recoverProofSigner(proof).catch(() => null)
-        : Promise.resolve(null),
-    ]).then(([result, signer]) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const signerPromise = proof
+      ? recoverProofSigner(proof).catch(() => null)
+      : Promise.resolve(null);
+    const poll = async (attempt: number) => {
+      const [result, signer] = await Promise.all([
+        fetchOnChainJob(jobId).catch(() => null),
+        signerPromise,
+      ]);
       if (cancelled) return;
       setJob(result);
       setFreshSigner(signer);
       setLoaded(true);
-    });
+      // The first read fires when the terminal frame lands — a few seconds
+      // BEFORE the worker's completeJob tx mines, so the commitment is often
+      // not visible yet. Re-read on a bounded schedule until it is; without
+      // this the chip would sit at "not settled" forever on a healthy job.
+      const commitmentVisible =
+        result?.responseCiphertextHash &&
+        result.responseCiphertextHash !== ZERO_HASH;
+      if (
+        !(commitmentVisible || cancelled) &&
+        proof &&
+        attempt < MAX_JOB_REREADS
+      ) {
+        timer = setTimeout(() => poll(attempt + 1), JOB_REREAD_INTERVAL_MS);
+      }
+    };
+    poll(0);
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [proof, jobId, fetchOnChainJob]);
 
@@ -280,7 +299,8 @@ function PureProvenanceChip({
             </p>
           )}
 
-          {stake !== null && worker && (            <p className="text-content-subtle">
+          {stake !== null && worker && (
+            <p className="text-content-subtle">
               This worker has{" "}
               <span className="font-medium font-mono text-content-strong">
                 {formatLcai(stake)}
@@ -429,6 +449,12 @@ function truncateAddress(address: string): string {
 }
 
 const TRAILING_ZEROS = /0+$/;
+
+const ZERO_HASH =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
+/** Bounded re-read schedule for the post-terminal-frame race with mining. */
+const MAX_JOB_REREADS = 24;
+const JOB_REREAD_INTERVAL_MS = 5000;
 
 function formatLcai(wei: bigint): string {
   const whole = wei / 10n ** 18n;

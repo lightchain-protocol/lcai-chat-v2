@@ -91,6 +91,17 @@ export type CustomUIDataTypes = {
   usage: AppUsage;
   webSearchSources: { sources: WebSearchSource[] };
   protocolFinal: { text: string };
+  // The job's protocol record (jobId, sessionId, serving model's friendly
+  // catalogue id). Emitted live at first frame — the row's
+  // metadata.protocolMeta only exists after the persist round trip — and
+  // persisted with the message so live and reload views match.
+  protocolMeta: {
+    jobId: number;
+    sessionId: number;
+    correlationId?: string;
+    completedAt?: string;
+    model?: string;
+  };
   // What the model itself measured for the generation. Arrives on its own
   // frame kind from the worker rather than being inferred client-side.
   generationStats: GenerationStats;

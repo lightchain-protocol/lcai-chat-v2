@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
 import { isAgentDescriptor } from "@/lib/agent/timeline";
+import { servedModelIdFromMessage } from "@/lib/ai/heat-tiers";
 import type { Vote } from "@/lib/db/schema";
 import type { ArtifactDescriptor } from "@/lib/protocol/audio-stream";
 import type { OnChainJob } from "@/lib/protocol/session";
@@ -155,15 +156,15 @@ const PurePreviewMessage = ({
     return null;
   }, [parts]);
 
-  // The friendly catalogue id of the model that served this answer (recorded
-  // by the transport at first frame). Drives tier labels and the Max
-  // progress/settle readouts in the provenance chip.
-  const servedModelId =
-    typeof message.metadata?.protocolMeta?.model === "string"
-      ? message.metadata.protocolMeta.model
-      : undefined;
+  // The friendly catalogue id of the model that served this answer — from
+  // metadata.protocolMeta after a reload, from the data-protocolMeta part
+  // while the stream is still live (the row's metadata only exists after the
+  // persist round trip). Drives tier labels and the Max readouts in the
+  // provenance chip.
+  const servedModelId = servedModelIdFromMessage(message);
 
-  const protocolFinalText = useMemo(() => {    for (const part of parts) {
+  const protocolFinalText = useMemo(() => {
+    for (const part of parts) {
       if (
         part.type === "data-protocolFinal" &&
         part.data &&

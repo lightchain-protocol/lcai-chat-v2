@@ -1,4 +1,4 @@
-import { isMaxModel } from "@/lib/ai/heat-tiers";
+import { isMaxModel, servedModelIdFromMessage } from "@/lib/ai/heat-tiers";
 import type { GenerationStats } from "@/lib/protocol/relay-client";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
 import type { StreamMetricsSnapshot } from "@/lib/protocol/stream-metrics";
@@ -123,8 +123,8 @@ export function buildVerifiableTranscript({
       entry.jobId = jobId;
     }
 
-    const servedModel = message.metadata?.protocolMeta?.model;
-    if (typeof servedModel === "string") {
+    const servedModel = servedModelIdFromMessage(message);
+    if (servedModel) {
       entry.model = servedModel;
       if (isMaxModel(servedModel)) {
         entry.tier = "max";

@@ -109,6 +109,24 @@ describe("verifyShareEntry", () => {
     expect(result.verdict).toBe("pending");
   });
 
+  it.each([5, 6])(
+    "still verifies after the keeper advances the job to state %i (Resolved/Released)",
+    async (state) => {
+      const result = await verifyShareEntry(
+        {
+          jobId,
+          sessionId,
+          ciphertext: bytesToBase64(ciphertext),
+          signature: await signDigestFor(ciphertext),
+        },
+        chainJob({ state }),
+        CHAIN_ID,
+        REGISTRY
+      );
+      expect(result.verdict).toBe("verified");
+    }
+  );
+
   it("is missing-evidence without the ciphertext", async () => {
     const result = await verifyShareEntry(
       { jobId, sessionId, signature: await signDigestFor(ciphertext) },

@@ -1,6 +1,7 @@
 import type { Address, Hex } from "viem";
 import { keccak256, recoverMessageAddress } from "viem";
 import { base64ToBytes } from "@/lib/protocol/base64";
+import { isCompletedJobState } from "@/lib/protocol/job-state";
 import { responseMismatchDigest } from "@/lib/protocol/verify-response";
 
 /**
@@ -58,7 +59,7 @@ export const SHARE_VERDICT_LABELS: Record<ShareVerdict, string> = {
   invalid: "Invalid — the payload does not match the on-chain job",
 };
 
-/** Subset of JobRegistry.getJob the verifier needs (state 2 = Completed). */
+/** Subset of JobRegistry.getJob the verifier needs (Completed/Resolved/Released all count). */
 export type OnChainJobFacts = {
   worker: string;
   state: number;
@@ -85,7 +86,7 @@ export async function verifyShareEntry(
   if (onChain.sessionId !== payload.sessionId) {
     return { verdict: "invalid" };
   }
-  if (onChain.state !== 2) {
+  if (!isCompletedJobState(onChain.state)) {
     return { verdict: "pending" };
   }
   if (!payload.ciphertext) {

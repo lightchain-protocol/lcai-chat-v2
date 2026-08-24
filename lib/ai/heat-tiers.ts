@@ -27,9 +27,7 @@ export function toMaxModelId(baseId: string): string {
 
 /** Base id when the suffix is present, null otherwise. */
 export function fromMaxModelId(modelId: string): string | null {
-  return isMaxModel(modelId)
-    ? modelId.slice(0, -MAX_TIER_SUFFIX.length)
-    : null;
+  return isMaxModel(modelId) ? modelId.slice(0, -MAX_TIER_SUFFIX.length) : null;
 }
 
 /** The id without its tier suffix — traits/capabilities key off this. */
@@ -39,4 +37,39 @@ export function baseModelId(modelId: string): string {
 
 export function tierOfModelId(modelId: string): HeatTier {
   return isMaxModel(modelId) ? "max" : "standard";
+}
+
+/**
+ * Structural minimum of a chat message for tier labelling — both ChatMessage
+ * and the transcript builder's entries satisfy it.
+ */
+type MessageWithModelEvidence = {
+  metadata?: { protocolMeta?: Record<string, unknown> | null } | null;
+  parts?: Array<{ type: string; data?: unknown }>;
+};
+
+/**
+ * The friendly catalogue id of the model that served a message
+ * ("agentworld-35b-max"). Live messages carry it on the data-protocolMeta
+ * part emitted at first frame; reloaded ones also have it on
+ * metadata.protocolMeta. Metadata wins when both exist — it is the record
+ * the API stored.
+ */
+export function servedModelIdFromMessage(
+  message: MessageWithModelEvidence
+): string | undefined {
+  const fromMeta = message.metadata?.protocolMeta?.model;
+  if (typeof fromMeta === "string" && fromMeta.length > 0) {
+    return fromMeta;
+  }
+  for (const part of message.parts ?? []) {
+    if (part.type !== "data-protocolMeta" || !part.data) {
+      continue;
+    }
+    const model = (part.data as { model?: unknown }).model;
+    if (typeof model === "string" && model.length > 0) {
+      return model;
+    }
+  }
+  return;
 }

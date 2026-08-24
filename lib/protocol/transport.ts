@@ -20,6 +20,7 @@ import type { AudioStreamDescriptor } from "./audio-stream";
 import { parseArtifactDescriptor, parseAudioFrame } from "./audio-stream";
 import { bytesToBase64 } from "./base64";
 import type { GatewayClient } from "./gateway-client";
+import { isCompletedJobState } from "./job-state";
 import {
   buildPromptEnvelope,
   checkAudioBudget,
@@ -877,13 +878,17 @@ export class ProtocolTransport {
     // Re-check on-chain state — worker may have completed in the same second
     try {
       const onChain = await this.sessionMgr.getJob(jobId);
-      // JobState: 0=Submitted 1=Acknowledged 2=Completed 3=TimedOut
-      if (onChain.state === 2 || onChain.state === 3) {
+      // Completed (2) and its post-completion terminal states (Resolved=5,
+      // Released=6) all mean the worker delivered; only TimedOut (3) is a
+      // genuine timeout. An exact ===2 misreads keeper-released jobs.
+      if (isCompletedJobState(onChain.state) || onChain.state === 3) {
         // Worker completed or already timed out — update and don't fire
         tracked.completedAt = onChain.completedAt;
-        tracked.status = onChain.state === 2 ? "completed" : "timed_out";
+        tracked.status = isCompletedJobState(onChain.state)
+          ? "completed"
+          : "timed_out";
         this.onJobUpdateCallback?.(tracked);
-        if (onChain.state === 2) return; // Don't fire timeout for a completed job
+        if (isCompletedJobState(onChain.state)) return; // Don't fire timeout for a completed job
       }
     } catch {
       // Chain read failed — fire the timeout optimistically
@@ -1339,19 +1344,30 @@ export class ProtocolTransport {
           metrics.markPayload();
           applySettlement({ type: "firstFrame", atMs: Date.now() });
           emitMetrics(true);
+          const protocolMeta = {
+            jobId: wsFrame.jobId,
+            sessionId: wsFrame.sessionId,
+            correlationId: wsFrame.correlationId,
+            completedAt: new Date().toISOString(),
+            // Friendly catalogue id ("agentworld-35b-max") so tier labels
+            // and transcripts can name what served the answer.
+            model: friendlyModelId,
+          };
           relayClient?.beginAssistantMessage({
             jobId,
             chatId,
             messageId: assistantMessageId,
-            protocolMeta: {
-              jobId: wsFrame.jobId,
-              sessionId: wsFrame.sessionId,
-              correlationId: wsFrame.correlationId,
-              completedAt: new Date().toISOString(),
-              // Friendly catalogue id ("agentworld-35b-max") so tier labels
-              // and transcripts can name what served the answer.
-              model: friendlyModelId,
-            },
+            protocolMeta,
+          });
+          // The message row's metadata.protocolMeta only exists after the
+          // persist round trip — until then everything keyed off the serving
+          // model (Max live progress, tier labels, share tier) would stay
+          // dark. This data part carries the same record live, and is
+          // persisted alongside the message so the reload view matches.
+          emit({
+            type: "data-protocolMeta",
+            id: `protocol-meta-${jobId}`,
+            data: protocolMeta,
           });
         }
 
@@ -1552,7 +1568,13 @@ export class ProtocolTransport {
           capturedSettlement = (async () => {
             try {
               const onChain = await sessionMgr.getJob(jobId);
-              if (onChain.state === 2 && onChain.completedAt > 0) {
+              // Accept Completed and its terminal successors (Resolved,
+              // Released) — the keeper can advance the job within seconds on
+              // a short devnet dispute window, before this re-read lands.
+              if (
+                isCompletedJobState(onChain.state) &&
+                onChain.completedAt > 0
+              ) {
                 applySettlement({
                   type: "chainSettled",
                   completedAtSec: onChain.completedAt,
