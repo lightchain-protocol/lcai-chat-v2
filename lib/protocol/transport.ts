@@ -504,48 +504,28 @@ export class ProtocolTransport {
     // Persisting the user message is deferred, not awaited: the POST is the
     // only place the jobId is still wanted synchronously, and blocking on it
     // would re-introduce the stall we are removing. See deferUserMessagePersist.
-    //
-    // Duel side B shares side A's user message: persisting it again would
-    // duplicate the prompt in the chat record, and re-registering the session
-    // would overwrite the chat's primary-session pointer. The assistant
-    // answer still persists through the relay client's own path.
-    const skipUserPersist = options.body?.duelSkipUserPersist === true;
-    const persist = skipUserPersist
-      ? {
-          settle: (_jobId: number | null) => {
-            /* no-op: side A already persisted the shared user message */
-          },
-          cancel: () => {
-            /* no-op: nothing was deferred */
-          },
-          done: Promise.resolve(),
-        }
-      : this.deferUserMessagePersist({
-          chatId,
-          sessionId,
-          message: lastMessage,
-          selectedVisibilityType:
-            typeof options.body?.selectedVisibilityType === "string"
-              ? options.body.selectedVisibilityType
-              : undefined,
-          systemPrompt:
-            typeof options.body?.systemPrompt === "string" ||
-            options.body?.systemPrompt === null
-              ? (options.body.systemPrompt as string | null)
-              : undefined,
-        });
+    const persist = this.deferUserMessagePersist({
+      chatId,
+      sessionId,
+      message: lastMessage,
+      selectedVisibilityType:
+        typeof options.body?.selectedVisibilityType === "string"
+          ? options.body.selectedVisibilityType
+          : undefined,
+      systemPrompt:
+        typeof options.body?.systemPrompt === "string" ||
+        options.body?.systemPrompt === null
+          ? (options.body.systemPrompt as string | null)
+          : undefined,
+    });
 
     // The chat row is created by the user-message POST, so the session
     // registration and the assistant POST both have to queue behind it.
-    const prelude = skipUserPersist
-      ? persist.done
-      : persist.done.then(() =>
-          this.registerProtocolSessionWithServerIfNeeded(chatId).catch(
-            (err) => {
-              console.warn("Failed to register protocol session", err);
-            }
-          )
-        );
+    const prelude = persist.done.then(() =>
+      this.registerProtocolSessionWithServerIfNeeded(chatId).catch((err) => {
+        console.warn("Failed to register protocol session", err);
+      })
+    );
 
     const protocolStream = this.createResponseStream({
       sessionId,

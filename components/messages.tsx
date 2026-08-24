@@ -2,11 +2,10 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
-import { Fragment, memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { BranchStore } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
-import { getDuelMeta } from "@/lib/protocol/duel";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import {
@@ -15,7 +14,6 @@ import {
   type ProtocolLoadingStatus,
 } from "@/lib/types";
 import { useDataStream } from "./data-stream-provider";
-import { DuelGrid } from "./duel-grid";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
 import { PreviewMessage, ThinkingMessage } from "./message";
@@ -127,42 +125,6 @@ function PureMessages({
     }
   }, [status, messagesContainerRef]);
 
-  // Duel grouping (bc-2 §1): the anchor user message carries
-  // protocolMeta.duel {group, side:"A", model}, side B's assistant answer
-  // carries {group, side:"B", model}. Side A's assistant reply carries no
-  // duel meta (normal useChat path) — find it as the first duel-less
-  // assistant message within the anchor's turn. Purely positional pairing
-  // (messages[i+1]) raced side B's upsert: when side B's stream landed
-  // first, side A was pushed to index i+2, the pane falsely read "This side
-  // didn't produce an answer", and side A rendered standalone below the grid.
-  const duelSideBByGroup = new Map<string, ChatMessage>();
-  for (const m of messages) {
-    const duel = getDuelMeta(m);
-    if (duel?.side === "B") {
-      duelSideBByGroup.set(duel.group, m);
-    }
-  }
-  const duelSideAIds = new Set<string>();
-  const duelSideAByGroup = new Map<string, ChatMessage>();
-  messages.forEach((m, i) => {
-    const duel = getDuelMeta(m);
-    if (m.role !== "user" || duel?.side !== "A") {
-      return;
-    }
-    for (
-      let j = i + 1;
-      j < messages.length && messages[j].role !== "user";
-      j++
-    ) {
-      const candidate = messages[j];
-      if (candidate.role === "assistant" && !getDuelMeta(candidate)) {
-        duelSideAIds.add(candidate.id);
-        duelSideAByGroup.set(duel.group, candidate);
-        break;
-      }
-    }
-  });
-
   const renderPreview = (message: ChatMessage, index: number) => {
     const jobId =
       typeof message.metadata?.jobId === "number"
@@ -234,41 +196,6 @@ function PureMessages({
             // stack an empty bubble on top of it.
             if (awaitingFirstToken && index === messages.length - 1) {
               return null;
-            }
-
-            const duel = getDuelMeta(message);
-
-            // Duel panes render inside the grid under their anchor, not
-            // standalone in the flow.
-            if (duel?.side === "B" || duelSideAIds.has(message.id)) {
-              return null;
-            }
-
-            if (message.role === "user" && duel?.side === "A") {
-              const sideB = duelSideBByGroup.get(duel.group);
-              const sideA = duelSideAByGroup.get(duel.group);
-
-              return (
-                <Fragment key={message.id}>
-                  {renderPreview(message, index)}
-                  {sideB && (
-                    <DuelGrid
-                      modelA={duel.model}
-                      modelB={getDuelMeta(sideB)?.model ?? ""}
-                      paneA={
-                        sideA ? (
-                          renderPreview(sideA, messages.indexOf(sideA))
-                        ) : (
-                          <p className="text-content-soft text-sm">
-                            This side didn&apos;t produce an answer.
-                          </p>
-                        )
-                      }
-                      paneB={renderPreview(sideB, messages.indexOf(sideB))}
-                    />
-                  )}
-                </Fragment>
-              );
             }
 
             return renderPreview(message, index);

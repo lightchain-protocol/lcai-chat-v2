@@ -4,7 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Globe, Mic, Square, Swords, Volume2 } from "lucide-react";
+import { Globe, Mic, Square, Volume2 } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -96,7 +96,6 @@ function PureMultimodalInput({
   disabled,
   disabledPlaceholder,
   onBeforeSubmit,
-  onDuel,
   autoRoute,
 }: {
   chatId: string;
@@ -131,12 +130,6 @@ function PureMultimodalInput({
    * attachments are preserved so the user can resend after resolving the issue.
    */
   onBeforeSubmit?: () => boolean;
-  /**
-   * Multi-model duel entry (bc-2 §1, protocol mode only). Called with the
-   * current trimmed prompt; chat.tsx opens the side-B picker. Undefined hides
-   * the button entirely — no teasing a feature the mode can't fund.
-   */
-  onDuel?: (prompt: string) => void;
   /** Last auto-routing decision, for the "auto → {model} · {reason}" line. */
   autoRoute?: AutoRoute | null;
 }) {
@@ -559,29 +552,6 @@ function PureMultimodalInput({
               mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
               onModeChange={onWebSearchModeChange}
             />
-            {onDuel && (
-              <Button
-                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
-                data-testid="duel-button"
-                disabled={
-                  status !== "ready" ||
-                  !input.trim() ||
-                  attachments.length > 0 ||
-                  isRecording
-                }
-                onClick={() => onDuel(input.trim())}
-                title={
-                  attachments.length > 0
-                    ? "Duels are text-only for now — remove attachments to compare models."
-                    : "Duel: send this prompt to a second model and compare side by side (2 paid jobs)."
-                }
-                type="button"
-                variant="ghost"
-              >
-                <Swords className="size-4" />
-                <span className="hidden sm:block">Duel</span>
-              </Button>
-            )}
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
@@ -643,9 +613,6 @@ export const MultimodalInput = memo(
     // Re-render when the send guard changes identity so submitForm captures the
     // latest readiness closure instead of a stale one.
     if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
-      return false;
-    }
-    if (prevProps.onDuel !== nextProps.onDuel) {
       return false;
     }
     if (!equal(prevProps.autoRoute, nextProps.autoRoute)) {
