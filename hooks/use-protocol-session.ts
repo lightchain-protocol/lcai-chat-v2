@@ -4,6 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
 import config, { isSortitionEnabled } from "@/config";
+import { jobRegistryAbi } from "@/contracts/job-registry-abi";
+import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
@@ -362,6 +364,106 @@ export function useProtocolSession(
     setTimedOutJob(null);
   }, []);
 
+  /**
+   * Reads a job straight from the chain. The proof panel needs this rather
+   * than the tracked-job cache (current page load only) — a reloaded
+   * conversation still has to be verifiable, and after a reload there is no
+   * transport until the next send, so fall back to a plain publicClient read.
+   */
+  const fetchOnChainJob = useCallback(
+    async (jobId: number) => {
+      const transport = transportRef.current;
+      if (transport) {
+        try {
+          return await transport.getJob(jobId);
+        } catch {
+          return null;
+        }
+      }
+      const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
+      if (!jobRegistryAddress || jobRegistryAddress === "0x") {
+        console.warn(
+          "[fetchOnChainJob] no registry for chain",
+          protocolChainId
+        );
+        return null;
+      }
+      try {
+        const job = await publicClient.readContract({
+          address: jobRegistryAddress,
+          abi: jobRegistryAbi,
+          functionName: "getJob",
+          args: [BigInt(jobId)],
+        });
+        return {
+          sessionId: Number(job.sessionId),
+          worker: job.worker,
+          state: job.state,
+          escrowedFee: job.escrowedFee,
+          submittedAt: Number(job.submittedAt),
+          completedAt: Number(job.completedAt),
+          deadline: Number(job.deadline),
+          promptBlobHash: job.promptBlobHash,
+          responseBlobHash: job.responseBlobHash,
+          responseCiphertextHash: job.responseCiphertextHash,
+          submitBlockNumber: Number(job.submitBlockNumber),
+          completionBlockNumber: Number(job.completionBlockNumber),
+        };
+      } catch (err) {
+        console.warn("[fetchOnChainJob] read failed", err);
+        return null;
+      }
+    },
+    [protocolChainId, publicClient]
+  );
+
+  /** Stake bonded behind a worker, for the proof panel. Null on failure. */
+  const fetchWorkerStake = useCallback(
+    async (worker: string) => {
+      const transport = transportRef.current;
+      if (transport) {
+        try {
+          return await transport.getWorkerStake(worker);
+        } catch {
+          return null;
+        }
+      }
+      const workerRegistryAddress =
+        config.workerRegistryAddress[protocolChainId];
+      if (!workerRegistryAddress || workerRegistryAddress === "0x") return null;
+      try {
+        return await publicClient.readContract({
+          address: workerRegistryAddress,
+          abi: workerRegistryAbi,
+          functionName: "getWorkerStake",
+          args: [worker as `0x${string}`],
+        });
+      } catch {
+        return null;
+      }
+    },
+    [protocolChainId, publicClient]
+  );
+
+  /**
+   * Cryptographic dispute with the evidence captured at receipt. Only filable
+   * while the page session that received the answer is alive — the ciphertext
+   * is never persisted, so post-reload this throws and the caller should
+   * steer the user to the bond dispute.
+   */
+  const disputeResponseMismatch = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.disputeResponseMismatch(jobId);
+    setActiveJobs(transport.listJobs());
+    return result;
+  }, []);
+
+  /** True while disputeResponseMismatch(jobId) can still be filed. */
+  const hasMismatchEvidence = useCallback((jobId: number) => {
+    return transportRef.current?.hasMismatchEvidence(jobId) ?? false;
+  }, []);
+
   return {
     status,
     error,
@@ -377,5 +479,9 @@ export function useProtocolSession(
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
+    fetchOnChainJob,
+    fetchWorkerStake,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
   };
 }

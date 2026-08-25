@@ -3,7 +3,7 @@ import {
   Copy,
   CopyCheck,
   Loader,
-  Pencil,
+  RefreshCw,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
@@ -24,12 +24,15 @@ export function PureMessageActions({
   vote,
   isLoading,
   setMode,
+  regenerate,
 }: {
   chatId: string;
   message: ChatMessage;
   vote: Vote | undefined;
   isLoading: boolean;
   setMode?: (mode: "view" | "edit") => void;
+  /** Re-runs the last turn. Omitted on read-only views. */
+  regenerate?: () => void;
 }) {
   const { mutate } = useSWRConfig();
   const [_, copyToClipboard] = useCopyToClipboard();
@@ -43,13 +46,6 @@ export function PureMessageActions({
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     if (!textFromParts) {
-      toast.custom((id) => (
-        <AlertError
-          description="Please try again"
-          id={id}
-          title="There's no text to copy!"
-        />
-      ));
       return;
     }
 
@@ -62,11 +58,22 @@ export function PureMessageActions({
     return null;
   }
 
+  // A turn that produced no text was never written to the database, so copy
+  // has nothing to read and a vote would reference a message row that does
+  // not exist. Offering the buttons at all only invites two failures.
+  if (!textFromParts) {
+    return null;
+  }
+
   // User messages get edit (on hover) and copy actions
   if (message.role === "user") {
     return (
       <Actions className="-mr-0.5 justify-end">
         <div className="relative">
+          {/* Edit is deliberately off in protocol mode: editing deletes the
+              trailing messages and re-runs the turn, which submits a new paid
+              on-chain job with no cost disclosure. Regenerate below is the
+              disclosed path. */}
           {/* {setMode && (
             <Action
               className="-left-10 absolute top-0 opacity-0 transition-opacity group-hover/message:opacity-100"
@@ -89,6 +96,18 @@ export function PureMessageActions({
       <Action onClick={handleCopy} tooltip="Copy">
         {copied ? <CopyCheck /> : <Copy />}
       </Action>
+
+      {regenerate && (
+        // Every regeneration is a new on-chain job with its own fee, so this
+        // says so rather than looking like a free retry.
+        <Action
+          data-testid="message-regenerate"
+          onClick={() => regenerate()}
+          tooltip="Regenerate (submits a new paid job)"
+        >
+          <RefreshCw />
+        </Action>
+      )}
 
       <Action
         data-testid="message-upvote"

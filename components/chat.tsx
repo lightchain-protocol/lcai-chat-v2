@@ -126,6 +126,12 @@ export function Chat({
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
   const { models: availableModels } = useModels();
+  // Ref so the protocol fetch wrapper can name the serving model without
+  // re-creating the transport whenever the live model list refreshes.
+  const availableModelsRef = useRef(availableModels);
+  useEffect(() => {
+    availableModelsRef.current = availableModels;
+  }, [availableModels]);
   useEffect(() => {
     if (availableModels.length === 0) {
       return;
@@ -219,6 +225,10 @@ export function Chat({
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
+    fetchOnChainJob,
+    fetchWorkerStake,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
   } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
   // Read-only preflight: union of capabilities across all workers eligible
   // for this model (web-search epic, Story 16). Populates at chat mount via
@@ -267,6 +277,12 @@ export function Chat({
               // ProtocolTransport forwards this through SessionManager.submitJob
               // → GatewayClient.uploadBlob → consumer-api side-channel write.
               enableWebSearch: enableWebSearchRef.current,
+              // Name of the serving model (live list), recorded into the
+              // assistant message's protocolMeta for the proof panel and
+              // transcripts.
+              friendlyModelId: availableModelsRef.current.find(
+                (m) => m.id === currentModelIdRef.current
+              )?.name,
             },
             signal: init?.signal ?? undefined,
           });
@@ -484,6 +500,11 @@ export function Chat({
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
