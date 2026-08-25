@@ -268,6 +268,23 @@ export const jobRegistryAbi = [
     stateMutability: "payable",
     type: "function",
   },
+  // ── disputeResponseMismatch ───────────────────────────────────────────────
+  // Cryptographic remedy: the caller supplies the response ciphertext exactly
+  // as delivered plus the worker's signature over it; the contract re-derives
+  // the signer, then slashes the worker when keccak256(ciphertext) differs
+  // from the responseCiphertextHash committed in completeJob. No bond — the
+  // proof is self-verifying.
+  {
+    inputs: [
+      { internalType: "uint256", name: "jobId", type: "uint256" },
+      { internalType: "bytes", name: "ciphertext", type: "bytes" },
+      { internalType: "bytes", name: "signature", type: "bytes" },
+    ],
+    name: "disputeResponseMismatch",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
   // ── getJob (view) ─────────────────────────────────────────────────────────
   {
     inputs: [{ internalType: "uint256", name: "jobId", type: "uint256" }],
@@ -280,19 +297,43 @@ export const jobRegistryAbi = [
           { internalType: "uint8", name: "state", type: "uint8" },
           { internalType: "uint256", name: "escrowedFee", type: "uint256" },
           { internalType: "bytes32", name: "promptBlobHash", type: "bytes32" },
-          { internalType: "bytes32", name: "responseBlobHash", type: "bytes32" },
+          {
+            internalType: "bytes32",
+            name: "responseBlobHash",
+            type: "bytes32",
+          },
           { internalType: "uint256", name: "submittedAt", type: "uint256" },
           { internalType: "uint256", name: "ackTimestamp", type: "uint256" },
           { internalType: "uint256", name: "completedAt", type: "uint256" },
           { internalType: "uint256", name: "deadline", type: "uint256" },
           { internalType: "address", name: "disputeFiler", type: "address" },
           { internalType: "uint256", name: "disputeBond", type: "uint256" },
-          { internalType: "bytes32", name: "reExecutionBlobHash", type: "bytes32" },
+          {
+            internalType: "bytes32",
+            name: "reExecutionBlobHash",
+            type: "bytes32",
+          },
           { internalType: "uint256", name: "similarityScore", type: "uint256" },
-          { internalType: "uint256", name: "disputeCreatedAt", type: "uint256" },
-          { internalType: "bytes32", name: "responseCiphertextHash", type: "bytes32" },
-          { internalType: "uint256", name: "submitBlockNumber", type: "uint256" },
-          { internalType: "uint256", name: "completionBlockNumber", type: "uint256" },
+          {
+            internalType: "uint256",
+            name: "disputeCreatedAt",
+            type: "uint256",
+          },
+          {
+            internalType: "bytes32",
+            name: "responseCiphertextHash",
+            type: "bytes32",
+          },
+          {
+            internalType: "uint256",
+            name: "submitBlockNumber",
+            type: "uint256",
+          },
+          {
+            internalType: "uint256",
+            name: "completionBlockNumber",
+            type: "uint256",
+          },
         ],
         internalType: "struct IJobRegistry.Job",
         name: "",
@@ -306,10 +347,30 @@ export const jobRegistryAbi = [
   {
     anonymous: false,
     inputs: [
-      { indexed: true, internalType: "uint256", name: "jobId", type: "uint256" },
-      { indexed: true, internalType: "address", name: "worker", type: "address" },
-      { indexed: false, internalType: "bytes32", name: "responseBlobHash", type: "bytes32" },
-      { indexed: false, internalType: "bytes32", name: "responseCiphertextHash", type: "bytes32" },
+      {
+        indexed: true,
+        internalType: "uint256",
+        name: "jobId",
+        type: "uint256",
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "worker",
+        type: "address",
+      },
+      {
+        indexed: false,
+        internalType: "bytes32",
+        name: "responseBlobHash",
+        type: "bytes32",
+      },
+      {
+        indexed: false,
+        internalType: "bytes32",
+        name: "responseCiphertextHash",
+        type: "bytes32",
+      },
     ],
     name: "JobCompleted",
     type: "event",
@@ -317,9 +378,24 @@ export const jobRegistryAbi = [
   {
     anonymous: false,
     inputs: [
-      { indexed: true, internalType: "uint256", name: "jobId", type: "uint256" },
-      { indexed: true, internalType: "address", name: "worker", type: "address" },
-      { indexed: false, internalType: "uint256", name: "slashAmount", type: "uint256" },
+      {
+        indexed: true,
+        internalType: "uint256",
+        name: "jobId",
+        type: "uint256",
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "worker",
+        type: "address",
+      },
+      {
+        indexed: false,
+        internalType: "uint256",
+        name: "slashAmount",
+        type: "uint256",
+      },
     ],
     name: "JobTimedOut",
     type: "event",
@@ -327,8 +403,18 @@ export const jobRegistryAbi = [
   {
     anonymous: false,
     inputs: [
-      { indexed: true, internalType: "uint256", name: "jobId", type: "uint256" },
-      { indexed: true, internalType: "address", name: "disputer", type: "address" },
+      {
+        indexed: true,
+        internalType: "uint256",
+        name: "jobId",
+        type: "uint256",
+      },
+      {
+        indexed: true,
+        internalType: "address",
+        name: "disputer",
+        type: "address",
+      },
     ],
     name: "DisputeCreated",
     type: "event",
@@ -412,4 +498,5 @@ export const jobRegistryAbi = [
     name: "UnauthorizedDisputeCaller",
     type: "error",
   },
+  { inputs: [], name: "InvalidWorkerSignature", type: "error" },
 ] as const;

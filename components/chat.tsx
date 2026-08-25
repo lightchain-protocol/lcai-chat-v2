@@ -20,7 +20,17 @@ import { useModels } from "@/hooks/use-models";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
+import { recordModelOutcome } from "@/lib/ai/availability";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
+import {
+  addBranch,
+  applyActiveBranches,
+  type BranchStore,
+  forkAt,
+  loadBranchStore,
+  saveBranchStore,
+  switchBranch,
+} from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
@@ -29,12 +39,23 @@ import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import {
+  addMemoryEntry,
+  EMPTY_MEMORY_STORE,
+  loadMemoryStore,
+  type MemoryStore,
+  memoryPrefixFromStore,
+  removeMemoryEntry,
+  saveMemoryStore,
+} from "@/lib/memory";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
+import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
+import { ShareTranscriptButton } from "./share-transcript-button";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -119,6 +140,9 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  // The model id of the in-flight send, recorded into the device-local
+  // availability heuristic on finish/error.
+  const lastSentModelRef = useRef<string | null>(null);
 
   // Live models are keyed by on-chain id (0x…hex); the initial/cookie value may
   // be a legacy name ("llama3-8b") or a model with no active worker, which the
@@ -126,6 +150,12 @@ export function Chat({
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
   const { models: availableModels } = useModels();
+  // Ref so the protocol fetch wrapper can name the serving model without
+  // re-creating the transport whenever the live model list refreshes.
+  const availableModelsRef = useRef(availableModels);
+  useEffect(() => {
+    availableModelsRef.current = availableModels;
+  }, [availableModels]);
   useEffect(() => {
     if (availableModels.length === 0) {
       return;
@@ -206,6 +236,32 @@ export function Chat({
     prepaid.isAuthorized,
   ]);
 
+  // Device-local private memory (lib/memory.ts). The ref feeds the
+  // transport's getMemoryPrefix so the lazily-created protocol transport
+  // always reads the latest store without being recreated. Loaded post-mount
+  // so SSR and the first client render agree.
+  const [memoryStore, setMemoryStore] =
+    useState<MemoryStore>(EMPTY_MEMORY_STORE);
+  const memoryRef = useRef<MemoryStore>(EMPTY_MEMORY_STORE);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const store = loadMemoryStore();
+    memoryRef.current = store;
+    setMemoryStore(store);
+  }, []);
+
+  const updateMemoryStore = useCallback((next: MemoryStore) => {
+    memoryRef.current = next;
+    setMemoryStore(next);
+    saveMemoryStore(next);
+  }, []);
+
+  const getMemoryPrefix = useCallback(
+    () => memoryPrefixFromStore(memoryRef.current),
+    []
+  );
+
   // Protocol mode: session management for on-chain encrypted chat
   const {
     getTransport: getProtocolTransport,
@@ -219,7 +275,19 @@ export function Chat({
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
+    fetchOnChainJob,
+    fetchWorkerStake,
+    getShareEvidence,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
+  } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address,
+    id,
+    submitMode,
+    getMemoryPrefix
+  );
   // Read-only preflight: union of capabilities across all workers eligible
   // for this model (web-search epic, Story 16). Populates at chat mount via
   // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
@@ -259,6 +327,11 @@ export function Chat({
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
           };
+          // Record the outcome-tracking ref here too: in non-protocol mode
+          // this happens in prepareSendMessagesRequest, but that hook isn't
+          // called for this transport's own fetch, so availability outcomes
+          // in protocol mode were never recorded without it.
+          lastSentModelRef.current = currentModelIdRef.current;
           const { response } = await t.sendMessages({
             messages: protocolBody.messages ?? [],
             body: {
@@ -267,6 +340,12 @@ export function Chat({
               // ProtocolTransport forwards this through SessionManager.submitJob
               // → GatewayClient.uploadBlob → consumer-api side-channel write.
               enableWebSearch: enableWebSearchRef.current,
+              // Name of the serving model (live list), recorded into the
+              // assistant message's protocolMeta for the proof panel and
+              // transcripts.
+              friendlyModelId: availableModelsRef.current.find(
+                (m) => m.id === currentModelIdRef.current
+              )?.name,
             },
             signal: init?.signal ?? undefined,
           });
@@ -282,6 +361,7 @@ export function Chat({
           ...init,
         }),
       prepareSendMessagesRequest(request) {
+        lastSentModelRef.current = currentModelIdRef.current;
         return {
           body: {
             id: request.id,
@@ -380,12 +460,30 @@ export function Chat({
       //   setUsage(dataPart.data);
       // }
     },
+    // The installed @ai-sdk/react (2.0.26) pins its own nested ai@5.0.26,
+    // whose ChatOnFinishCallback carries no isAbort/isError (that shape is
+    // from the newer `ai` this repo also depends on directly, ~L4146 of the
+    // top-level node_modules/ai/dist/index.d.ts, but @ai-sdk/react resolves
+    // its own isolated, older copy — pnpm keeps the two separate). Tracing
+    // that version's Chat.makeRequest confirms onFinish is only ever invoked
+    // after a clean, non-aborted, non-errored stream — an abort returns early
+    // in the catch block and a real error routes to onError instead — so the
+    // outcome-recording guard the fields would have added is already true by
+    // construction here; nothing to destructure.
     onFinish: () => {
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "completed");
+      }
       mutate(unstable_serialize(getChatHistoryPaginationKey));
       prepaid.refetch();
       balance.refetch();
     },
     onError: (error: any) => {
+      // An expired delegate isn't a model failure — the model never got the
+      // chance to answer.
+      if (lastSentModelRef.current && !isProtocolAuthExpiredError(error)) {
+        recordModelOutcome(lastSentModelRef.current, "failed");
+      }
       if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError
@@ -413,6 +511,82 @@ export function Chat({
       ));
     },
   });
+
+  // --- Conversation branching (device-local, lib/branches.ts) -------------
+  // Loaded post-mount (not in useState) so SSR and the first client render
+  // agree; the branched view is applied once per chat right after.
+  const [branchStore, setBranchStore] = useState<BranchStore>({});
+  const branchesLoadedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Readonly viewers see the true flat history (branch controls are gated the same way).
+    if (isReadonly) {
+      return;
+    }
+    if (branchesLoadedRef.current === id) {
+      return;
+    }
+    branchesLoadedRef.current = id;
+    const store = loadBranchStore(id);
+    setBranchStore(store);
+    if (Object.keys(store).length > 0) {
+      setMessages((prev) => applyActiveBranches(prev, store));
+    }
+  }, [id, isReadonly, setMessages]);
+
+  const handleFork = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1 || index >= messages.length - 1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = forkAt(branchStore, anchorId, messages.slice(index + 1), now);
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleSwitchBranch = useCallback(
+    (anchorId: string, target: number) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const result = switchBranch(
+        branchStore,
+        anchorId,
+        target,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(result.store);
+      saveBranchStore(id, result.store);
+      setMessages([
+        ...messages.slice(0, index + 1),
+        ...(result.tail as ChatMessage[]),
+      ]);
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleAddBranch = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = addBranch(branchStore, anchorId, messages.slice(index + 1), now);
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
@@ -456,6 +630,9 @@ export function Chat({
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onOpenMemory={
+            isProtocolMode ? () => setMemoryDialogOpen(true) : undefined
+          }
           onSystemPromptChange={(promptId, prompt) => {
             setSystemPromptId(promptId);
             setSystemPrompt(prompt);
@@ -481,12 +658,21 @@ export function Chat({
 
         <Messages
           activeJobs={activeJobs}
+          branchStore={isReadonly ? undefined : branchStore}
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          onAddBranch={isReadonly ? undefined : handleAddBranch}
+          onFork={isReadonly ? undefined : handleFork}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={initialChatModel}
@@ -494,6 +680,16 @@ export function Chat({
           status={status}
           votes={votes}
         />
+
+        {!isReadonly && messages.length > 0 && (
+          <div className="flex justify-end px-4 pt-1">
+            <ShareTranscriptButton
+              chatId={id}
+              getShareEvidence={getShareEvidence}
+              messages={messages}
+            />
+          </div>
+        )}
 
         <div
           className={
@@ -508,9 +704,15 @@ export function Chat({
               disabledPlaceholder="Session recovering..."
               enableWebSearch={enableWebSearch}
               input={input}
+              memoryActive={
+                isProtocolMode &&
+                memoryStore.enabled &&
+                memoryStore.entries.length > 0
+              }
               messages={messages}
               onBeforeSubmit={canPrompt}
               onModelChange={setCurrentModelId}
+              onOpenMemory={() => setMemoryDialogOpen(true)}
               onWebSearchToggle={setEnableWebSearch}
               searchCapable={searchCapable}
               selectedModelId={currentModelId}
@@ -526,6 +728,27 @@ export function Chat({
           )}
         </div>
       </div>
+
+      <MemoryDialog
+        onAdd={(text) =>
+          updateMemoryStore(
+            addMemoryEntry(
+              memoryStore,
+              text,
+              generateUUID(),
+              new Date().toISOString()
+            )
+          )
+        }
+        onClear={() => updateMemoryStore({ ...memoryStore, entries: [] })}
+        onOpenChange={setMemoryDialogOpen}
+        onRemove={(entryId) =>
+          updateMemoryStore(removeMemoryEntry(memoryStore, entryId))
+        }
+        onToggle={(enabled) => updateMemoryStore({ ...memoryStore, enabled })}
+        open={memoryDialogOpen}
+        store={memoryStore}
+      />
 
       <PrepaidBalanceDialog
         onOpenChange={setPrepaidGateOpen}

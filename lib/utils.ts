@@ -99,16 +99,35 @@ type APIMessage = DBMessage & {
 };
 
 export function convertToUIMessages(messages: APIMessage[]): ChatMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    role: message.role as 'user' | 'assistant' | 'system',
-    parts: message.parts as UIMessagePart<CustomUIDataTypes, ChatTools>[],
-    metadata: {
-      createdAt: formatISO(message.createdAt),
-      ...(message.jobId != null ? { jobId: message.jobId } : {}),
-      ...(message.protocolMeta ? { protocolMeta: message.protocolMeta } : {}),
-    },
-  }));
+  // Per-row tolerance: a half-written in-flight row (null createdAt, missing
+  // parts) must not take down the whole /chat/[id] render — skip it; the live
+  // stream or the next reload replaces it.
+  return messages.flatMap((message) => {
+    try {
+      const createdAt = message.createdAt
+        ? formatISO(message.createdAt)
+        : formatISO(new Date(0));
+      return [
+        {
+          id: message.id,
+          role: message.role as 'user' | 'assistant' | 'system',
+          parts: (Array.isArray(message.parts)
+            ? message.parts
+            : []) as UIMessagePart<CustomUIDataTypes, ChatTools>[],
+          metadata: {
+            createdAt,
+            ...(message.jobId != null ? { jobId: message.jobId } : {}),
+            ...(message.protocolMeta
+              ? { protocolMeta: message.protocolMeta }
+              : {}),
+          },
+        },
+      ];
+    } catch (error) {
+      console.warn('Skipping malformed message row', message?.id, error);
+      return [];
+    }
+  });
 }
 
 export function getTextFromMessage(message: ChatMessage): string {
