@@ -20,6 +20,7 @@ import { useModels } from "@/hooks/use-models";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
+import { recordModelOutcome } from "@/lib/ai/availability";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import {
   addBranch,
@@ -139,6 +140,9 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  // The model id of the in-flight send, recorded into the device-local
+  // availability heuristic on finish/error.
+  const lastSentModelRef = useRef<string | null>(null);
 
   // Live models are keyed by on-chain id (0x…hex); the initial/cookie value may
   // be a legacy name ("llama3-8b") or a model with no active worker, which the
@@ -352,6 +356,7 @@ export function Chat({
           ...init,
         }),
       prepareSendMessagesRequest(request) {
+        lastSentModelRef.current = currentModelIdRef.current;
         return {
           body: {
             id: request.id,
@@ -451,11 +456,17 @@ export function Chat({
       // }
     },
     onFinish: () => {
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "completed");
+      }
       mutate(unstable_serialize(getChatHistoryPaginationKey));
       prepaid.refetch();
       balance.refetch();
     },
     onError: (error: any) => {
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "failed");
+      }
       if (isProtocolAuthExpiredError(error)) {
         toast.custom((errorId) => (
           <AlertError

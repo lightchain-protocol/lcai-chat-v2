@@ -23,6 +23,7 @@ import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
 import { useModels } from "@/hooks/use-models";
+import { type Availability, availabilityOf } from "@/lib/ai/availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
@@ -572,9 +573,12 @@ function PureModelSelectorCompact({
               key={model.id}
               value={model.id}
             >
-              <h6 className="mb-0.5 truncate font-medium text-xs">
-                {model.name}
-              </h6>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <AvailabilityDot modelId={model.id} />
+                <h6 className="mb-0.5 truncate font-medium text-xs">
+                  {model.name}
+                </h6>
+              </span>
             </SelectItem>
           ))}
         </div>
@@ -608,3 +612,41 @@ function PureStopButton({
 }
 
 const StopButton = memo(PureStopButton);
+
+const AVAILABILITY_STYLES: Record<
+  Availability,
+  { className: string; title: string }
+> = {
+  good: {
+    className: "bg-emerald-500",
+    title:
+      "Recent jobs on this model completed — device-local signal from your last few jobs, not a fleet-wide measurement",
+  },
+  shaky: {
+    className: "bg-amber-500",
+    title:
+      "A recent job on this model failed or timed out — device-local signal from your last few jobs, not a fleet-wide measurement",
+  },
+  unknown: {
+    className: "bg-content-subtle/30",
+    title: "No recent jobs on this model from this device yet",
+  },
+};
+
+/** Small per-row availability dot (lib/ai/availability.ts — device-local). */
+function AvailabilityDot({ modelId }: { modelId: string }) {
+  const availability = availabilityOf(modelId);
+  const style = AVAILABILITY_STYLES[availability];
+  return (
+    <span
+      aria-label={`availability: ${availability}`}
+      className={cn(
+        "inline-block size-1.5 shrink-0 rounded-full",
+        style.className
+      )}
+      data-testid={`availability-dot-${availability}`}
+      role="img"
+      title={style.title}
+    />
+  );
+}
