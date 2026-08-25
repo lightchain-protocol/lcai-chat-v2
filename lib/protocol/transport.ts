@@ -560,6 +560,19 @@ export class ProtocolTransport {
     // prefix exists only inside the encrypted blob, never in chat history.
     // Search stays worker-side: searchEnabled rides the sentinel envelope
     // that pkg/searchaug decodes.
+    // The user may have pressed Stop while the session was still being
+    // claimed. Nothing is on chain yet at this point, so bail before the
+    // job is submitted and paid for; useChat treats the AbortError as a
+    // plain cancel.
+    if (options.signal?.aborted) {
+      const cancelled = new DOMException(
+        "Send cancelled before job submission",
+        "AbortError"
+      );
+      persist.cancel();
+      protocolStream.onSubmitFailed(cancelled);
+      throw cancelled;
+    }
     const prompt = withMemoryPrefix(this.getMemoryPrefix?.() ?? "", plaintext);
     this.sessionMgr
       .submitJob(prompt, { searchEnabled: enableWebSearch })
