@@ -54,6 +54,7 @@ import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
+import { ShareTranscriptButton } from "./share-transcript-button";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -272,6 +273,7 @@ export function Chat({
     clearTimedOutJob,
     fetchOnChainJob,
     fetchWorkerStake,
+    getShareEvidence,
     disputeResponseMismatch,
     hasMismatchEvidence,
   } = useProtocolSession(
@@ -650,6 +652,16 @@ export function Chat({
           status={status}
           votes={votes}
         />
+
+        {!isReadonly && messages.length > 0 && (
+          <div className="flex justify-end px-4 pt-1">
+            <ShareTranscriptButton
+              chatId={id}
+              getShareEvidence={getShareEvidence}
+              messages={messages}
+            />
+          </div>
+        )}
 
         <div
           className={

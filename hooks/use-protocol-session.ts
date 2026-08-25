@@ -472,6 +472,14 @@ export function useProtocolSession(
     return transportRef.current?.hasMismatchEvidence(jobId) ?? false;
   }, []);
 
+  /**
+   * Live-session share evidence (ciphertext + signature) for one job, or null
+   * once the window has passed. Backs the verifiable-transcript export.
+   */
+  const getShareEvidence = useCallback((jobId: number) => {
+    return transportRef.current?.getShareEvidence(jobId) ?? null;
+  }, []);
+
   return {
     status,
     error,
@@ -489,6 +497,7 @@ export function useProtocolSession(
     clearTimedOutJob,
     fetchOnChainJob,
     fetchWorkerStake,
+    getShareEvidence,
     disputeResponseMismatch,
     hasMismatchEvidence,
   };
