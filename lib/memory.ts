@@ -4,10 +4,10 @@
  * Memory entries live only in this browser's localStorage — never in the
  * chat database, never on chain, never in any server-side profile. When
  * enabled, the entries are prepended to the prompt inside ProtocolTransport's
- * envelope assembly (buildPrompt), which runs AFTER the user-message persist
- * has already captured the unmodified message — so memory travels only inside
- * the encrypted envelope of the user's own prompts, and chat history stays
- * clean of it.
+ * envelope assembly (sendMessages, via withMemoryPrefix), which runs AFTER the
+ * user-message persist has already captured the unmodified message — so
+ * memory travels only inside the encrypted envelope of the user's own
+ * prompts, and chat history stays clean of it.
  *
  * Default is OFF (enabled: false). Two reasons: privacy-first posture, and
  * quality — a stale memory silently injected into every prompt is a prompt-

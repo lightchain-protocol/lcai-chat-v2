@@ -133,7 +133,10 @@ export function buildVerifiableTranscript({
         if (entry.text.length === 0 && part.data.text) {
           entry.text = part.data.text;
         }
-      } else if (part.type === "data-responseProof" && part.data) {
+      } else if (
+        part.type === "data-responseProof" &&
+        typeof part.data?.jobId === "number"
+      ) {
         entry.proof = part.data;
       } else if (part.type === "data-settlement" && part.data) {
         entry.settlement = part.data;

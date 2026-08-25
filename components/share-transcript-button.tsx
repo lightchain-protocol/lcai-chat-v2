@@ -63,7 +63,10 @@ export function ShareTranscriptButton({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const provableCount = messages.filter((m) =>
-    m.parts.some((p) => p.type === "data-responseProof")
+    m.parts.some(
+      (p) =>
+        p.type === "data-responseProof" && typeof p.data?.jobId === "number"
+    )
   ).length;
 
   const doExport = () => {
@@ -75,7 +78,10 @@ export function ShareTranscriptButton({
     if (getShareEvidence) {
       for (const message of messages) {
         for (const part of message.parts) {
-          if (part.type === "data-responseProof" && part.data) {
+          if (
+            part.type === "data-responseProof" &&
+            typeof part.data?.jobId === "number"
+          ) {
             const live = getShareEvidence(part.data.jobId);
             if (live) evidence.set(part.data.jobId, live);
           }

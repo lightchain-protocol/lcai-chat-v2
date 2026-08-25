@@ -145,7 +145,10 @@ function PureMessages({
     return (
       <PreviewMessage
         branch={
-          onFork
+          // Fork/switch/add mutate the message list by slicing at an anchor;
+          // offering that while a response is still streaming targets a list
+          // that is about to change under it.
+          onFork && status !== "streaming" && status !== "submitted"
             ? {
                 nav: anchorEntry
                   ? {

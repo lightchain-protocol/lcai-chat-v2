@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WSErrorFrame, WSFrame } from "./relay-client";
+import type { GenerationStats, WSErrorFrame, WSFrame } from "./relay-client";
 import {
   PendingJobConflictError,
+  parseGenerationStats,
   RelayClient,
   TOMBSTONE_DRAIN_TTL_MS,
 } from "./relay-client";
@@ -489,5 +490,28 @@ describe("RelayClient tombstones (aborted submissions)", () => {
 
     deliver(socket, chunkFrame({ jobId: 910 }));
     expect(next).toEqual([910]);
+  });
+});
+
+describe("parseGenerationStats", () => {
+  const valid: GenerationStats = {
+    promptTokens: 12,
+    evalTokens: 48,
+    tokensPerSecond: 25.5,
+    promptEvalMs: 100,
+    evalMs: 2000,
+    totalMs: 2100,
+  };
+
+  it("parses a fully-populated stats payload", () => {
+    expect(parseGenerationStats(JSON.stringify(valid))).toEqual(valid);
+  });
+
+  it("returns null when required numeric fields are missing", () => {
+    expect(parseGenerationStats(JSON.stringify({ evalTokens: 3 }))).toBeNull();
+  });
+
+  it("returns null for JSON that does not decode to an object", () => {
+    expect(parseGenerationStats(JSON.stringify("nope"))).toBeNull();
   });
 });

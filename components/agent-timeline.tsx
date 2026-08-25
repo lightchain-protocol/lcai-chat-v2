@@ -8,8 +8,8 @@ import {
   spendSummary,
 } from "@/lib/agent/timeline";
 import type { ArtifactDescriptor } from "@/lib/protocol/artifact";
-import { cn } from "@/lib/utils";
 import { DELIVERED_NOT_SETTLED_LABEL } from "@/lib/protocol/artifact";
+import { cn } from "@/lib/utils";
 
 /**
  * Agent mode plan/progress surface (ai-1-agent-mode-design.md §3): the

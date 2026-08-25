@@ -21,13 +21,12 @@ import { bytesToBase64 } from "./base64";
 import type { GatewayClient } from "./gateway-client";
 import { isCompletedJobState } from "./job-state";
 import type {
-  GenerationStats,
   LifecycleEvent,
   ProtocolCitationSource,
   WSErrorFrame,
   WSFrame,
 } from "./relay-client";
-import { frameKind, RelayClient } from "./relay-client";
+import { frameKind, parseGenerationStats, RelayClient } from "./relay-client";
 import type { OnChainJob, SessionManagerConfig } from "./session";
 import {
   MaxReassignmentsError,
@@ -41,8 +40,9 @@ import { captureResponseProof, decodeBase64ToBytes } from "./verify-response";
 
 /**
  * Hard ceiling on how long the user-message POST may wait for a jobId before
- * being written without one. Only reachable when neither the relay nor the
- * submit call ever answers.
+ * being written without one. Reached when neither the relay nor the submit
+ * call ever answers, or — in wallet mode — when the user simply takes longer
+ * than this to sign the transaction.
  */
 const USER_MESSAGE_PERSIST_DEADLINE_MS = 10_000;
 
@@ -82,12 +82,6 @@ type ProtocolStream = {
   onSubmitted: (jobId: number | null) => void;
   /** Report a failed submit. Ignored once frames have started arriving. */
   onSubmitFailed: (error: unknown) => void;
-  /**
-   * Publish the browser-side web-search citations for this answer. Rendered
-   * immediately and re-applied to the assistant message once a jobId exists,
-   * so they survive a reload as well.
-   */
-  emitSearchSources: (sources: ProtocolCitationSource[]) => void;
   /**
    * Fold the deadline-tracking chain read (worker, escrow, ack state) into the
    * settlement timeline. May arrive after frames have started; the reducer is
@@ -476,20 +470,37 @@ export class ProtocolTransport {
     // Persisting the user message is deferred, not awaited: the POST is the
     // only place the jobId is still wanted synchronously, and blocking on it
     // would re-introduce the stall we are removing. See deferUserMessagePersist.
-    const persist = this.deferUserMessagePersist({
-      chatId,
-      sessionId,
-      message: lastMessage,
-      selectedVisibilityType:
-        typeof options.body?.selectedVisibilityType === "string"
-          ? options.body.selectedVisibilityType
-          : undefined,
-      systemPrompt:
-        typeof options.body?.systemPrompt === "string" ||
-        options.body?.systemPrompt === null
-          ? (options.body.systemPrompt as string | null)
-          : undefined,
-    });
+    //
+    // Regenerating re-sends the same user message id; POSTing it again would
+    // collide with the row already written by the original send (API 500,
+    // swallowed) and, after a reload, show two answers under one prompt. The
+    // rest of the regenerate path — new job, new assistant message — is
+    // unaffected: only the user-message persist is skipped.
+    const persist =
+      options.body?.trigger === "regenerate-message"
+        ? {
+            settle: () => {
+              // no-op: nothing was ever queued to persist.
+            },
+            cancel: () => {
+              // no-op: nothing was ever queued to persist.
+            },
+            done: Promise.resolve(),
+          }
+        : this.deferUserMessagePersist({
+            chatId,
+            sessionId,
+            message: lastMessage,
+            selectedVisibilityType:
+              typeof options.body?.selectedVisibilityType === "string"
+                ? options.body.selectedVisibilityType
+                : undefined,
+            systemPrompt:
+              typeof options.body?.systemPrompt === "string" ||
+              options.body?.systemPrompt === null
+                ? (options.body.systemPrompt as string | null)
+                : undefined,
+          });
 
     // The chat row is created by the user-message POST, so the session
     // registration and the assistant POST both have to queue behind it.
@@ -1084,7 +1095,6 @@ export class ProtocolTransport {
     let unsubscribe: (() => void) | null = null;
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let firstFrameTimer: ReturnType<typeof setTimeout> | undefined;
-    let searchSources: ProtocolCitationSource[] = [];
     // Live metrics are emitted at most this often; the final snapshot always
     // goes out with the terminal frame regardless of throttle.
     let lastMetricsEmitMs = 0;
@@ -1205,25 +1215,7 @@ export class ProtocolTransport {
       // The jobId existing at all means the escrow landed on chain — this is
       // the timeline's first milestone, whichever path reported the id.
       applySettlement({ type: "escrowed", atMs: Date.now() });
-      // Browser-side search finishes before any jobId exists, so the citations
-      // are held until there is a message to attach them to.
-      if (searchSources.length > 0) {
-        relayClient?.setAssistantSources(jobId, searchSources);
-      }
       onJobIdResolved(jobId);
-    };
-
-    const emitSearchSources = (sources: ProtocolCitationSource[]) => {
-      if (sources.length === 0 || closed) return;
-      searchSources = sources;
-      emit({
-        type: "data-webSearchSources",
-        id: `protocol-web-search-${assistantMessageId}`,
-        data: { sources },
-      });
-      if (boundJobId !== null) {
-        relayClient?.setAssistantSources(boundJobId, sources);
-      }
     };
 
     const handleFrame = async (frame: WSFrame | WSErrorFrame) => {
@@ -1320,17 +1312,16 @@ export class ProtocolTransport {
           }
 
           if (kind === "stats") {
-            try {
-              const stats = JSON.parse(decrypted) as GenerationStats;
+            // A malformed stats frame costs the user a throughput badge and
+            // nothing else, so it is dropped rather than breaking the answer.
+            const stats = parseGenerationStats(decrypted);
+            if (stats) {
               relayClient?.setAssistantStats(jobId, stats);
               emit({
                 type: "data-generationStats",
                 id: `protocol-stats-${jobId}`,
                 data: stats,
               });
-            } catch {
-              // A malformed stats frame costs the user a throughput badge
-              // and nothing else, so it must never break the answer.
             }
             return;
           }
@@ -1616,7 +1607,6 @@ export class ProtocolTransport {
       subscribePending,
       onSubmitted,
       onSubmitFailed,
-      emitSearchSources,
       noteChainObservation,
     };
   }

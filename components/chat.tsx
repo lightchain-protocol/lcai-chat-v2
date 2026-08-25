@@ -327,6 +327,11 @@ export function Chat({
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
           };
+          // Record the outcome-tracking ref here too: in non-protocol mode
+          // this happens in prepareSendMessagesRequest, but that hook isn't
+          // called for this transport's own fetch, so availability outcomes
+          // in protocol mode were never recorded without it.
+          lastSentModelRef.current = currentModelIdRef.current;
           const { response } = await t.sendMessages({
             messages: protocolBody.messages ?? [],
             body: {
@@ -455,6 +460,16 @@ export function Chat({
       //   setUsage(dataPart.data);
       // }
     },
+    // The installed @ai-sdk/react (2.0.26) pins its own nested ai@5.0.26,
+    // whose ChatOnFinishCallback carries no isAbort/isError (that shape is
+    // from the newer `ai` this repo also depends on directly, ~L4146 of the
+    // top-level node_modules/ai/dist/index.d.ts, but @ai-sdk/react resolves
+    // its own isolated, older copy — pnpm keeps the two separate). Tracing
+    // that version's Chat.makeRequest confirms onFinish is only ever invoked
+    // after a clean, non-aborted, non-errored stream — an abort returns early
+    // in the catch block and a real error routes to onError instead — so the
+    // outcome-recording guard the fields would have added is already true by
+    // construction here; nothing to destructure.
     onFinish: () => {
       if (lastSentModelRef.current) {
         recordModelOutcome(lastSentModelRef.current, "completed");
@@ -464,7 +479,9 @@ export function Chat({
       balance.refetch();
     },
     onError: (error: any) => {
-      if (lastSentModelRef.current) {
+      // An expired delegate isn't a model failure — the model never got the
+      // chance to answer.
+      if (lastSentModelRef.current && !isProtocolAuthExpiredError(error)) {
         recordModelOutcome(lastSentModelRef.current, "failed");
       }
       if (isProtocolAuthExpiredError(error)) {

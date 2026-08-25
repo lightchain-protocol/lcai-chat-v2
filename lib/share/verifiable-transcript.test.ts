@@ -246,4 +246,22 @@ describe("buildVerifiableTranscript", () => {
     });
     expect(doc.messages[0].share).toBeUndefined();
   });
+
+  it("ignores a responseProof part reloaded without a jobId", () => {
+    // A persisted data part can come back as `data: {}` (e.g. a row written
+    // before the field existed); it must not be mistaken for a real proof.
+    const message = assistantMessage([
+      { type: "text", text: "answer" },
+      {
+        type: "data-responseProof",
+        data: {},
+      } as ChatMessage["parts"][number],
+    ]);
+    const doc = buildVerifiableTranscript({
+      chatId: "chat-1",
+      messages: [message],
+    });
+    expect(doc.messages[0].proof).toBeUndefined();
+    expect(doc.messages[0].share).toBeUndefined();
+  });
 });

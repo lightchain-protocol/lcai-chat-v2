@@ -34,6 +34,41 @@ function fromBase64Url(encoded: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** Every field of `share` is optional except jobId/sessionId, which anchor the on-chain re-verification. */
+function isValidShare(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isPlainObject(value)) return false;
+  if (typeof value.jobId !== "number" || typeof value.sessionId !== "number") {
+    return false;
+  }
+  return (
+    (value.renderedText === undefined ||
+      typeof value.renderedText === "string") &&
+    (value.ciphertext === undefined || typeof value.ciphertext === "string") &&
+    (value.signature === undefined || typeof value.signature === "string")
+  );
+}
+
+/** Shape guard for an untrusted document from a URL hash or a picked file. */
+function isValidTranscriptDoc(doc: unknown): doc is VerifiableTranscript {
+  if (!isPlainObject(doc) || doc.v !== 1) return false;
+  if (!isPlainObject(doc.chat) || typeof doc.chat.id !== "string") {
+    return false;
+  }
+  if (!Array.isArray(doc.messages)) return false;
+  return doc.messages.every(
+    (m) =>
+      isPlainObject(m) &&
+      typeof m.role === "string" &&
+      typeof m.text === "string" &&
+      isValidShare(m.share)
+  );
+}
+
 type EntryState =
   | { status: "verifying" }
   | { status: "done"; result: ShareVerdictResult }
@@ -67,9 +102,9 @@ export default function SharePage() {
 
   const load = useCallback((raw: string) => {
     try {
-      const doc = JSON.parse(raw) as VerifiableTranscript;
-      if (doc.v !== 1 || !Array.isArray(doc.messages)) {
-        setParseError("Not a verifiable transcript (expected v: 1).");
+      const doc: unknown = JSON.parse(raw);
+      if (!isValidTranscriptDoc(doc)) {
+        setParseError("Could not parse that transcript file/link.");
         return;
       }
       setTranscript(doc);
@@ -82,7 +117,12 @@ export default function SharePage() {
   // URL hash form: /share#<base64url JSON>.
   useEffect(() => {
     const hash = window.location.hash.slice(1);
-    if (hash) load(fromBase64Url(hash));
+    if (!hash) return;
+    try {
+      load(fromBase64Url(hash));
+    } catch {
+      setParseError("Could not parse that transcript file/link.");
+    }
   }, [load]);
 
   // Verify each entry with share evidence against the chain.

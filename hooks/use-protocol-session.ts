@@ -206,8 +206,8 @@ export function useProtocolSession(
               systemPrompt,
               completionState: "completed",
               relaySource: "protocol-user",
-              jobId,
-              protocolMeta: { jobId, sessionId },
+              ...(jobId != null ? { jobId } : {}),
+              protocolMeta: { ...(jobId != null ? { jobId } : {}), sessionId },
             }
           );
 

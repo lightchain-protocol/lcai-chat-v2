@@ -67,6 +67,53 @@ export type GenerationStats = {
   totalMs: number;
 };
 
+/**
+ * Parses a `stats` frame payload, validating every field the UI and the
+ * persisted message part depend on being a real number. Malformed JSON or a
+ * non-finite field yields `null` so a corrupt frame is dropped — never
+ * thrown, never persisted — instead of poisoning the throughput badge or the
+ * stored message.
+ */
+export function parseGenerationStats(json: string): GenerationStats | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+  const p = parsed as Record<string, unknown>;
+  if (
+    !(
+      Number.isFinite(p.promptTokens) &&
+      Number.isFinite(p.evalTokens) &&
+      Number.isFinite(p.tokensPerSecond) &&
+      Number.isFinite(p.promptEvalMs) &&
+      Number.isFinite(p.evalMs) &&
+      Number.isFinite(p.totalMs)
+    )
+  ) {
+    return null;
+  }
+  const stats: GenerationStats = {
+    promptTokens: p.promptTokens as number,
+    evalTokens: p.evalTokens as number,
+    tokensPerSecond: p.tokensPerSecond as number,
+    promptEvalMs: p.promptEvalMs as number,
+    evalMs: p.evalMs as number,
+    totalMs: p.totalMs as number,
+  };
+  if (Number.isFinite(p.thinkingBytes)) {
+    stats.thinkingBytes = p.thinkingBytes as number;
+  }
+  if (Number.isFinite(p.loadMs)) {
+    stats.loadMs = p.loadMs as number;
+  }
+  return stats;
+}
+
 export type WSErrorFrame = {
   type: "error";
   code: string;
