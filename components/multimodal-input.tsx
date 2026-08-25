@@ -4,6 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
+import { Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -72,6 +73,8 @@ function PureMultimodalInput({
   disabled,
   disabledPlaceholder,
   onBeforeSubmit,
+  memoryActive,
+  onOpenMemory,
 }: {
   chatId: string;
   input: string;
@@ -94,6 +97,12 @@ function PureMultimodalInput({
   disabled?: boolean;
   disabledPlaceholder?: string;
   onBeforeSubmit?: () => boolean;
+  /**
+   * Device-local memory (lib/memory.ts) is enabled and has entries shaping
+   * prompts. Indicator only — click opens the memory dialog (chat.tsx).
+   */
+  memoryActive?: boolean;
+  onOpenMemory?: () => void;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -357,6 +366,25 @@ function PureMultimodalInput({
               onToggle={onWebSearchToggle}
               searchCapable={searchCapable ?? false}
             />
+            {memoryActive && (
+              <Button
+                aria-label="Memory is active"
+                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+                data-testid="memory-active-indicator"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpenMemory?.();
+                }}
+                title="Memory is on — your saved notes shape prompts on this device only (nothing is shared with other devices)"
+                type="button"
+                variant="ghost"
+              >
+                <Brain className="size-4 text-primary" />
+                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
+                  Memory
+                </span>
+              </Button>
+            )}
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
@@ -421,6 +449,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
+      return false;
+    }
+    if (prevProps.memoryActive !== nextProps.memoryActive) {
       return false;
     }
 

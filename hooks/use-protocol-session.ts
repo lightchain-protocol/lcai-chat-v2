@@ -40,7 +40,13 @@ export function useProtocolSession(
    * flip from "wallet" to "delegated" the moment the user finishes setting up
    * a prepaid balance. Defaults to "wallet" (legacy per-prompt TX).
    */
-  submitMode: SubmitMode = "wallet"
+  submitMode: SubmitMode = "wallet",
+  /**
+   * Device-local private memory prefix (lib/memory.ts), read once per send at
+   * envelope assembly. A ref-backed getter keeps the lazily-created transport
+   * in sync with later edits without recreating it.
+   */
+  getMemoryPrefix?: () => string
 ) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +166,7 @@ export function useProtocolSession(
       workerRegistryAddress,
       relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
       getSubmitMode: () => submitModeRef.current,
+      getMemoryPrefix,
       registerProtocolSession: async ({
         chatId: targetChatId,
         sessionId,
@@ -266,6 +273,7 @@ export function useProtocolSession(
     resolveModelId,
     protocolChainId,
     publicClient,
+    getMemoryPrefix,
   ]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */

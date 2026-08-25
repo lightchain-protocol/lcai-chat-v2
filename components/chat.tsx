@@ -29,8 +29,18 @@ import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import {
+  addMemoryEntry,
+  EMPTY_MEMORY_STORE,
+  loadMemoryStore,
+  type MemoryStore,
+  memoryPrefixFromStore,
+  removeMemoryEntry,
+  saveMemoryStore,
+} from "@/lib/memory";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
+import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
@@ -212,6 +222,32 @@ export function Chat({
     prepaid.isAuthorized,
   ]);
 
+  // Device-local private memory (lib/memory.ts). The ref feeds the
+  // transport's getMemoryPrefix so the lazily-created protocol transport
+  // always reads the latest store without being recreated. Loaded post-mount
+  // so SSR and the first client render agree.
+  const [memoryStore, setMemoryStore] =
+    useState<MemoryStore>(EMPTY_MEMORY_STORE);
+  const memoryRef = useRef<MemoryStore>(EMPTY_MEMORY_STORE);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const store = loadMemoryStore();
+    memoryRef.current = store;
+    setMemoryStore(store);
+  }, []);
+
+  const updateMemoryStore = useCallback((next: MemoryStore) => {
+    memoryRef.current = next;
+    setMemoryStore(next);
+    saveMemoryStore(next);
+  }, []);
+
+  const getMemoryPrefix = useCallback(
+    () => memoryPrefixFromStore(memoryRef.current),
+    []
+  );
+
   // Protocol mode: session management for on-chain encrypted chat
   const {
     getTransport: getProtocolTransport,
@@ -229,7 +265,14 @@ export function Chat({
     fetchWorkerStake,
     disputeResponseMismatch,
     hasMismatchEvidence,
-  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
+  } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address,
+    id,
+    submitMode,
+    getMemoryPrefix
+  );
   // Read-only preflight: union of capabilities across all workers eligible
   // for this model (web-search epic, Story 16). Populates at chat mount via
   // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
@@ -472,6 +515,9 @@ export function Chat({
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onOpenMemory={
+            isProtocolMode ? () => setMemoryDialogOpen(true) : undefined
+          }
           onSystemPromptChange={(promptId, prompt) => {
             setSystemPromptId(promptId);
             setSystemPrompt(prompt);
@@ -529,9 +575,15 @@ export function Chat({
               disabledPlaceholder="Session recovering..."
               enableWebSearch={enableWebSearch}
               input={input}
+              memoryActive={
+                isProtocolMode &&
+                memoryStore.enabled &&
+                memoryStore.entries.length > 0
+              }
               messages={messages}
               onBeforeSubmit={canPrompt}
               onModelChange={setCurrentModelId}
+              onOpenMemory={() => setMemoryDialogOpen(true)}
               onWebSearchToggle={setEnableWebSearch}
               searchCapable={searchCapable}
               selectedModelId={currentModelId}
@@ -547,6 +599,27 @@ export function Chat({
           )}
         </div>
       </div>
+
+      <MemoryDialog
+        onAdd={(text) =>
+          updateMemoryStore(
+            addMemoryEntry(
+              memoryStore,
+              text,
+              generateUUID(),
+              new Date().toISOString()
+            )
+          )
+        }
+        onClear={() => updateMemoryStore({ ...memoryStore, entries: [] })}
+        onOpenChange={setMemoryDialogOpen}
+        onRemove={(entryId) =>
+          updateMemoryStore(removeMemoryEntry(memoryStore, entryId))
+        }
+        onToggle={(enabled) => updateMemoryStore({ ...memoryStore, enabled })}
+        open={memoryDialogOpen}
+        store={memoryStore}
+      />
 
       <PrepaidBalanceDialog
         onOpenChange={setPrepaidGateOpen}
