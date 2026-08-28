@@ -53,7 +53,7 @@ import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
-import { MultimodalInput, type WebSearchMode } from "./multimodal-input";
+import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
 import { ShareTranscriptButton } from "./share-transcript-button";
@@ -245,11 +245,8 @@ export function Chat({
   );
   const systemPromptRef = useRef(systemPrompt);
 
-  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>("auto");
-  // Boolean actually sent to the worker: Auto and On both search, Off does not,
-  // and a worker that can't search is always false. Synced below once
-  // searchCapable is known.
-  const enableWebSearchRef = useRef(false);
+  const [enableWebSearch, setEnableWebSearch] = useState(false);
+  const enableWebSearchRef = useRef(enableWebSearch);
   const { walletClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
@@ -491,8 +488,8 @@ export function Chat({
   }, [systemPrompt]);
 
   useEffect(() => {
-    enableWebSearchRef.current = searchCapable && webSearchMode !== "off";
-  }, [searchCapable, webSearchMode]);
+    enableWebSearchRef.current = enableWebSearch;
+  }, [enableWebSearch]);
 
   // Show a non-blocking toast when a job's deadline passes with no response
   useEffect(() => {
@@ -781,7 +778,7 @@ export function Chat({
               chatId={id}
               disabled={sessionRecovering}
               disabledPlaceholder="Session recovering..."
-              onWebSearchModeChange={setWebSearchMode}
+              enableWebSearch={enableWebSearch}
               input={input}
               memoryActive={
                 isProtocolMode &&
@@ -792,7 +789,7 @@ export function Chat({
               onBeforeSubmit={canPrompt}
               onModelChange={handleModelChange}
               onOpenMemory={() => setMemoryDialogOpen(true)}
-              webSearchMode={webSearchMode}
+              onWebSearchToggle={setEnableWebSearch}
               searchCapable={searchCapable}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}

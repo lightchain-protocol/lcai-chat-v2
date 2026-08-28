@@ -4,7 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Brain, Globe } from "lucide-react";
+import { Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -49,6 +49,7 @@ import {
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
 import type { VisibilityType } from "./visibility-selector";
@@ -69,8 +70,8 @@ function PureMultimodalInput({
   selectedModelId,
   onModelChange,
   usage,
-  webSearchMode,
-  onWebSearchModeChange,
+  enableWebSearch,
+  onWebSearchToggle,
   searchCapable,
   disabled,
   disabledPlaceholder,
@@ -93,8 +94,8 @@ function PureMultimodalInput({
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   usage?: AppUsage;
-  webSearchMode?: WebSearchMode;
-  onWebSearchModeChange?: (mode: WebSearchMode) => void;
+  enableWebSearch?: boolean;
+  onWebSearchToggle?: (enabled: boolean) => void;
   searchCapable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string;
@@ -364,8 +365,8 @@ function PureMultimodalInput({
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
             <WebSearchToggle
-              mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
-              onModeChange={onWebSearchModeChange}
+              enabled={enableWebSearch ?? false}
+              onToggle={onWebSearchToggle}
               searchCapable={searchCapable ?? false}
             />
             {memoryActive && (
@@ -441,7 +442,7 @@ export const MultimodalInput = memo(
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
       return false;
     }
-    if (prevProps.webSearchMode !== nextProps.webSearchMode) {
+    if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
       return false;
     }
     if (prevProps.searchCapable !== nextProps.searchCapable) {
@@ -461,86 +462,34 @@ export const MultimodalInput = memo(
   }
 );
 
-/**
- * Per-message web-search control — phase1's three-state Globe cycle
- * (Off → On → Auto → Off), wired to devnet's boolean search opt-in.
- *
- * Devnet has no browser-side search-intent resolver, so "Auto" and "On" both
- * enable search on the bound worker; only "Off" disables it — the parent
- * computes `enableWebSearch = mode !== "off"`. The worker-capability gate is
- * preserved: when the bound worker can't search the control is locked and a
- * tooltip explains why, rather than cycling a mode that can't take effect.
- */
-export type WebSearchMode = "auto" | "on" | "off";
-const DEFAULT_WEB_SEARCH_MODE: WebSearchMode = "auto";
-const WEB_SEARCH_LABELS: Record<WebSearchMode, string> = {
-  auto: "Auto",
-  on: "On",
-  off: "Off",
-};
-const WEB_SEARCH_TITLES: Record<WebSearchMode, string> = {
-  auto: "Web search: Auto — runs when the question needs current information. Click to always search.",
-  on: "Web search: On — every prompt is searched. Click to never search.",
-  off: "Web search: Off — never searches. Click to go back to Auto.",
-};
-const NEXT_WEB_SEARCH_MODE: Record<WebSearchMode, WebSearchMode> = {
-  auto: "on",
-  on: "off",
-  off: "auto",
-};
-
 function WebSearchToggle({
-  mode,
-  onModeChange,
+  enabled,
+  onToggle,
   searchCapable,
 }: {
-  mode: WebSearchMode;
-  onModeChange?: (mode: WebSearchMode) => void;
+  enabled: boolean;
+  onToggle?: (enabled: boolean) => void;
   searchCapable: boolean;
 }) {
-  const button = (
-    <Button
-      aria-disabled={!searchCapable}
-      className={cn(
-        "h-8 gap-1.5 rounded-lg px-2 font-normal text-sm",
-        !searchCapable && "cursor-not-allowed opacity-50"
-      )}
-      data-testid="web-search-toggle"
-      onClick={() => {
-        if (searchCapable) {
-          onModeChange?.(NEXT_WEB_SEARCH_MODE[mode]);
-        }
-      }}
-      title={
-        searchCapable
-          ? WEB_SEARCH_TITLES[mode]
-          : "This conversation's worker doesn't support web search. Start a new conversation to enable it."
-      }
-      type="button"
-      variant="ghost"
-    >
-      <Globe className={cn("size-4", mode === "off" && "opacity-40")} />
-      <span className="text-content-secondary">Web Search</span>
-      <span
-        className={cn(
-          "rounded px-1.5 py-0.5 text-xs",
-          mode === "on" && "bg-primary/10 text-primary",
-          mode === "auto" && "bg-muted text-content-secondary",
-          mode === "off" && "text-content-secondary opacity-60"
-        )}
-      >
-        {WEB_SEARCH_LABELS[mode]}
-      </span>
-    </Button>
+  const inner = (
+    <div className="flex items-center gap-2 px-1 py-1">
+      <Switch
+        checked={searchCapable ? enabled : false}
+        className="rounded-full!"
+        disabled={!searchCapable}
+        onCheckedChange={searchCapable ? onToggle : undefined}
+      />
+      <span className="text-content-secondary text-sm">Web Search</span>
+    </div>
   );
 
   if (searchCapable) {
-    return button;
+    return inner;
   }
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipTrigger asChild>{inner}</TooltipTrigger>
       <TooltipContent>
         This conversation&apos;s worker doesn&apos;t support web search. Start a
         new conversation to enable it.
