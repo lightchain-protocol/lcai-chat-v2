@@ -22,6 +22,15 @@ export type OnChainJob = {
   submittedAt: number;
   completedAt: number;
   deadline: number;
+  /**
+   * Settlement commitments. Without these the client cannot check that the
+   * answer it rendered is the answer the chain was told about.
+   */
+  promptBlobHash: `0x${string}`;
+  responseBlobHash: `0x${string}`;
+  responseCiphertextHash: `0x${string}`;
+  submitBlockNumber: number;
+  completionBlockNumber: number;
 };
 
 import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
@@ -842,7 +851,61 @@ export class SessionManager {
       submittedAt: Number(job.submittedAt),
       completedAt: Number(job.completedAt),
       deadline: Number(job.deadline),
+      promptBlobHash: job.promptBlobHash,
+      responseBlobHash: job.responseBlobHash,
+      responseCiphertextHash: job.responseCiphertextHash,
+      submitBlockNumber: Number(job.submitBlockNumber),
+      completionBlockNumber: Number(job.completionBlockNumber),
     };
+  }
+
+  /**
+   * Reads the stake bonded behind a worker — what a successful dispute
+   * slashes, i.e. the concrete measure of how much an answer is backed by.
+   */
+  async getWorkerStake(worker: string): Promise<bigint> {
+    return await this.publicClient.readContract({
+      address: this.workerRegistryAddress,
+      abi: workerRegistryAbi,
+      functionName: "getWorkerStake",
+      args: [worker as `0x${string}`],
+    });
+  }
+
+  /**
+   * Bond-free cryptographic dispute: submits the received ciphertext and the
+   * worker's signature; the contract slashes the worker when
+   * keccak256(ciphertext) differs from the committed responseCiphertextHash.
+   * Callable only within the live page session that received the answer —
+   * the ciphertext is never persisted.
+   */
+  async disputeResponseMismatch(args: {
+    jobId: number;
+    ciphertext: Uint8Array;
+    signature: `0x${string}`;
+  }): Promise<{ txHash: string }> {
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const callParams = {
+      account,
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "disputeResponseMismatch",
+      args: [BigInt(args.jobId), toHex(args.ciphertext), args.signature],
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
+      gas: (gasEstimate * 120n) / 100n,
+    });
+    const hash = await this.walletClient.writeContract(request);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`disputeResponseMismatch TX reverted (tx ${hash})`);
+    }
+    return { txHash: hash };
   }
 
   /**

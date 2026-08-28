@@ -4,6 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
+import { Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -22,6 +23,7 @@ import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
 import { useModels } from "@/hooks/use-models";
+import { type Availability, availabilityOf } from "@/lib/ai/availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
@@ -72,6 +74,8 @@ function PureMultimodalInput({
   disabled,
   disabledPlaceholder,
   onBeforeSubmit,
+  memoryActive,
+  onOpenMemory,
 }: {
   chatId: string;
   input: string;
@@ -94,6 +98,12 @@ function PureMultimodalInput({
   disabled?: boolean;
   disabledPlaceholder?: string;
   onBeforeSubmit?: () => boolean;
+  /**
+   * Device-local memory (lib/memory.ts) is enabled and has entries shaping
+   * prompts. Indicator only — click opens the memory dialog (chat.tsx).
+   */
+  memoryActive?: boolean;
+  onOpenMemory?: () => void;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -357,13 +367,32 @@ function PureMultimodalInput({
               onToggle={onWebSearchToggle}
               searchCapable={searchCapable ?? false}
             />
+            {memoryActive && (
+              <Button
+                aria-label="Memory is active"
+                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+                data-testid="memory-active-indicator"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpenMemory?.();
+                }}
+                title="Memory is on — your saved notes shape prompts on this device only (nothing is shared with other devices)"
+                type="button"
+                variant="ghost"
+              >
+                <Brain className="size-4 text-primary" />
+                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
+                  Memory
+                </span>
+              </Button>
+            )}
             <ModelSelectorCompact
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
             />
           </PromptInputTools>
 
-          {status === "submitted" ? (
+          {status === "submitted" || status === "streaming" ? (
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
             <PromptInputSubmit
@@ -421,6 +450,9 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
+      return false;
+    }
+    if (prevProps.memoryActive !== nextProps.memoryActive) {
       return false;
     }
 
@@ -541,9 +573,12 @@ function PureModelSelectorCompact({
               key={model.id}
               value={model.id}
             >
-              <h6 className="mb-0.5 truncate font-medium text-xs">
-                {model.name}
-              </h6>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <AvailabilityDot modelId={model.id} />
+                <h6 className="mb-0.5 truncate font-medium text-xs">
+                  {model.name}
+                </h6>
+              </span>
             </SelectItem>
           ))}
         </div>
@@ -577,3 +612,41 @@ function PureStopButton({
 }
 
 const StopButton = memo(PureStopButton);
+
+const AVAILABILITY_STYLES: Record<
+  Availability,
+  { className: string; title: string }
+> = {
+  good: {
+    className: "bg-emerald-500",
+    title:
+      "Recent jobs on this model completed — device-local signal from your last few jobs, not a fleet-wide measurement",
+  },
+  shaky: {
+    className: "bg-amber-500",
+    title:
+      "A recent job on this model failed or timed out — device-local signal from your last few jobs, not a fleet-wide measurement",
+  },
+  unknown: {
+    className: "bg-content-subtle/30",
+    title: "No recent jobs on this model from this device yet",
+  },
+};
+
+/** Small per-row availability dot (lib/ai/availability.ts — device-local). */
+function AvailabilityDot({ modelId }: { modelId: string }) {
+  const availability = availabilityOf(modelId);
+  const style = AVAILABILITY_STYLES[availability];
+  return (
+    <span
+      aria-label={`availability: ${availability}`}
+      className={cn(
+        "inline-block size-1.5 shrink-0 rounded-full",
+        style.className
+      )}
+      data-testid={`availability-dot-${availability}`}
+      role="img"
+      title={style.title}
+    />
+  );
+}
