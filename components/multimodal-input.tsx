@@ -4,7 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Brain } from "lucide-react";
+import { Brain, Globe } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -47,7 +47,6 @@ import {
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
 import type { VisibilityType } from "./visibility-selector";
@@ -460,6 +459,14 @@ export const MultimodalInput = memo(
   }
 );
 
+/**
+ * Per-message web-search control. Devnet resolves search on the bound worker,
+ * so it is a two-state on/off gated on the worker advertising a "search"
+ * capability (searchCapable) — not the three-state browser-side intent from
+ * phase1. The presentation follows phase1's Globe button: an icon that dims
+ * when off and a state pill, replacing the old Switch, while the underlying
+ * boolean + capability wiring stays devnet's.
+ */
 function WebSearchToggle({
   enabled,
   onToggle,
@@ -469,25 +476,55 @@ function WebSearchToggle({
   onToggle?: (enabled: boolean) => void;
   searchCapable: boolean;
 }) {
-  const inner = (
-    <div className="flex items-center gap-2 px-1 py-1">
-      <Switch
-        checked={searchCapable ? enabled : false}
-        className="rounded-full!"
-        disabled={!searchCapable}
-        onCheckedChange={searchCapable ? onToggle : undefined}
-      />
-      <span className="text-content-secondary text-sm">Web Search</span>
-    </div>
+  const on = searchCapable && enabled;
+  const button = (
+    <Button
+      aria-disabled={!searchCapable}
+      aria-label="Toggle web search"
+      aria-pressed={on}
+      className={cn(
+        "h-8 gap-1.5 rounded-lg px-2 font-normal text-sm",
+        !searchCapable && "cursor-not-allowed opacity-50"
+      )}
+      data-testid="web-search-toggle"
+      onClick={(event) => {
+        event.preventDefault();
+        if (searchCapable) {
+          onToggle?.(!enabled);
+        }
+      }}
+      title={
+        searchCapable
+          ? on
+            ? "Web search: On — every prompt is searched. Click to turn off."
+            : "Web search: Off — click to search every prompt."
+          : "This conversation's worker doesn't support web search. Start a new conversation to enable it."
+      }
+      type="button"
+      variant="ghost"
+    >
+      <Globe className={cn("size-4", !on && "opacity-40")} />
+      <span className="text-content-secondary">Web Search</span>
+      <span
+        className={cn(
+          "rounded px-1.5 py-0.5 text-xs",
+          on
+            ? "bg-primary/10 text-primary"
+            : "text-content-secondary opacity-60"
+        )}
+      >
+        {on ? "On" : "Off"}
+      </span>
+    </Button>
   );
 
   if (searchCapable) {
-    return inner;
+    return button;
   }
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{inner}</TooltipTrigger>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent>
         This conversation&apos;s worker doesn&apos;t support web search. Start a
         new conversation to enable it.
