@@ -69,8 +69,8 @@ function PureMultimodalInput({
   selectedModelId,
   onModelChange,
   usage,
-  enableWebSearch,
-  onWebSearchToggle,
+  webSearchMode,
+  onWebSearchModeChange,
   searchCapable,
   disabled,
   disabledPlaceholder,
@@ -93,8 +93,8 @@ function PureMultimodalInput({
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   usage?: AppUsage;
-  enableWebSearch?: boolean;
-  onWebSearchToggle?: (enabled: boolean) => void;
+  webSearchMode?: WebSearchMode;
+  onWebSearchModeChange?: (mode: WebSearchMode) => void;
   searchCapable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string;
@@ -364,8 +364,8 @@ function PureMultimodalInput({
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
             <WebSearchToggle
-              enabled={enableWebSearch ?? false}
-              onToggle={onWebSearchToggle}
+              mode={webSearchMode ?? DEFAULT_WEB_SEARCH_MODE}
+              onModeChange={onWebSearchModeChange}
               searchCapable={searchCapable ?? false}
             />
             {memoryActive && (
@@ -441,7 +441,7 @@ export const MultimodalInput = memo(
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
       return false;
     }
-    if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
+    if (prevProps.webSearchMode !== nextProps.webSearchMode) {
       return false;
     }
     if (prevProps.searchCapable !== nextProps.searchCapable) {
@@ -462,60 +462,74 @@ export const MultimodalInput = memo(
 );
 
 /**
- * Per-message web-search control. Devnet resolves search on the bound worker,
- * so it is a two-state on/off gated on the worker advertising a "search"
- * capability (searchCapable) — not the three-state browser-side intent from
- * phase1. The presentation follows phase1's Globe button: an icon that dims
- * when off and a state pill, replacing the old Switch, while the underlying
- * boolean + capability wiring stays devnet's.
+ * Per-message web-search control — phase1's three-state Globe cycle
+ * (Off → On → Auto → Off), wired to devnet's boolean search opt-in.
+ *
+ * Devnet has no browser-side search-intent resolver, so "Auto" and "On" both
+ * enable search on the bound worker; only "Off" disables it — the parent
+ * computes `enableWebSearch = mode !== "off"`. The worker-capability gate is
+ * preserved: when the bound worker can't search the control is locked and a
+ * tooltip explains why, rather than cycling a mode that can't take effect.
  */
+export type WebSearchMode = "auto" | "on" | "off";
+const DEFAULT_WEB_SEARCH_MODE: WebSearchMode = "auto";
+const WEB_SEARCH_LABELS: Record<WebSearchMode, string> = {
+  auto: "Auto",
+  on: "On",
+  off: "Off",
+};
+const WEB_SEARCH_TITLES: Record<WebSearchMode, string> = {
+  auto: "Web search: Auto — runs when the question needs current information. Click to always search.",
+  on: "Web search: On — every prompt is searched. Click to never search.",
+  off: "Web search: Off — never searches. Click to go back to Auto.",
+};
+const NEXT_WEB_SEARCH_MODE: Record<WebSearchMode, WebSearchMode> = {
+  auto: "on",
+  on: "off",
+  off: "auto",
+};
+
 function WebSearchToggle({
-  enabled,
-  onToggle,
+  mode,
+  onModeChange,
   searchCapable,
 }: {
-  enabled: boolean;
-  onToggle?: (enabled: boolean) => void;
+  mode: WebSearchMode;
+  onModeChange?: (mode: WebSearchMode) => void;
   searchCapable: boolean;
 }) {
-  const on = searchCapable && enabled;
   const button = (
     <Button
       aria-disabled={!searchCapable}
-      aria-label="Toggle web search"
-      aria-pressed={on}
       className={cn(
         "h-8 gap-1.5 rounded-lg px-2 font-normal text-sm",
         !searchCapable && "cursor-not-allowed opacity-50"
       )}
       data-testid="web-search-toggle"
-      onClick={(event) => {
-        event.preventDefault();
+      onClick={() => {
         if (searchCapable) {
-          onToggle?.(!enabled);
+          onModeChange?.(NEXT_WEB_SEARCH_MODE[mode]);
         }
       }}
       title={
         searchCapable
-          ? on
-            ? "Web search: On — every prompt is searched. Click to turn off."
-            : "Web search: Off — click to search every prompt."
+          ? WEB_SEARCH_TITLES[mode]
           : "This conversation's worker doesn't support web search. Start a new conversation to enable it."
       }
       type="button"
       variant="ghost"
     >
-      <Globe className={cn("size-4", !on && "opacity-40")} />
+      <Globe className={cn("size-4", mode === "off" && "opacity-40")} />
       <span className="text-content-secondary">Web Search</span>
       <span
         className={cn(
           "rounded px-1.5 py-0.5 text-xs",
-          on
-            ? "bg-primary/10 text-primary"
-            : "text-content-secondary opacity-60"
+          mode === "on" && "bg-primary/10 text-primary",
+          mode === "auto" && "bg-muted text-content-secondary",
+          mode === "off" && "text-content-secondary opacity-60"
         )}
       >
-        {on ? "On" : "Off"}
+        {WEB_SEARCH_LABELS[mode]}
       </span>
     </Button>
   );
