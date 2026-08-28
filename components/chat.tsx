@@ -17,6 +17,7 @@ import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useModels } from "@/hooks/use-models";
+import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
@@ -107,6 +108,28 @@ function noWorkerAvailableMessage(error: unknown): string | undefined {
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
+/**
+ * The live model with the most eligible workers. Iterating in live-list
+ * order and switching only on a strictly-greater count makes ties stable —
+ * the first model among the max wins. Falls back to the first model when no
+ * count is known yet, so callers always get a concrete choice.
+ */
+function pickModelWithMostWorkers(
+  models: { id: string; name: string }[],
+  counts: Record<string, number>
+): { id: string; name: string } {
+  let best = models[0];
+  let bestCount = counts[best.id] ?? 0;
+  for (const model of models) {
+    const count = counts[model.id] ?? 0;
+    if (count > bestCount) {
+      best = model;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 export function Chat({
   id,
   initialMessages,
@@ -140,6 +163,12 @@ export function Chat({
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  // True once the user explicitly picks a model in this session, so the
+  // "most workers" default below stops overriding their choice.
+  const userPickedModelRef = useRef(false);
+  // The most-workers default is applied at most once per session (after the
+  // first time worker counts are known) so it can't thrash the selection.
+  const appliedWorkerDefaultRef = useRef(false);
   // The model id of the in-flight send, recorded into the device-local
   // availability heuristic on finish/error.
   const lastSentModelRef = useRef<string | null>(null);
@@ -150,6 +179,13 @@ export function Chat({
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
   const { models: availableModels } = useModels();
+  // Live per-model worker count (WorkerRegistry.getEligibleWorkers). Drives
+  // the "default to the model with the most active workers" behaviour below.
+  const workerCountModelIds = useMemo(
+    () => availableModels.map((model) => model.id),
+    [availableModels]
+  );
+  const { counts: workerCounts } = useWorkerCounts(workerCountModelIds);
   // Ref so the protocol fetch wrapper can name the serving model without
   // re-creating the transport whenever the live model list refreshes.
   const availableModelsRef = useRef(availableModels);
@@ -160,15 +196,48 @@ export function Chat({
     if (availableModels.length === 0) {
       return;
     }
-    if (availableModels.some((model) => model.id === currentModelId)) {
+
+    const currentIsAvailable = availableModels.some(
+      (model) => model.id === currentModelId
+    );
+    const countsKnown = Object.keys(workerCounts).length > 0;
+
+    // Current model isn't in the live list at all — pick something usable now
+    // so the picker never shows "Select model". Prefer the most-workers model
+    // once counts are known, otherwise the legacy name/first-in-list default.
+    if (!currentIsAvailable) {
+      const fallback = countsKnown
+        ? pickModelWithMostWorkers(availableModels, workerCounts)
+        : (availableModels.find(
+            (model) => model.name === DEFAULT_CHAT_MODEL
+          ) ?? availableModels[0]);
+      setCurrentModelId(fallback.id);
+      void saveChatModelAsCookie(fallback.id);
       return;
     }
-    const fallback =
-      availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
-      availableModels[0];
-    setCurrentModelId(fallback.id);
-    void saveChatModelAsCookie(fallback.id);
-  }, [availableModels, currentModelId]);
+
+    // The current model is in the live list. Respect an explicit in-session
+    // pick, and only apply the most-workers default once (and once counts are
+    // known) so a provisional cookie default doesn't thrash while loading.
+    if (userPickedModelRef.current || appliedWorkerDefaultRef.current) {
+      return;
+    }
+    if (!countsKnown) {
+      return;
+    }
+
+    appliedWorkerDefaultRef.current = true;
+
+    const best = pickModelWithMostWorkers(availableModels, workerCounts);
+    const bestCount = workerCounts[best.id] ?? 0;
+    const currentCount = workerCounts[currentModelId] ?? 0;
+    // Switch only to a strictly better model, so the persisted cookie choice is
+    // kept whenever it already ties for the most workers.
+    if (best.id !== currentModelId && bestCount > currentCount) {
+      setCurrentModelId(best.id);
+      void saveChatModelAsCookie(best.id);
+    }
+  }, [availableModels, currentModelId, workerCounts]);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
@@ -409,6 +478,13 @@ export function Chat({
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  // Wraps the picker's change so an explicit pick is remembered for the
+  // session; cookie persistence still happens inside the picker itself.
+  const handleModelChange = useCallback((modelId: string) => {
+    userPickedModelRef.current = true;
+    setCurrentModelId(modelId);
+  }, []);
 
   useEffect(() => {
     systemPromptRef.current = systemPrompt;
@@ -714,7 +790,7 @@ export function Chat({
               }
               messages={messages}
               onBeforeSubmit={canPrompt}
-              onModelChange={setCurrentModelId}
+              onModelChange={handleModelChange}
               onOpenMemory={() => setMemoryDialogOpen(true)}
               webSearchMode={webSearchMode}
               searchCapable={searchCapable}
