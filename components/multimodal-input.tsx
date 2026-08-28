@@ -15,6 +15,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -572,19 +573,36 @@ function PureModelSelectorCompact({
 }) {
   const { models } = useModels();
   const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     setOptimisticModelId(selectedModelId);
   }, [selectedModelId]);
 
-  const selectedModel = models.find(
-    (model) => model.id === optimisticModelId
-  );
+  const selectedModel = models.find((model) => model.id === optimisticModelId);
+
+  // The live list only carries the models a worker is currently serving, so a
+  // filter only earns its space once that list is long enough to scan.
+  const showSearch = models.length > MODEL_SEARCH_THRESHOLD;
+
+  const filteredModels = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) {
+      return models;
+    }
+    return models.filter((model) => model.name.toLowerCase().includes(needle));
+  }, [models, query]);
 
   return (
     <PromptInputModelSelect
+      onOpenChange={(next) => {
+        if (!next) {
+          setQuery("");
+        }
+      }}
       onValueChange={(modelId) => {
         setOptimisticModelId(modelId);
+        setQuery("");
         onModelChange?.(modelId);
         startTransition(() => {
           saveChatModelAsCookie(modelId);
@@ -596,20 +614,39 @@ function PureModelSelectorCompact({
         className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
         type="button"
       >
-        <CpuIcon size={16} />
+        {selectedModel ? (
+          <AvailabilityDot modelId={selectedModel.id} />
+        ) : (
+          <CpuIcon size={16} />
+        )}
         <span className="hidden font-medium text-xs sm:block">
           {selectedModel?.name ?? "Select model"}
         </span>
         <ChevronDownIcon size={16} />
       </Trigger>
       <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
-        <div className="flex flex-col gap-px">
-          {models.map((model) => (
-            <SelectItem
-              className="rounded-lg"
-              key={model.id}
-              value={model.id}
-            >
+        {showSearch && (
+          <div className="border-bdr-light border-b p-1.5">
+            <input
+              className="w-full rounded-md bg-surface-base-faint px-2 py-1 text-xs outline-none placeholder:text-content-subtle"
+              onChange={(event) => setQuery(event.target.value)}
+              // The select's typeahead would otherwise swallow every keystroke.
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder="Search models"
+              value={query}
+            />
+          </div>
+        )}
+        <div className="flex max-h-[320px] flex-col gap-px overflow-y-auto p-1">
+          {filteredModels.length === 0 && (
+            <p className="px-2 py-3 text-center text-content-subtle text-xs">
+              {models.length === 0
+                ? "No models available"
+                : `No model matches “${query}”`}
+            </p>
+          )}
+          {filteredModels.map((model) => (
+            <SelectItem className="rounded-lg" key={model.id} value={model.id}>
               <span className="flex min-w-0 items-center gap-1.5">
                 <AvailabilityDot modelId={model.id} />
                 <h6 className="mb-0.5 truncate font-medium text-xs">
@@ -623,6 +660,9 @@ function PureModelSelectorCompact({
     </PromptInputModelSelect>
   );
 }
+
+/** Above this many live models the picker grows a name filter. */
+const MODEL_SEARCH_THRESHOLD = 6;
 
 const ModelSelectorCompact = memo(PureModelSelectorCompact);
 
