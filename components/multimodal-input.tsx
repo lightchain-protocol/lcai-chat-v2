@@ -24,6 +24,7 @@ import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { SelectItem } from "@/components/ui/select";
 import { useModels } from "@/hooks/use-models";
+import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { type Availability, availabilityOf } from "@/lib/ai/availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -581,6 +582,13 @@ function PureModelSelectorCompact({
 
   const selectedModel = models.find((model) => model.id === optimisticModelId);
 
+  // Live per-model worker count from the WorkerRegistry. A model with a
+  // known count of 0 is not claimable, so its row is disabled; while the
+  // count is still unknown (loading or a failed read) the row stays
+  // selectable rather than being greyed on a guess.
+  const modelIds = useMemo(() => models.map((model) => model.id), [models]);
+  const { counts } = useWorkerCounts(modelIds);
+
   // The live list only carries the models a worker is currently serving, so a
   // filter only earns its space once that list is long enough to scan.
   const showSearch = models.length > MODEL_SEARCH_THRESHOLD;
@@ -645,16 +653,41 @@ function PureModelSelectorCompact({
                 : `No model matches “${query}”`}
             </p>
           )}
-          {filteredModels.map((model) => (
-            <SelectItem className="rounded-lg" key={model.id} value={model.id}>
-              <span className="flex min-w-0 items-center gap-1.5">
-                <AvailabilityDot modelId={model.id} />
-                <h6 className="mb-0.5 truncate font-medium text-xs">
-                  {model.name}
-                </h6>
-              </span>
-            </SelectItem>
-          ))}
+          {filteredModels.map((model) => {
+            const workerCount = counts[model.id];
+            // Only a *known* zero disables — unknown (loading/failed) stays on.
+            const disabled = workerCount === 0;
+
+            return (
+              <SelectItem
+                className="rounded-lg"
+                disabled={disabled}
+                key={model.id}
+                value={model.id}
+              >
+                <span className="flex w-full min-w-0 items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <AvailabilityDot modelId={model.id} />
+                    <h6 className="mb-0.5 truncate font-medium text-xs">
+                      {model.name}
+                    </h6>
+                  </span>
+                  {workerCount !== undefined && (
+                    <span
+                      className={cn(
+                        "ml-auto shrink-0 text-[10px]",
+                        workerCount === 0
+                          ? "text-red-500"
+                          : "text-content-subtle"
+                      )}
+                    >
+                      {workerCountLabel(workerCount)}
+                    </span>
+                  )}
+                </span>
+              </SelectItem>
+            );
+          })}
         </div>
       </PromptInputModelSelectContent>
     </PromptInputModelSelect>
@@ -663,6 +696,14 @@ function PureModelSelectorCompact({
 
 /** Above this many live models the picker grows a name filter. */
 const MODEL_SEARCH_THRESHOLD = 6;
+
+/** Subtle worker-count label for a picker row. 0 reads as "No workers". */
+function workerCountLabel(count: number): string {
+  if (count === 0) {
+    return "No workers";
+  }
+  return `${count} ${count === 1 ? "worker" : "workers"}`;
+}
 
 const ModelSelectorCompact = memo(PureModelSelectorCompact);
 
