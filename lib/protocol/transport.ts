@@ -79,6 +79,18 @@ const MAX_MISMATCH_EVIDENCE = 50;
 const SPEECH_SYNTHESIS_DEADLINE_MS = 180_000;
 
 /**
+ * How long a one-off speech job waits for its relay socket to finish the
+ * authenticated handshake before giving up. The relay registers a connection
+ * for a session only once its per-session token authenticates on WS open, and
+ * it routes a worker's response to that session solely by the connections it
+ * has registered — a frame published before the socket is live is dropped, not
+ * queued. The normal chat path is masked from this by wallet-signature and
+ * blob-upload latency; a fast delegated TTS submit is not, so this job must
+ * wait for the socket to be genuinely connected before it submits.
+ */
+const RELAY_CONNECT_DEADLINE_MS = 20_000;
+
+/**
  * A response stream whose relay subscription is wired up independently of the
  * submit call, so frames can be consumed before a jobId exists.
  */
@@ -641,6 +653,13 @@ export class ProtocolTransport {
       throw new Error("Relay client not connected");
     }
 
+    // Wait for the socket to actually finish its authenticated handshake before
+    // submitting. Until the relay has registered this session's connection it
+    // has nowhere to route the worker's response and drops it — the root cause
+    // of the button spinning while the job settled fine server-side.
+    this.setProgressStatus("waiting_for_relay");
+    await this.waitForRelayConnected(relayClient, { signal: opts?.signal });
+
     return await new Promise<Uint8Array>((resolve, reject) => {
       let settled = false;
       let unsubscribe: (() => void) | null = null;
@@ -940,6 +959,45 @@ export class ProtocolTransport {
     this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
     this.relayClient.onReconnect(() => this.handleReconnect());
     this.relayClient.connect();
+  }
+
+  /**
+   * Resolves once the relay socket has reached "connected" — i.e. the WS
+   * handshake completed and the per-session token authenticated, at which point
+   * the relay has registered a connection for this session and will route its
+   * responses. `connect()` only *starts* the handshake, so callers that submit
+   * immediately (a fast delegated job) must await this first or race the
+   * worker's publish. A transient mid-handshake close is tolerated — the client
+   * auto-reconnects, so this keeps waiting until the deadline rather than
+   * failing on a blip.
+   */
+  private waitForRelayConnected(
+    relayClient: RelayClient,
+    opts?: { signal?: AbortSignal; timeoutMs?: number }
+  ): Promise<void> {
+    if (relayClient.getStatus() === "connected") {
+      return Promise.resolve();
+    }
+    const deadline =
+      Date.now() + (opts?.timeoutMs ?? RELAY_CONNECT_DEADLINE_MS);
+    return new Promise<void>((resolve, reject) => {
+      const check = () => {
+        if (opts?.signal?.aborted) {
+          reject(new DOMException("Speech synthesis cancelled", "AbortError"));
+          return;
+        }
+        if (relayClient.getStatus() === "connected") {
+          resolve();
+          return;
+        }
+        if (Date.now() > deadline) {
+          reject(new Error("Timed out connecting to the relay"));
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      setTimeout(check, 50);
+    });
   }
 
   private setProgressStatus(status: ProtocolLoadingStatus) {

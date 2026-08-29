@@ -66,9 +66,23 @@ export function PureMessageActions({
     }
     try {
       await tts.speak(textFromParts);
-    } catch {
+    } catch (err) {
+      const timedOut =
+        err instanceof Error && err.message.toLowerCase().includes("timed out");
       toast.custom((toastId) => (
-        <AlertError id={toastId} title="Couldn't read this message aloud." />
+        <AlertError
+          description={
+            timedOut
+              ? "The audio didn't arrive in time. Please try again."
+              : undefined
+          }
+          id={toastId}
+          title={
+            timedOut
+              ? "Read aloud timed out"
+              : "Couldn't read this message aloud."
+          }
+        />
       ));
     }
   };
