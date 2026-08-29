@@ -17,6 +17,7 @@ import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
 import { PreviewMessage, ThinkingMessage } from "./message";
+import { PipelineTimeline } from "./pipeline-timeline";
 
 type MessagesProps = {
   chatId: string;
@@ -102,6 +103,11 @@ function PureMessages({
         part.text?.trim().length > 0
     );
   const showThinking = status === "submitted" || awaitingFirstToken;
+  const live = status === "submitted" || status === "streaming";
+  // In protocol mode the on-chain pipeline timeline replaces the single
+  // "Finding a worker…" line and carries the status itself.
+  const protocolActive =
+    !!protocolProgressStatus && protocolProgressStatus !== "idle";
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -210,8 +216,18 @@ function PureMessages({
             return renderPreview(message, index);
           })}
 
+          {protocolActive && (
+            <PipelineTimeline
+              activeJobs={activeJobs}
+              chatId={chatId}
+              explorerBaseUrl={explorerBaseUrl}
+              live={live}
+              progressStatus={protocolProgressStatus as ProtocolLoadingStatus}
+            />
+          )}
+
           <AnimatePresence mode="wait">
-            {showThinking && (
+            {showThinking && !protocolActive && (
               <ThinkingMessage
                 key="thinking"
                 label={
