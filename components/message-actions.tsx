@@ -4,13 +4,16 @@ import {
   CopyCheck,
   Loader,
   RefreshCw,
+  Square,
   ThumbsDown,
   ThumbsUp,
+  Volume2,
 } from "lucide-react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
+import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import type { ChatMessage } from "@/lib/types";
@@ -54,6 +57,22 @@ export function PureMessageActions({
     setTimeout(() => setCopied(false), 1200);
   };
 
+  // Read-aloud: synthesizes the message as speech via a one-off protocol job
+  // on the TTS model and plays the returned MP3. Never added to the thread.
+  const tts = useTextToSpeech();
+  const handleReadAloud = async () => {
+    if (!textFromParts) {
+      return;
+    }
+    try {
+      await tts.speak(textFromParts);
+    } catch {
+      toast.custom((toastId) => (
+        <AlertError id={toastId} title="Couldn't read this message aloud." />
+      ));
+    }
+  };
+
   if (isLoading) {
     return null;
   }
@@ -95,6 +114,29 @@ export function PureMessageActions({
     <Actions className="-ml-0.5">
       <Action onClick={handleCopy} tooltip="Copy">
         {copied ? <CopyCheck /> : <Copy />}
+      </Action>
+
+      <Action
+        data-testid="message-read-aloud"
+        // Spinner state is inert; the busy job either finishes or is cancelled
+        // by clicking again once it is playing.
+        disabled={!tts.isAvailable || tts.state === "synthesizing"}
+        onClick={handleReadAloud}
+        tooltip={
+          tts.isAvailable
+            ? tts.state === "playing"
+              ? "Stop"
+              : "Read aloud (submits a paid job)"
+            : "Connect a wallet to read messages aloud"
+        }
+      >
+        {tts.state === "synthesizing" ? (
+          <Loader className="animate-spin" />
+        ) : tts.state === "playing" ? (
+          <Square />
+        ) : (
+          <Volume2 />
+        )}
       </Action>
 
       {regenerate && (

@@ -17,7 +17,7 @@
 import { withMemoryPrefix } from "../memory";
 import type { ProtocolLoadingStatus } from "../types";
 import { parseArtifactDescriptor } from "./artifact";
-import { bytesToBase64 } from "./base64";
+import { base64ToBytes, bytesToBase64 } from "./base64";
 import type { GatewayClient } from "./gateway-client";
 import { isCompletedJobState } from "./job-state";
 import type {
@@ -69,6 +69,14 @@ const EMPTY_ANSWER_ERROR =
 
 /** Cap on retained mismatch evidence entries (FIFO eviction past this). */
 const MAX_MISMATCH_EVIDENCE = 50;
+
+/**
+ * Ceiling on how long a one-off speech-synthesis job may wait for its answer.
+ * Piper is fast, but the job still has to bind a worker and settle on-chain, so
+ * this mirrors the generous first-frame budget rather than a tight audio one —
+ * it exists only so a genuinely broken job can't leave the button spinning.
+ */
+const SPEECH_SYNTHESIS_DEADLINE_MS = 180_000;
 
 /**
  * A response stream whose relay subscription is wired up independently of the
@@ -593,6 +601,190 @@ export class ProtocolTransport {
         },
       }),
     };
+  }
+
+  /**
+   * One-off text-to-speech job. Submits `text` as an ordinary protocol job on
+   * this transport's model — a TTS model (tts-piper) returns base64-encoded MP3
+   * bytes as its response payload instead of text — waits for the settled
+   * answer, and returns the decoded MP3 bytes.
+   *
+   * Deliberately does NOT go through sendMessages(): that pipeline persists a
+   * user message and an assistant message to the chat database and drives the
+   * useChat stream. Read-aloud must leave no trace in the visible thread, so
+   * this drives the same session/submit/decrypt machinery directly and simply
+   * collects the response. The job is still a real, paid, on-chain job that
+   * settles and is verifiable like any other.
+   */
+  async synthesizeSpeech(
+    text: string,
+    opts?: { signal?: AbortSignal }
+  ): Promise<Uint8Array> {
+    const plaintext = text.trim();
+    if (!plaintext) {
+      throw new Error("No text to synthesize");
+    }
+
+    this.setProgressStatus("preparing_chat");
+    await this.sessionMgr.initialize();
+    this.ensureRelayConnected();
+
+    if (this.sessionMgr.status !== "ready") {
+      throw new Error("Session is not ready — cannot synthesize speech");
+    }
+    const sessionId = this.sessionMgr.sessionId;
+    if (sessionId === null) {
+      throw new Error("Session ID not available after initialization");
+    }
+    const relayClient = this.relayClient;
+    if (!relayClient) {
+      throw new Error("Relay client not connected");
+    }
+
+    return await new Promise<Uint8Array>((resolve, reject) => {
+      let settled = false;
+      let unsubscribe: (() => void) | null = null;
+      let streamed = "";
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+
+      const onAbort = () => {
+        finish(
+          undefined,
+          new DOMException("Speech synthesis cancelled", "AbortError")
+        );
+      };
+
+      function cleanup() {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        unsubscribe?.();
+        unsubscribe = null;
+        opts?.signal?.removeEventListener("abort", onAbort);
+      }
+
+      function finish(bytes?: Uint8Array, err?: unknown) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        if (err !== undefined) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        } else if (bytes) {
+          resolve(bytes);
+        } else {
+          reject(new Error("Speech synthesis produced no audio"));
+        }
+      }
+
+      const decode = (base64: string) => {
+        const trimmed = base64.trim();
+        if (!trimmed) {
+          finish(undefined, new Error("The worker returned no audio"));
+          return;
+        }
+        try {
+          finish(base64ToBytes(trimmed));
+        } catch (err) {
+          finish(undefined, err);
+        }
+      };
+
+      // Serialize frame handling: decryptResponse is async, so without an
+      // await-chain a quickly-decrypted frame could overtake an earlier one.
+      let chain: Promise<void> = Promise.resolve();
+      const handleFrame = (frame: WSFrame | WSErrorFrame) => {
+        chain = chain.then(async () => {
+          if (settled) {
+            return;
+          }
+          if (frame.type === "error") {
+            const errorFrame = frame as WSErrorFrame;
+            if (
+              errorFrame.code === "RATE_LIMITED" &&
+              errorFrame.droppedSeq > 0
+            ) {
+              return;
+            }
+            finish(
+              undefined,
+              new Error(errorFrame.message || UNSPECIFIED_RELAY_ERROR)
+            );
+            return;
+          }
+          const wsFrame = frame as WSFrame;
+          // Metadata frames (e.g. web-search sources) never carry audio.
+          if (wsFrame.type === "metadata" || !wsFrame.payload) {
+            if (wsFrame.type === "complete") {
+              decode(streamed);
+            }
+            return;
+          }
+          const decrypted = await this.sessionMgr.decryptResponse(
+            wsFrame.payload
+          );
+          // The terminal `complete` frame carries the full, authoritative
+          // answer (the base64 MP3). Chunk frames, if any, are accumulated as
+          // a fallback for a worker that only streams.
+          if (wsFrame.type === "complete") {
+            decode(decrypted || streamed);
+          } else {
+            streamed += decrypted;
+          }
+        });
+        chain.catch((err) => finish(undefined, err));
+      };
+
+      if (opts?.signal) {
+        if (opts.signal.aborted) {
+          finish(
+            undefined,
+            new DOMException("Speech synthesis cancelled", "AbortError")
+          );
+          return;
+        }
+        opts.signal.addEventListener("abort", onAbort);
+      }
+
+      timeout = setTimeout(
+        () => finish(undefined, new Error("Timed out waiting for speech")),
+        SPEECH_SYNTHESIS_DEADLINE_MS
+      );
+
+      // ORDER MATTERS: subscribe by session first, submit second — the same
+      // guarantee sendMessages() relies on, so a worker that answers before the
+      // submit call returns doesn't lose its frames. A dedicated TTS transport
+      // is used serially, so an unbound pending handler should never exist; if
+      // one somehow does, bail rather than orphan its frames.
+      if (relayClient.hasUnboundPendingJob(sessionId)) {
+        finish(
+          undefined,
+          new Error("Another synthesis is already in flight on this session")
+        );
+        return;
+      }
+      try {
+        unsubscribe = relayClient.onPendingJob(sessionId, handleFrame);
+      } catch (err) {
+        finish(undefined, err);
+        return;
+      }
+
+      this.setProgressStatus("submitting_job");
+      this.sessionMgr
+        .submitJob(plaintext)
+        .then((result) => {
+          const jobId = normalizeJobId(result.jobId);
+          // Converge the pending handler onto the authoritative jobId when
+          // wallet-mode submit returns one; delegated mode binds on first frame.
+          if (jobId !== null) {
+            relayClient.bindPendingJob(sessionId, jobId);
+          }
+        })
+        .catch((err) => finish(undefined, err));
+    });
   }
 
   /**
