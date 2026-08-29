@@ -637,28 +637,51 @@ export class ProtocolTransport {
       throw new Error("No text to synthesize");
     }
 
-    this.setProgressStatus("preparing_chat");
-    await this.sessionMgr.initialize();
-    this.ensureRelayConnected();
+    // Establish a session with a LIVE relay socket. A session (and its
+    // sessionStorage snapshot) outlives its short-lived relay token, so a
+    // restored/long-reused session can hand back an on-chain-valid session
+    // whose token has expired — connecting with it silently 401s and the
+    // worker's answer is never routed. So: initialize, re-mint the token, open
+    // a socket with it, and wait for the authenticated handshake. If any of
+    // that fails on a reused session, throw it away and build a fresh one once.
+    const establish = async (): Promise<RelayClient> => {
+      this.setProgressStatus("preparing_chat");
+      await this.sessionMgr.initialize();
+      if (this.sessionMgr.status !== "ready") {
+        throw new Error("Session is not ready — cannot synthesize speech");
+      }
+      if (this.sessionMgr.sessionId === null) {
+        throw new Error("Session ID not available after initialization");
+      }
+      this.setProgressStatus("waiting_for_relay");
+      await this.connectRelayWithFreshToken();
+      const client = this.relayClient;
+      if (!client) {
+        throw new Error("Relay client not connected");
+      }
+      await this.waitForRelayConnected(client, { signal: opts?.signal });
+      return client;
+    };
 
-    if (this.sessionMgr.status !== "ready") {
-      throw new Error("Session is not ready — cannot synthesize speech");
+    let relayClient: RelayClient;
+    try {
+      relayClient = await establish();
+    } catch (err) {
+      // An abort is the user's choice, not a stale session — don't burn a
+      // fresh-session retry (and a wallet TX in legacy mode) on it.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw err;
+      }
+      // The reused session was stale (dead worker, unmintable token, rejected
+      // socket). Drop it and its snapshot, then build one clean session.
+      this.startNewSession();
+      relayClient = await establish();
     }
+
     const sessionId = this.sessionMgr.sessionId;
     if (sessionId === null) {
       throw new Error("Session ID not available after initialization");
     }
-    const relayClient = this.relayClient;
-    if (!relayClient) {
-      throw new Error("Relay client not connected");
-    }
-
-    // Wait for the socket to actually finish its authenticated handshake before
-    // submitting. Until the relay has registered this session's connection it
-    // has nowhere to route the worker's response and drops it — the root cause
-    // of the button spinning while the job settled fine server-side.
-    this.setProgressStatus("waiting_for_relay");
-    await this.waitForRelayConnected(relayClient, { signal: opts?.signal });
 
     return await new Promise<Uint8Array>((resolve, reject) => {
       let settled = false;
@@ -951,6 +974,39 @@ export class ProtocolTransport {
         return;
       }
       // WebSocket is dead — reconnect.
+      this.relayClient.disconnect();
+      this.relayClient = null;
+    }
+
+    this.relayClient = new RelayClient(relayUrl, relayToken);
+    this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
+    this.relayClient.onReconnect(() => this.handleReconnect());
+    this.relayClient.connect();
+  }
+
+  /**
+   * Tears down any existing relay socket and opens a new one authenticated with
+   * a freshly-minted relay token for the active session.
+   *
+   * `ensureRelayConnected` deliberately reuses a live socket and whatever token
+   * it already holds — correct for a long chat session that keeps the same
+   * connection warm. A one-off speech job is the opposite case: the session
+   * (and its token) may have been restored from a previous page load or reused
+   * for many minutes, so the held token can be expired. Reconnecting with a
+   * stale token silently 401s at the relay and the response is never routed, so
+   * this re-mints the token (the same acquisition `initialize` uses) and binds
+   * the new socket to it before anything is submitted.
+   */
+  private async connectRelayWithFreshToken(): Promise<void> {
+    await this.sessionMgr.refreshRelayToken();
+
+    const relayUrl = this.sessionMgr.getRelayUrl();
+    const relayToken = this.sessionMgr.relayToken;
+    if (!relayUrl || !relayToken) {
+      throw new Error("Relay URL or token not available");
+    }
+
+    if (this.relayClient) {
       this.relayClient.disconnect();
       this.relayClient = null;
     }
