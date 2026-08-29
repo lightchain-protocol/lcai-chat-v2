@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { useAppKit } from "@reown/appkit/react";
 import { type DataUIPart, DefaultChatTransport } from "ai";
+import { Columns } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,17 +11,17 @@ import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { useAccount, useBalance } from "wagmi";
+import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
-import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useModels } from "@/hooks/use-models";
-import { useWorkerCounts } from "@/hooks/use-worker-counts";
+import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
-import { saveChatModelAsCookie } from "@/app/(chat)/actions";
+import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { recordModelOutcome } from "@/lib/ai/availability";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import {
@@ -34,12 +35,6 @@ import {
 } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
-import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
-import { NoWorkerAvailableError } from "@/lib/protocol/session";
-import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
-import type { AppUsage } from "@/lib/usage";
-import { parseWeb3Error } from "@/lib/utils/web3-errors";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import {
   addMemoryEntry,
   EMPTY_MEMORY_STORE,
@@ -49,6 +44,13 @@ import {
   removeMemoryEntry,
   saveMemoryStore,
 } from "@/lib/memory";
+import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import { NoWorkerAvailableError } from "@/lib/protocol/session";
+import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
+import type { AppUsage } from "@/lib/usage";
+import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
+import { CompareView } from "./compare-view";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { MemoryDialog } from "./memory-dialog";
@@ -103,7 +105,7 @@ function noWorkerAvailableMessage(error: unknown): string | undefined {
   if (error instanceof Error && error.cause instanceof NoWorkerAvailableError) {
     return error.cause.message || undefined;
   }
-  return undefined;
+  return;
 }
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
@@ -208,9 +210,8 @@ export function Chat({
     if (!currentIsAvailable) {
       const fallback = countsKnown
         ? pickModelWithMostWorkers(availableModels, workerCounts)
-        : (availableModels.find(
-            (model) => model.name === DEFAULT_CHAT_MODEL
-          ) ?? availableModels[0]);
+        : (availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
+          availableModels[0]);
       setCurrentModelId(fallback.id);
       void saveChatModelAsCookie(fallback.id);
       return;
@@ -241,12 +242,17 @@ export function Chat({
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
   const [enableWebSearch, setEnableWebSearch] = useState(false);
   const enableWebSearchRef = useRef(enableWebSearch);
+
+  // Compare mode — an additive, separate flow (protocol mode only). When on,
+  // the normal single-model chat body is swapped for the side-by-side compare
+  // view; nothing about the single-model path changes.
+  const [compareMode, setCompareMode] = useState(false);
   const { walletClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
@@ -457,14 +463,14 @@ export function Chat({
       });
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -510,7 +516,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -530,7 +536,7 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
@@ -575,9 +581,7 @@ export function Chat({
         const message =
           noWorkerAvailableMessage(error) ??
           "No worker available right now — please try again.";
-        toast.custom((errorId) => (
-          <AlertError id={errorId} title={message} />
-        ));
+        toast.custom((errorId) => <AlertError id={errorId} title={message} />);
         return;
       }
 
@@ -617,7 +621,12 @@ export function Chat({
         return;
       }
       const now = new Date().toISOString();
-      const next = forkAt(branchStore, anchorId, messages.slice(index + 1), now);
+      const next = forkAt(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
       setBranchStore(next);
       saveBranchStore(id, next);
       setMessages(messages.slice(0, index + 1));
@@ -656,7 +665,12 @@ export function Chat({
         return;
       }
       const now = new Date().toISOString();
-      const next = addBranch(branchStore, anchorId, messages.slice(index + 1), now);
+      const next = addBranch(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
       setBranchStore(next);
       saveBranchStore(id, next);
       setMessages(messages.slice(0, index + 1));
@@ -687,7 +701,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    fetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -717,92 +731,122 @@ export function Chat({
           systemPromptId={systemPromptId}
         />
 
-        <UsageWarningBanner
-          className="mx-6 mt-4"
-          subscriptionTier="basic"
-          totalTokens={usage?.totalTokens ?? 0}
-        />
-
-        {sessionRecovering && (
-          <SessionRecoveryBanner
-            className="mb-2"
-            failoverStatus={failoverStatus}
-            onNewSession={startNewSession}
-            onRetry={retryFailover}
-          />
-        )}
-
-        <Messages
-          activeJobs={activeJobs}
-          branchStore={isReadonly ? undefined : branchStore}
-          chatId={id}
-          claimJobTimeout={claimJobTimeout}
-          disputeJob={disputeJob}
-          disputeResponseMismatch={disputeResponseMismatch}
-          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
-          fetchOnChainJob={fetchOnChainJob}
-          fetchWorkerStake={fetchWorkerStake}
-          hasMismatchEvidence={hasMismatchEvidence}
-          isArtifactVisible={false}
-          isReadonly={isReadonly}
-          messages={messages}
-          onAddBranch={isReadonly ? undefined : handleAddBranch}
-          onFork={isReadonly ? undefined : handleFork}
-          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
-          protocolProgressStatus={progressStatus}
-          regenerate={regenerate}
-          selectedModelId={initialChatModel}
-          setMessages={setMessages}
-          status={status}
-          votes={votes}
-        />
-
-        {!isReadonly && messages.length > 0 && (
-          <div className="flex justify-end px-4 pt-1">
-            <ShareTranscriptButton
-              chatId={id}
-              getShareEvidence={getShareEvidence}
-              messages={messages}
-            />
+        {isProtocolMode && !isReadonly && (
+          <div className="mx-auto flex w-full max-w-4xl justify-end px-4 pt-2">
+            <button
+              aria-pressed={compareMode}
+              className={
+                compareMode
+                  ? "flex items-center gap-1.5 rounded-full border border-primary/50 bg-primary/10 px-2.5 py-1 font-medium text-primary text-xs transition-colors"
+                  : "flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 font-medium text-content-secondary text-xs transition-colors hover:bg-surface-base-faint"
+              }
+              onClick={() => setCompareMode((v) => !v)}
+              type="button"
+            >
+              <Columns size={13} />
+              {compareMode ? "Exit compare" : "Compare models"}
+            </button>
           </div>
         )}
 
-        <div
-          className={
-            "sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4"
-          }
-        >
-          {!isReadonly && (
-            <MultimodalInput
-              attachments={attachments}
+        {compareMode ? (
+          <CompareView
+            chatId={id}
+            explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+            getMemoryPrefix={getMemoryPrefix}
+            onBeforeSend={canPrompt}
+            onExit={() => setCompareMode(false)}
+          />
+        ) : (
+          <>
+            <UsageWarningBanner
+              className="mx-6 mt-4"
+              subscriptionTier="basic"
+              totalTokens={usage?.totalTokens ?? 0}
+            />
+
+            {sessionRecovering && (
+              <SessionRecoveryBanner
+                className="mb-2"
+                failoverStatus={failoverStatus}
+                onNewSession={startNewSession}
+                onRetry={retryFailover}
+              />
+            )}
+
+            <Messages
+              activeJobs={activeJobs}
+              branchStore={isReadonly ? undefined : branchStore}
               chatId={id}
-              disabled={sessionRecovering}
-              disabledPlaceholder="Session recovering..."
-              enableWebSearch={enableWebSearch}
-              input={input}
-              memoryActive={
-                isProtocolMode &&
-                memoryStore.enabled &&
-                memoryStore.entries.length > 0
-              }
+              claimJobTimeout={claimJobTimeout}
+              disputeJob={disputeJob}
+              disputeResponseMismatch={disputeResponseMismatch}
+              explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+              fetchOnChainJob={fetchOnChainJob}
+              fetchWorkerStake={fetchWorkerStake}
+              hasMismatchEvidence={hasMismatchEvidence}
+              isArtifactVisible={false}
+              isReadonly={isReadonly}
               messages={messages}
-              onBeforeSubmit={canPrompt}
-              onModelChange={handleModelChange}
-              onOpenMemory={() => setMemoryDialogOpen(true)}
-              onWebSearchToggle={setEnableWebSearch}
-              searchCapable={searchCapable}
-              selectedModelId={currentModelId}
-              selectedVisibilityType={visibilityType}
-              sendMessage={sendMessage}
-              setAttachments={setAttachments}
-              setInput={setInput}
+              onAddBranch={isReadonly ? undefined : handleAddBranch}
+              onFork={isReadonly ? undefined : handleFork}
+              onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
+              protocolProgressStatus={progressStatus}
+              regenerate={regenerate}
+              selectedModelId={initialChatModel}
               setMessages={setMessages}
               status={status}
-              stop={stop}
-              usage={usage}
+              votes={votes}
             />
-          )}
-        </div>
+
+            {!isReadonly && messages.length > 0 && (
+              <div className="flex justify-end px-4 pt-1">
+                <ShareTranscriptButton
+                  chatId={id}
+                  getShareEvidence={getShareEvidence}
+                  messages={messages}
+                />
+              </div>
+            )}
+
+            <div
+              className={
+                "sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4"
+              }
+            >
+              {!isReadonly && (
+                <MultimodalInput
+                  attachments={attachments}
+                  chatId={id}
+                  disabled={sessionRecovering}
+                  disabledPlaceholder="Session recovering..."
+                  enableWebSearch={enableWebSearch}
+                  input={input}
+                  memoryActive={
+                    isProtocolMode &&
+                    memoryStore.enabled &&
+                    memoryStore.entries.length > 0
+                  }
+                  messages={messages}
+                  onBeforeSubmit={canPrompt}
+                  onModelChange={handleModelChange}
+                  onOpenMemory={() => setMemoryDialogOpen(true)}
+                  onWebSearchToggle={setEnableWebSearch}
+                  searchCapable={searchCapable}
+                  selectedModelId={currentModelId}
+                  selectedVisibilityType={visibilityType}
+                  sendMessage={sendMessage}
+                  setAttachments={setAttachments}
+                  setInput={setInput}
+                  setMessages={setMessages}
+                  status={status}
+                  stop={stop}
+                  usage={usage}
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <MemoryDialog
