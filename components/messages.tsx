@@ -13,6 +13,7 @@ import {
   PROTOCOL_LOADING_STATUS_LABELS,
   type ProtocolLoadingStatus,
 } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
@@ -222,14 +223,20 @@ function PureMessages({
           })}
 
           {protocolActive && (
-            <PipelineTimeline
-              activeJobs={activeJobs}
-              chatId={chatId}
-              explorerBaseUrl={explorerBaseUrl}
-              firstTokenSeen={firstTokenSeen}
-              live={live}
-              progressStatus={protocolProgressStatus as ProtocolLoadingStatus}
-            />
+            // One mounted instance across the turn so on-chain evidence never
+            // resets mid-flight. Before the answer it stands in for the thinking
+            // bubble; once the answer streams it collapses to a slim provenance
+            // line, pulled up to sit directly under the assistant message.
+            <div className={cn(firstTokenSeen && "-mt-2 md:-mt-4")}>
+              <PipelineTimeline
+                activeJobs={activeJobs}
+                chatId={chatId}
+                explorerBaseUrl={explorerBaseUrl}
+                firstTokenSeen={firstTokenSeen}
+                live={live}
+                progressStatus={protocolProgressStatus as ProtocolLoadingStatus}
+              />
+            </div>
           )}
 
           <AnimatePresence mode="wait">
