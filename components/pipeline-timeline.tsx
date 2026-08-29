@@ -20,50 +20,35 @@ import { cn } from "@/lib/utils";
 /**
  * A live, verifiable timeline of one prompt's on-chain journey.
  *
- * Replaces the single "Finding a worker…" line with the ordered pipeline:
+ * Ordered pipeline:
  *   Requested → Worker selected → Session ready → Job submitted →
  *   Acknowledged → Generating → Response committed → Settled.
  *
- * Two sources are reconciled:
- *  - State transitions (pending → active → done) come from the relay-driven
- *    `progressStatus` and the transport's tracked job — the same signals that
- *    already move the chat, so the animation matches reality with no lag.
- *  - The authoritative tx hashes and worker address come from the chain: the
- *    submit txHash is discarded by the transport, so the only trustworthy
- *    source is the events themselves, fetched with getLogs filtered by the
- *    identifiers this client already knows (user address → SessionCreated,
- *    sessionId → JobSubmitted, jobId → JobCompleted).
+ * Two rules keep the animation honest in real time:
+ *  - A step turns green ONLY when its own completion is actually observed for
+ *    THIS request — never inferred from how far the loading label has moved.
+ *    Every "done" is backed by a chain event, a getJob() read, or, for
+ *    Generating, the first token actually rendering. Steps below the current
+ *    one stay grey (pending); exactly one step is "active" and shows a loader.
+ *  - The authoritative tx hashes and worker address come from the chain (the
+ *    submit txHash is discarded by the transport), fetched with getLogs
+ *    filtered by the indexed identifiers of this exact request: the session id
+ *    and job id created by this send.
  *
- * Every hash/address is a link to the block explorer, so a user can verify
- * each step independently. Nothing here gates the visible answer: tokens
- * render as they arrive, and the Response-committed / Settled nodes keep
- * animating in the background after the text is already on screen.
+ * Scope: the timeline latches onto the un-settled job created by the current
+ * send and follows only it, so a previously completed job can never paint the
+ * steps green. State resets on each new prompt.
  *
- * Degrades gracefully: if an event is never seen (or an RPC read fails) the
- * step simply stays pending — the component never throws.
+ * Nothing here gates the answer: tokens render as they arrive, and the
+ * Response-committed / Settled nodes keep animating in the background after the
+ * text is already on screen. Missing evidence leaves a step pending (with the
+ * loader if it is the active one) rather than throwing.
  */
 
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-
-// How far the relay-driven loading status has advanced, so a step without a
-// dedicated on-chain event (Requested, Acknowledged, Generating) can still
-// animate honestly from the signal the chat already trusts.
-const PROGRESS_ORDER: Record<ProtocolLoadingStatus, number> = {
-  idle: 0,
-  finding_worker: 1,
-  preparing_chat: 2,
-  writing_on_chain: 3,
-  submitting_job: 4,
-  waiting_for_relay: 5,
-  decoding_prompt: 6,
-  thinking: 6,
-  reasoning: 7,
-  streaming: 7,
-  completed: 8,
-  error: -1,
-};
+const POLL_MS = 2000;
 
 type StepState = "pending" | "active" | "done" | "failed";
 
@@ -99,47 +84,51 @@ function isZeroAddress(v?: string): boolean {
   return !v || v.toLowerCase() === ZERO_ADDRESS;
 }
 
+// Text shown under the one active step, so the wait always says what it is
+// waiting for rather than sitting silent.
+const ACTIVE_NOTES: Record<string, string> = {
+  worker: "finding a worker…",
+  session: "opening the session…",
+  submitted: "submitting the job…",
+  acknowledged: "waiting for the worker…",
+  generating: "model is generating…",
+  committed: "committing the response…",
+  settled: "finalizing on chain…",
+};
+
+// biome-ignore lint/nursery/useMaxParams: five flat inputs read clearer here than an options bag for a pure builder.
 function buildSteps(
-  progressStatus: ProtocolLoadingStatus,
   job: TrackedJob | undefined,
   ev: Evidence,
+  firstTokenSeen: boolean,
+  isError: boolean,
   activeAllowed: boolean
 ): { steps: PipelineStep[]; settled: boolean } {
-  const p = PROGRESS_ORDER[progressStatus] ?? 0;
-  const isError = progressStatus === "error";
-
-  const sessionId = ev.session?.sessionId ?? job?.sessionId;
   const worker = isZeroAddress(ev.session?.worker)
     ? isZeroAddress(job?.worker)
       ? undefined
       : job?.worker
     : ev.session?.worker;
+  const sessionId = ev.session?.sessionId ?? job?.sessionId;
   const jobId = ev.job?.jobId ?? job?.jobId;
   const sessionTx = ev.session?.txHash;
   const jobTx = ev.job?.txHash;
   const completionTx = ev.completed?.txHash;
 
+  const hasSession = ev.session !== undefined || job !== undefined;
+  const hasJob = ev.job !== undefined || job?.jobId !== undefined;
+  const acknowledged = ev.acknowledged === true;
   const settled =
-    ev.completed !== undefined ||
-    (job !== undefined && job.completedAt > 0) ||
-    progressStatus === "completed";
-  const responseCommitted = ev.responseCommitted === true || settled;
-  const acknowledged =
-    ev.acknowledged === true || p >= PROGRESS_ORDER.waiting_for_relay;
-  const generating = responseCommitted || p >= PROGRESS_ORDER.decoding_prompt;
+    ev.completed !== undefined || (job !== undefined && job.completedAt > 0);
+  const committed = ev.responseCommitted === true || settled;
 
   const defs: Omit<PipelineStep, "state">[] = [
-    {
-      key: "requested",
-      label: "Requested",
-      note: "prompt request accepted",
-    },
+    { key: "requested", label: "Requested", note: "prompt request sent" },
     {
       key: "worker",
       label: "Worker selected",
       address: worker,
       txHash: sessionTx,
-      note: worker ? undefined : "sortition in progress",
     },
     {
       key: "session",
@@ -161,13 +150,13 @@ function buildSteps(
     {
       key: "generating",
       label: "Generating",
-      note: generating ? "answer streaming" : undefined,
+      note: firstTokenSeen ? "answer streaming" : undefined,
     },
     {
       key: "committed",
       label: "Response committed",
       txHash: completionTx,
-      note: responseCommitted ? "blob hash on chain" : undefined,
+      note: committed ? "blob hash on chain" : undefined,
     },
     {
       key: "settled",
@@ -177,21 +166,22 @@ function buildSteps(
     },
   ];
 
+  // Strict, evidence-only completion — no step turns green from how far the
+  // loading label has advanced.
   const done: boolean[] = [
-    sessionId !== undefined || p >= PROGRESS_ORDER.preparing_chat || !!job,
+    true, // requested: the send happened (component only renders once in flight)
     !!worker,
-    ev.session !== undefined ||
-      jobId !== undefined ||
-      p >= PROGRESS_ORDER.thinking,
-    jobId !== undefined,
+    hasSession,
+    hasJob,
     acknowledged,
-    settled || responseCommitted || p >= PROGRESS_ORDER.reasoning,
-    responseCommitted,
+    firstTokenSeen,
+    committed,
     settled,
   ];
 
-  // Evidence of a later milestone proves every earlier one, even if a read for
-  // an in-between step happened to fail — backfill so the cascade stays honest.
+  // A genuinely-observed later milestone proves the earlier ones (settled ⇒
+  // committed ⇒ generated ⇒ …), so backfill in case an in-between read lagged.
+  // Safe now that every flag is real evidence, never a label threshold.
   const lastDone = done.lastIndexOf(true);
   for (let i = 0; i < lastDone; i++) done[i] = true;
 
@@ -206,7 +196,9 @@ function buildSteps(
       frontierAssigned = true;
       state = isError ? "failed" : activeAllowed ? "active" : "pending";
     }
-    return { ...d, state };
+    // The active step always narrates what it is waiting for.
+    const note = state === "active" && !d.note ? ACTIVE_NOTES[d.key] : d.note;
+    return { ...d, note, state };
   });
 
   return { steps, settled };
@@ -228,29 +220,46 @@ function StepRow({
   isLast: boolean;
   explorerBaseUrl?: string;
 }) {
+  const active = step.state === "active";
   const showTx = step.state !== "pending" && !isZeroHash(step.txHash);
   const showAddr = step.state !== "pending" && !isZeroAddress(step.address);
 
   return (
     <li className="flex gap-2.5">
       <div className="flex flex-col items-center">
-        <motion.span
-          animate={{ scale: 1, opacity: 1 }}
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center rounded-full border",
-            step.state === "done" &&
-              "border-emerald-500/60 text-emerald-600 dark:text-emerald-400",
-            step.state === "failed" &&
-              "border-red-500/60 text-red-600 dark:text-red-400",
-            step.state === "active" &&
-              "border-transparent bg-gradient-primary text-white",
-            step.state === "pending" && "border-border text-content-extraLight"
+        <span className="relative flex size-5 shrink-0 items-center justify-center">
+          {/* Pulsing halo makes the active step unmistakably "in progress". */}
+          {active && (
+            <motion.span
+              animate={{ opacity: 0, scale: 1.9 }}
+              aria-hidden
+              className="absolute inset-0 rounded-full bg-gradient-primary"
+              initial={{ opacity: 0.5, scale: 1 }}
+              transition={{
+                duration: 1.4,
+                repeat: Number.POSITIVE_INFINITY,
+                ease: "easeOut",
+              }}
+            />
           )}
-          initial={{ scale: 0.6, opacity: 0 }}
-          transition={{ duration: 0.25 }}
-        >
-          <StepIcon state={step.state} />
-        </motion.span>
+          <motion.span
+            animate={{ scale: 1, opacity: 1 }}
+            className={cn(
+              "relative flex size-5 items-center justify-center rounded-full border",
+              step.state === "done" &&
+                "border-emerald-500/60 text-emerald-600 dark:text-emerald-400",
+              step.state === "failed" &&
+                "border-red-500/60 text-red-600 dark:text-red-400",
+              active && "border-transparent bg-gradient-primary text-white",
+              step.state === "pending" &&
+                "border-border text-content-extraLight"
+            )}
+            initial={{ scale: 0.6, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            <StepIcon state={step.state} />
+          </motion.span>
+        </span>
         {!isLast && (
           <span
             className={cn(
@@ -264,16 +273,24 @@ function StepRow({
         <p
           className={cn(
             "font-medium text-xs leading-5",
-            step.state === "pending"
-              ? "text-content-extraLight"
-              : "text-content-strong"
+            active && "text-content-strong",
+            step.state === "done" && "text-content-strong",
+            step.state === "failed" && "text-red-600 dark:text-red-400",
+            step.state === "pending" && "text-content-extraLight"
           )}
         >
           {step.label}
         </p>
         {(step.note || showAddr || showTx) && (
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px] text-content-subtle">
-            {step.note && <span>{step.note}</span>}
+          <div
+            className={cn(
+              "mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px]",
+              active ? "text-content-secondary" : "text-content-subtle"
+            )}
+          >
+            {step.note && (
+              <span className={cn(active && "animate-pulse")}>{step.note}</span>
+            )}
             {showAddr && (
               <a
                 className="inline-flex items-center gap-0.5 text-content-secondary hover:text-content-strong hover:underline"
@@ -311,6 +328,7 @@ function PurePipelineTimeline({
   activeJobs,
   chatId,
   live,
+  firstTokenSeen,
   explorerBaseUrl,
 }: {
   progressStatus: ProtocolLoadingStatus;
@@ -318,6 +336,8 @@ function PurePipelineTimeline({
   chatId: string;
   /** True while the request is in flight (status submitted/streaming). */
   live: boolean;
+  /** True once the answer has actually begun rendering (first token). */
+  firstTokenSeen: boolean;
   explorerBaseUrl?: string;
 }) {
   const { address } = useAccount();
@@ -326,34 +346,52 @@ function PurePipelineTimeline({
   const chainId = config.chains[0].id;
   const registry = config.jobRegistryAddress[chainId];
 
-  // The job this timeline is following: the most recently started one for
-  // this chat (the transport tracks one per active send).
-  const job = useMemo(() => {
-    const mine = (activeJobs ?? []).filter((j) => j.chatId === chatId);
-    if (mine.length === 0) return;
-    return mine.reduce((a, b) => (b.startedAt > a.startedAt ? b : a));
-  }, [activeJobs, chatId]);
-
+  // The job THIS send created. We latch onto the newest un-settled job for the
+  // chat while live and then follow only it — a previously completed job is
+  // never picked up, so the steps can't be painted green by stale events.
+  const [currentJobId, setCurrentJobId] = useState<number | null>(null);
   const [evidence, setEvidence] = useState<Evidence>({});
   const fromBlockRef = useRef<bigint | null>(null);
   const prevLiveRef = useRef(false);
 
-  // A fresh send resets the evidence and the log-scan window.
+  // Each fresh send drops the previous job and clears its evidence + scan window.
   useEffect(() => {
     if (live && !prevLiveRef.current) {
+      setCurrentJobId(null);
       setEvidence({});
       fromBlockRef.current = null;
     }
     prevLiveRef.current = live;
   }, [live]);
 
+  // Latch onto the in-flight job once the transport registers it. Only a job
+  // that has not completed yet is eligible, so the just-finished prior job is
+  // ignored even before its events are filtered out.
+  useEffect(() => {
+    if (currentJobId !== null || !live) return;
+    const fresh = (activeJobs ?? [])
+      .filter((j) => j.chatId === chatId && j.completedAt === 0)
+      .reduce<TrackedJob | undefined>(
+        (a, b) => (a && a.startedAt > b.startedAt ? a : b),
+        undefined
+      );
+    if (fresh) setCurrentJobId(fresh.jobId);
+  }, [live, activeJobs, chatId, currentJobId]);
+
+  const job = useMemo(
+    () =>
+      currentJobId === null
+        ? undefined
+        : (activeJobs ?? []).find((j) => j.jobId === currentJobId),
+    [activeJobs, currentJobId]
+  );
+
   const settled =
     evidence.completed !== undefined ||
     (job !== undefined && job.completedAt > 0);
 
-  // Keep scanning the chain for the authoritative hashes while the request is
-  // live, and afterwards until settlement lands — so the Response-committed /
-  // Settled nodes finish in the background once the text is already visible.
+  // Scan the chain for the authoritative hashes while live, and afterwards
+  // until settlement lands (so the last two nodes finish in the background).
   const watching =
     !!publicClient &&
     !!registry &&
@@ -371,7 +409,6 @@ function PurePipelineTimeline({
         if (fromBlockRef.current === null) {
           try {
             const bn = await publicClient.getBlockNumber();
-            // A small lookback catches events that fired just before mount.
             fromBlockRef.current = bn > 5000n ? bn - 5000n : 0n;
           } catch {
             fromBlockRef.current = 0n;
@@ -380,20 +417,22 @@ function PurePipelineTimeline({
         const fromBlock = fromBlockRef.current ?? 0n;
         const reg = registry as `0x${string}`;
 
-        // Worker + session tx: SessionCreated indexed by this user.
-        if (!evidence.session && address) {
+        const sid = evidence.session?.sessionId ?? job?.sessionId;
+        const jid = evidence.job?.jobId ?? job?.jobId;
+
+        // Worker + session tx: SessionCreated for THIS user + session id only.
+        if (!evidence.session && sid !== undefined && address) {
           const logs = await publicClient.getLogs({
             address: reg,
             event: sessionCreatedEvent,
-            args: { user: address as `0x${string}` },
+            args: {
+              user: address as `0x${string}`,
+              sessionId: BigInt(sid),
+            },
             fromBlock,
             toBlock: "latest",
           });
-          const known = job?.sessionId;
-          const match =
-            (known !== undefined
-              ? logs.find((l) => Number(l.args.sessionId) === known)
-              : undefined) ?? logs.at(-1);
+          const match = logs.at(-1);
           if (match && !cancelled) {
             setEvidence((prev) =>
               prev.session
@@ -410,22 +449,16 @@ function PurePipelineTimeline({
           }
         }
 
-        const sid = evidence.session?.sessionId ?? job?.sessionId;
-
-        // Job submit tx: JobSubmitted indexed by sessionId.
-        if (sid !== undefined && !evidence.job) {
+        // Job submit tx: JobSubmitted for THIS session id + job id only.
+        if (!evidence.job && sid !== undefined && jid !== undefined) {
           const logs = await publicClient.getLogs({
             address: reg,
             event: jobSubmittedEvent,
-            args: { sessionId: BigInt(sid) },
+            args: { sessionId: BigInt(sid), jobId: BigInt(jid) },
             fromBlock,
             toBlock: "latest",
           });
-          const known = job?.jobId;
-          const match =
-            (known !== undefined
-              ? logs.find((l) => Number(l.args.jobId) === known)
-              : undefined) ?? logs.at(-1);
+          const match = logs.at(-1);
           if (match && !cancelled) {
             setEvidence((prev) =>
               prev.job
@@ -441,7 +474,6 @@ function PurePipelineTimeline({
           }
         }
 
-        const jid = evidence.job?.jobId ?? job?.jobId;
         if (jid !== undefined) {
           // Ack + response-blob commitment, straight from the job record.
           try {
@@ -473,10 +505,10 @@ function PurePipelineTimeline({
               });
             }
           } catch {
-            // read failed — leave those steps pending, try again next tick.
+            // read failed — leave those steps as they are, retry next tick.
           }
 
-          // Settlement tx: JobCompleted indexed by jobId.
+          // Settlement tx: JobCompleted for THIS job id only.
           if (!evidence.completed) {
             const logs = await publicClient.getLogs({
               address: reg,
@@ -504,27 +536,27 @@ function PurePipelineTimeline({
     };
 
     tick();
-    const interval = setInterval(tick, 2500);
+    const interval = setInterval(tick, POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-    // jobId/sessionId are derived from job + evidence, already listed here.
+    // sid/jid are derived from job + evidence, already in the dep list.
   }, [watching, publicClient, registry, address, job, evidence]);
 
-  const activeAllowed =
-    live || (!!job && !settled) || (PROGRESS_ORDER[progressStatus] ?? 0) > 0;
+  const isError = progressStatus === "error";
+  const activeAllowed = live || (!!job && !settled);
 
   const { steps, settled: builtSettled } = buildSteps(
-    progressStatus,
     job,
     evidence,
+    firstTokenSeen,
+    isError,
     activeAllowed
   );
 
-  // Nothing to show before a request starts. While live, always shown; after
-  // the answer is on screen the timeline lingers only until settlement lands
-  // (so the Response-committed / Settled nodes finish animating), then the
+  // Show while in flight; after the answer is on screen, linger only until
+  // settlement lands (Response-committed / Settled finish animating), then the
   // per-message provenance panel takes over.
   const visible = live || (!!job && !builtSettled);
   if (!visible) return null;

@@ -104,6 +104,11 @@ function PureMessages({
     );
   const showThinking = status === "submitted" || awaitingFirstToken;
   const live = status === "submitted" || status === "streaming";
+  // The answer has actually begun rendering — this is the signal that turns the
+  // timeline's "Generating" node green, so it holds its loading state for the
+  // full inference rather than flipping done while the model is still thinking.
+  const firstTokenSeen =
+    status === "ready" || (status === "streaming" && !awaitingFirstToken);
   // In protocol mode the on-chain pipeline timeline replaces the single
   // "Finding a worker…" line and carries the status itself.
   const protocolActive =
@@ -221,6 +226,7 @@ function PureMessages({
               activeJobs={activeJobs}
               chatId={chatId}
               explorerBaseUrl={explorerBaseUrl}
+              firstTokenSeen={firstTokenSeen}
               live={live}
               progressStatus={protocolProgressStatus as ProtocolLoadingStatus}
             />
