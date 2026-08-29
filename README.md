@@ -116,6 +116,26 @@ pnpm db:reset         # Reset migrations
 
 ```
 
+## 🧪 Running Tests
+
+End-to-end tests use [Playwright](https://playwright.dev). The Playwright config boots a dev server with `PLAYWRIGHT=True`, which swaps the AI provider for a mock so tests don't need a real model endpoint.
+
+The current suite is a small unauthenticated smoke pass — no DB or real LLM required, but the dev server still needs `AUTH_SECRET` set so NextAuth can boot:
+
+```bash
+# One-time: install browser binaries
+# (on Linux/CI add --with-deps to also install system libs)
+pnpm exec playwright install chromium
+
+# Minimum env to boot the dev server
+echo 'AUTH_SECRET="'"$(openssl rand -base64 32)"'"' >> .env.local
+
+# Run the suite
+pnpm test
+```
+
+CI (`.github/workflows/ci.yml`) runs `pnpm typecheck` and `pnpm test` on every PR and push to `main`. Authenticated and DB-touching tests will follow once a SIWE auth fixture and a Postgres test setup land.
+
 ## 🌐 Deploying to Vercel
 
 ### Option 1: Deploy via CLI
