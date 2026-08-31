@@ -4,7 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Brain } from "lucide-react";
+import { Brain, Columns } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -78,6 +78,7 @@ function PureMultimodalInput({
   onBeforeSubmit,
   memoryActive,
   onOpenMemory,
+  onEnterCompare,
 }: {
   chatId: string;
   input: string;
@@ -100,6 +101,8 @@ function PureMultimodalInput({
   disabled?: boolean;
   disabledPlaceholder?: string;
   onBeforeSubmit?: () => boolean;
+  /** Enter side-by-side compare mode (protocol mode only). */
+  onEnterCompare?: () => void;
   /**
    * Device-local memory (lib/memory.ts) is enabled and has entries shaping
    * prompts. Indicator only — click opens the memory dialog (chat.tsx).
@@ -392,6 +395,22 @@ function PureMultimodalInput({
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
             />
+            {onEnterCompare && (
+              <Button
+                aria-label="Compare models side by side"
+                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onEnterCompare();
+                }}
+                title="Compare models — run one prompt across up to 4 models in parallel"
+                type="button"
+                variant="ghost"
+              >
+                <Columns className="size-4 text-primary" />
+                <span className="hidden sm:inline">Compare</span>
+              </Button>
+            )}
           </PromptInputTools>
 
           {status === "submitted" || status === "streaming" ? (

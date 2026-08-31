@@ -3,7 +3,6 @@
 import { useChat } from "@ai-sdk/react";
 import { useAppKit } from "@reown/appkit/react";
 import { type DataUIPart, DefaultChatTransport } from "ai";
-import { Columns } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -731,24 +730,6 @@ export function Chat({
           systemPromptId={systemPromptId}
         />
 
-        {isProtocolMode && !isReadonly && (
-          <div className="mx-auto flex w-full max-w-4xl justify-end px-4 pt-2">
-            <button
-              aria-pressed={compareMode}
-              className={
-                compareMode
-                  ? "flex items-center gap-1.5 rounded-full border border-primary/50 bg-primary/10 px-2.5 py-1 font-medium text-primary text-xs transition-colors"
-                  : "flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 font-medium text-content-secondary text-xs transition-colors hover:bg-surface-base-faint"
-              }
-              onClick={() => setCompareMode((v) => !v)}
-              type="button"
-            >
-              <Columns size={13} />
-              {compareMode ? "Exit compare" : "Compare models"}
-            </button>
-          </div>
-        )}
-
         {compareMode ? (
           <CompareView
             chatId={id}
@@ -829,6 +810,11 @@ export function Chat({
                   }
                   messages={messages}
                   onBeforeSubmit={canPrompt}
+                  onEnterCompare={
+                    isProtocolMode && !isReadonly
+                      ? () => setCompareMode(true)
+                      : undefined
+                  }
                   onModelChange={handleModelChange}
                   onOpenMemory={() => setMemoryDialogOpen(true)}
                   onWebSearchToggle={setEnableWebSearch}
