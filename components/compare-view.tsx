@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Square, X } from "lucide-react";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import {
@@ -13,7 +14,7 @@ import type { OnChainJob } from "@/lib/protocol/session";
 import { AssistantAvatar } from "./assistant-answer";
 import {
   AvailabilityDot,
-  CompareModelPicker,
+  CompareModelMultiSelect,
   MIN_COMPARE_MODELS,
 } from "./compare-model-picker";
 import { MessageContent } from "./elements/message";
@@ -22,8 +23,10 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
+  PromptInputTools,
 } from "./elements/prompt-input";
 import { Response } from "./elements/response";
+import { ArrowUpIcon } from "./icons";
 import { MessageReasoning } from "./message-reasoning";
 import { PipelineTimeline } from "./pipeline-timeline";
 import { ProvenanceChip } from "./provenance-chip";
@@ -225,115 +228,155 @@ export function CompareView({
   };
 
   const columns = Math.max(panes.length || selectedModels.length || 1, 1);
+  const hasResults = panes.length > 0;
 
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 md:px-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-baseline gap-2">
-          <h2 className="font-semibold text-content-strong text-sm">
-            Compare models
-          </h2>
-          <span className="text-[11px] text-content-subtle">
-            one prompt · {selectedModels.length || "N"} parallel on-chain jobs
-          </span>
-        </div>
-        <Button
-          className="h-7 gap-1 px-2 text-xs"
-          onClick={onExit}
-          size="sm"
-          variant="ghost"
-        >
-          <X size={13} />
-          Exit
-        </Button>
-      </div>
+  const compareLabel =
+    selectedModels.length > 0
+      ? `Compare ${selectedModels.length} models`
+      : "Compare models";
 
-      <div className="rounded-xl border border-bdr-light bg-surface-elevation-light/40 p-3">
-        <CompareModelPicker
-          disabled={isRunning}
-          onChange={updateSelection}
-          selectedIds={liveSelectedIds}
-        />
-      </div>
+  const exitButton = (
+    <Button
+      className="h-7 gap-1 px-2 text-content-subtle text-xs"
+      onClick={onExit}
+      size="sm"
+      variant="ghost"
+    >
+      <X size={13} />
+      Exit
+    </Button>
+  );
 
-      {/* Composer — the same PromptInput shell as the main chat. */}
+  // The composer — visually identical to the main chat's, differing only in
+  // its contents: the multi-model dropdown stands where the single-model
+  // picker sits, and the round gradient submit runs the fan-out.
+  const composer = (
+    <div className="flex w-full flex-col gap-2">
       <PromptInput
-        className="p-2"
+        className="border border-bdr-light p-3 transition-all duration-200 sm:p-4"
         onSubmit={(event) => {
           event.preventDefault();
           handleSend();
         }}
       >
-        <PromptInputTextarea
-          disabled={isRunning}
-          minHeight={52}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={
-            enoughModels
-              ? "Ask all selected models the same question…"
-              : `Select at least ${MIN_COMPARE_MODELS} models to compare`
-          }
-          value={prompt}
-        />
-        <PromptInputToolbar>
-          <span className="px-2 text-[11px] text-content-subtle">
-            {isConnected
-              ? "Each answer is a separate paid, verifiable job."
-              : "Connect your wallet to run a comparison."}
-          </span>
+        <div className="relative flex flex-row items-start gap-1 sm:gap-2">
+          <div className="absolute top-[3px] border-surface-base-extraLight border-r pr-2 sm:top-0.5">
+            <Image
+              alt="Icon"
+              height={16}
+              src="/images/logo/favicon.png"
+              width={16}
+            />
+          </div>
+          <PromptInputTextarea
+            autoFocus
+            className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
+            disableAutoResize={true}
+            disabled={isRunning}
+            maxHeight={200}
+            minHeight={44}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={
+              enoughModels
+                ? "Ask all selected models the same question…"
+                : `Select at least ${MIN_COMPARE_MODELS} models to compare`
+            }
+            rows={1}
+            value={prompt}
+          />
+        </div>
+        <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
+          <PromptInputTools className="gap-0 sm:gap-0.5">
+            <CompareModelMultiSelect
+              disabled={isRunning}
+              onChange={updateSelection}
+              selectedIds={liveSelectedIds}
+            />
+          </PromptInputTools>
+
           {isRunning ? (
             <Button
-              className="h-8 gap-1.5 rounded-lg px-3"
+              aria-label="Stop comparison"
+              className="size-8 rounded-full bg-foreground p-1 text-background transition-colors hover:bg-foreground/90"
               onClick={stop}
-              size="sm"
+              size="icon"
               type="button"
-              variant="outline"
             >
               <Square size={13} />
-              Stop
             </Button>
           ) : (
             <PromptInputSubmit
-              className="h-8 bg-gradient-primary px-3 text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
+              aria-label={compareLabel}
+              className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
               disabled={!canSend}
-              size="default"
             >
-              Compare {selectedModels.length > 0 ? selectedModels.length : ""}
+              <ArrowUpIcon size={14} />
             </PromptInputSubmit>
           )}
         </PromptInputToolbar>
       </PromptInput>
 
-      {/* Columns on desktop, horizontal snap-scroll on mobile. */}
-      {panes.length > 0 && (
-        <div
-          className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 md:grid md:overflow-visible"
-          style={{
-            // Only takes effect in md:grid; ignored in the mobile flex row.
-            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-          }}
-        >
-          {panes.map((pane) => (
-            <div
-              className="w-[82vw] shrink-0 md:w-auto md:shrink"
-              key={pane.paneChatId}
-            >
-              <PaneColumn
-                explorerBaseUrl={explorerBaseUrl}
-                fetchPaneJob={fetchPaneJob}
-                fetchPaneWorkerStake={fetchPaneWorkerStake}
-                pane={pane}
-              />
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Density-matched helper, folded into the composer footer. */}
+      <p className="px-1 text-[11px] text-content-subtle">
+        {isConnected
+          ? "Each answer is a separate paid, verifiable job."
+          : "Connect your wallet to run a comparison."}
+      </p>
+    </div>
+  );
 
-      {panes.length === 0 && (
-        <p className="px-1 py-6 text-center text-content-subtle text-xs">
-          Pick your models and ask a question — answers stream in side by side,
-          each an independent on-chain job you can verify.
-        </p>
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col overflow-y-auto px-3 py-4 md:px-4">
+      {hasResults ? (
+        <div className="flex w-full flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2">
+              <h2 className="font-semibold text-content-strong text-sm">
+                Compare models
+              </h2>
+              <span className="text-[11px] text-content-subtle">
+                one prompt · {selectedModels.length || "N"} parallel on-chain
+                jobs
+              </span>
+            </div>
+            {exitButton}
+          </div>
+
+          {composer}
+
+          {/* Columns on desktop, horizontal snap-scroll on mobile. Unchanged. */}
+          <div
+            className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 md:grid md:overflow-visible"
+            style={{
+              // Only takes effect in md:grid; ignored in the mobile flex row.
+              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            }}
+          >
+            {panes.map((pane) => (
+              <div
+                className="w-[82vw] shrink-0 md:w-auto md:shrink"
+                key={pane.paneChatId}
+              >
+                <PaneColumn
+                  explorerBaseUrl={explorerBaseUrl}
+                  fetchPaneJob={fetchPaneJob}
+                  fetchPaneWorkerStake={fetchPaneWorkerStake}
+                  pane={pane}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        // Pre-results — mirrors the main chat's empty state: a subtle exit,
+        // a centered hero, and the composer, all sitting comfortably centered.
+        <div className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-8">
+          <div className="absolute top-0 right-0">{exitButton}</div>
+          <h2 className="text-center font-semibold text-2xl text-content-ultra md:text-3xl xl:text-4xl">
+            Compare models
+          </h2>
+          {composer}
+        </div>
       )}
     </div>
   );

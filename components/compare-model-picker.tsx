@@ -1,7 +1,13 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { ChevronDown, Layers } from "lucide-react";
 import { useMemo } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useModels } from "@/hooks/use-models";
 import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { type Availability, availabilityOf } from "@/lib/ai/availability";
@@ -31,16 +37,22 @@ export function AvailabilityDot({ modelId }: { modelId: string }) {
 }
 
 /**
- * Multi-select for compare mode: pick between {@link MIN_COMPARE_MODELS} and
- * {@link MAX_COMPARE_MODELS} models to run the same prompt against.
+ * Compact multi-select for compare mode: pick between {@link MIN_COMPARE_MODELS}
+ * and {@link MAX_COMPARE_MODELS} models to run the same prompt against.
+ *
+ * A dropdown so it can live *inside* the composer's toolbar — the same slot the
+ * single-model picker sits in on the normal chat — instead of a separate card.
+ * The trigger reads as one restrained toolbar control ("N models"); opening it
+ * reveals the checkable list.
  *
  * Only models a worker is currently serving are selectable — the worker count
  * (WorkerRegistry.getEligibleWorkers, the same data the single-model picker
  * disables on) is reused, and a model showing 0 workers is disabled because it
  * genuinely cannot take a job. Once the cap is reached, unselected rows are
- * disabled so the selection can never exceed the max.
+ * disabled so the selection can never exceed the max. Selecting a row keeps the
+ * menu open (preventDefault) so several models can be toggled in one pass.
  */
-export function CompareModelPicker({
+export function CompareModelMultiSelect({
   selectedIds,
   onChange,
   disabled,
@@ -63,69 +75,80 @@ export function CompareModelPicker({
     }
   };
 
+  const count = selectedIds.length;
+  const label =
+    count === 0 ? "Select models" : `${count} model${count === 1 ? "" : "s"}`;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="font-medium text-[11px] text-content-strong uppercase tracking-[0.08em]">
-          Models to compare
-        </span>
-        <span className="text-[11px] text-content-subtle">
-          {selectedIds.length}/{MAX_COMPARE_MODELS} selected
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={disabled}>
+        <button
+          className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-surface-base-faint"
+          type="button"
+        >
+          <Layers className="size-4 text-primary" />
+          <span className="font-medium text-xs">{label}</span>
+          <ChevronDown className="size-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="min-w-[240px] max-w-[300px]"
+      >
+        <div className="flex items-baseline justify-between gap-2 px-2 py-1">
+          <span className="font-medium text-[11px] text-content-strong uppercase tracking-[0.08em]">
+            Compare
+          </span>
+          <span className="text-[11px] text-content-subtle">
+            {count}/{MAX_COMPARE_MODELS} selected
+          </span>
+        </div>
         {models.length === 0 && (
-          <p className="text-content-subtle text-xs">No models available.</p>
+          <p className="px-2 py-3 text-center text-content-subtle text-xs">
+            No models available.
+          </p>
         )}
         {models.map((model) => {
           // Undefined count = read failed; treat as available rather than
           // wrongly locking a model out (matches the single-model picker).
-          const count = counts[model.id];
-          const hasWorker = count === undefined || count > 0;
+          const workerCount = counts[model.id];
+          const hasWorker = workerCount === undefined || workerCount > 0;
           const selected = selectedIds.includes(model.id);
           const isDisabled = disabled || !hasWorker || (!selected && atCap);
 
           return (
-            <button
-              aria-pressed={selected}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                selected
-                  ? "border-primary/50 bg-primary/10 text-content-strong"
-                  : "border-border text-content-secondary hover:bg-surface-base-faint",
-                isDisabled &&
-                  "cursor-not-allowed opacity-40 hover:bg-transparent"
-              )}
+            <DropdownMenuCheckboxItem
+              checked={selected}
+              className="rounded-lg"
               disabled={isDisabled}
               key={model.id}
-              onClick={() => toggle(model.id)}
-              title={
-                hasWorker
-                  ? undefined
-                  : "No worker is currently serving this model"
-              }
-              type="button"
+              onSelect={(event) => {
+                event.preventDefault();
+                toggle(model.id);
+              }}
             >
-              {selected ? (
-                <Check
-                  className="shrink-0 text-primary"
-                  size={12}
-                  strokeWidth={3}
-                />
-              ) : (
-                <AvailabilityDot modelId={model.id} />
-              )}
-              <span className="truncate">{model.name}</span>
-              {typeof count === "number" && (
-                <span className="font-mono text-[10px] text-content-subtle">
-                  {count}w
+              <span className="flex w-full min-w-0 items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <AvailabilityDot modelId={model.id} />
+                  <span className="truncate font-medium text-xs">
+                    {model.name}
+                  </span>
                 </span>
-              )}
-            </button>
+                {typeof workerCount === "number" && (
+                  <span
+                    className={cn(
+                      "ml-auto shrink-0 font-mono text-[10px]",
+                      workerCount === 0 ? "text-red-500" : "text-content-subtle"
+                    )}
+                  >
+                    {workerCount}w
+                  </span>
+                )}
+              </span>
+            </DropdownMenuCheckboxItem>
           );
         })}
-      </div>
-    </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
