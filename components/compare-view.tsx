@@ -28,6 +28,7 @@ import {
 import { Response } from "./elements/response";
 import { ArrowUpIcon } from "./icons";
 import { MessageReasoning } from "./message-reasoning";
+import { ModelLogo } from "./model-logo";
 import { PipelineTimeline } from "./pipeline-timeline";
 import { ProvenanceChip } from "./provenance-chip";
 import { Button } from "./ui/button";
@@ -94,6 +95,7 @@ function PaneColumn({
       {/* Subtle model-name label — compare's one addition over a chat answer. */}
       <div className="flex min-w-0 items-center gap-1.5">
         <AvailabilityDot modelId={pane.modelId} />
+        <ModelLogo modelId={pane.modelId} size={14} />
         <span className="truncate font-medium text-content-secondary text-xs">
           {pane.modelName}
         </span>

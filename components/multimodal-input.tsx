@@ -46,12 +46,13 @@ import {
   PaperclipIcon,
   StopIcon,
 } from "./icons";
+import { ModelLogo } from "./model-logo";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
 
 function PureMultimodalInput({
@@ -609,6 +610,7 @@ function PureModelSelectorCompact({
         ) : (
           <CpuIcon size={16} />
         )}
+        {selectedModel && <ModelLogo modelId={selectedModel.id} size={14} />}
         <span className="hidden font-medium text-xs sm:block">
           {selectedModel?.name ?? "Select model"}
         </span>
@@ -650,6 +652,7 @@ function PureModelSelectorCompact({
                 <span className="flex w-full min-w-0 items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <AvailabilityDot modelId={model.id} />
+                    <ModelLogo modelId={model.id} size={14} />
                     <h6 className="mb-0.5 truncate font-medium text-xs">
                       {model.name}
                     </h6>

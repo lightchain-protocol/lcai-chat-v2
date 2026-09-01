@@ -12,6 +12,7 @@ import { useModels } from "@/hooks/use-models";
 import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { type Availability, availabilityOf } from "@/lib/ai/availability";
 import { cn } from "@/lib/utils";
+import { ModelLogo } from "./model-logo";
 
 export const MIN_COMPARE_MODELS = 2;
 export const MAX_COMPARE_MODELS = 4;
@@ -130,6 +131,7 @@ export function CompareModelMultiSelect({
               <span className="flex w-full min-w-0 items-center justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <AvailabilityDot modelId={model.id} />
+                  <ModelLogo modelId={model.id} size={14} />
                   <span className="truncate font-medium text-xs">
                     {model.name}
                   </span>
