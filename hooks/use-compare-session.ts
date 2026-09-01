@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicClient, WalletClient } from "viem";
 import { recordModelOutcome } from "@/lib/ai/availability";
 import { createCompareTransport } from "@/lib/protocol/compare-transport";
+import type { OnChainJob } from "@/lib/protocol/session";
 import type { ProtocolTransport, TrackedJob } from "@/lib/protocol/transport";
 import type { ProtocolLoadingStatus } from "@/lib/types";
 
@@ -31,6 +32,11 @@ export type ComparePane = {
   /** True once the first answer token has rendered (drives the timeline). */
   firstTokenSeen: boolean;
   jobs: TrackedJob[];
+  /**
+   * On-chain job id for this pane, once the relay binds it. Feeds the shared
+   * {@link ProvenanceChip} the same way message metadata does in the main chat.
+   */
+  jobId?: number;
   error: string | null;
 };
 
@@ -113,6 +119,36 @@ export function useCompareSession(args: {
     setPanes([]);
   }, [teardown]);
 
+  // Chain reads for the shared ProvenanceChip, bound to a pane's own transport
+  // (each pane is an independent session). Mirror the main chat's
+  // fetchOnChainJob/fetchWorkerStake, so the chip verifies compare answers with
+  // the very same code path. Null once a pane's transport has been torn down.
+  const fetchPaneJob = useCallback(
+    async (paneChatId: string, jobId: number): Promise<OnChainJob | null> => {
+      const transport = transportsRef.current.get(paneChatId);
+      if (!transport) return null;
+      try {
+        return await transport.getJob(jobId);
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  const fetchPaneWorkerStake = useCallback(
+    async (paneChatId: string, worker: string): Promise<bigint | null> => {
+      const transport = transportsRef.current.get(paneChatId);
+      if (!transport) return null;
+      try {
+        return await transport.getWorkerStake(worker);
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
   const run = useCallback(
     ({ prompt, models, searchEnabled }: RunArgs) => {
       const trimmed = prompt.trim();
@@ -166,6 +202,7 @@ export function useCompareSession(args: {
             trimmed,
             paneChatId,
             {
+              onJobId: (jobId) => updatePane(paneChatId, { jobId }),
               onReset: () =>
                 updatePane(paneChatId, { text: "", firstTokenSeen: false }),
               onFirstToken: () =>
@@ -228,5 +265,13 @@ export function useCompareSession(args: {
   // Tear everything down on unmount so no relay socket outlives the view.
   useEffect(() => teardown, [teardown]);
 
-  return { panes, isRunning, run, stop, reset };
+  return {
+    panes,
+    isRunning,
+    run,
+    stop,
+    reset,
+    fetchPaneJob,
+    fetchPaneWorkerStake,
+  };
 }

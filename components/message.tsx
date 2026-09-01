@@ -5,15 +5,16 @@ import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
 import { isAgentDescriptor } from "@/lib/agent/timeline";
-import { servedModelIdFromMessage } from "@/lib/protocol/served-model";
 import type { Vote } from "@/lib/db/schema";
 import type { ArtifactDescriptor } from "@/lib/protocol/artifact";
+import { servedModelIdFromMessage } from "@/lib/protocol/served-model";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { AgentTimeline } from "./agent-timeline";
 import { Shimmer } from "./ai-elements/shimmer";
+import { AssistantAvatar } from "./assistant-answer";
 import { BranchControls, type BranchControlsData } from "./branch-controls";
 import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
@@ -245,11 +246,7 @@ const PurePreviewMessage = ({
           "justify-start": message.role === "assistant",
         })}
       >
-        {message.role === "assistant" && (
-          <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background p-1 ring-1 ring-border">
-            <LCAIIcon size={14} />
-          </div>
-        )}
+        {message.role === "assistant" && <AssistantAvatar />}
 
         <div
           className={cn("flex flex-col", {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Square, X } from "lucide-react";
+import { AlertTriangle, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import {
@@ -9,14 +9,24 @@ import {
 } from "@/hooks/use-compare-session";
 import { useModels } from "@/hooks/use-models";
 import useWeb3Clients from "@/hooks/use-web3-clients";
-import { cn } from "@/lib/utils";
+import type { OnChainJob } from "@/lib/protocol/session";
+import { AssistantAvatar } from "./assistant-answer";
 import {
   AvailabilityDot,
   CompareModelPicker,
   MIN_COMPARE_MODELS,
 } from "./compare-model-picker";
+import { MessageContent } from "./elements/message";
+import {
+  PromptInput,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputToolbar,
+} from "./elements/prompt-input";
 import { Response } from "./elements/response";
+import { MessageReasoning } from "./message-reasoning";
 import { PipelineTimeline } from "./pipeline-timeline";
+import { ProvenanceChip } from "./provenance-chip";
 import { Button } from "./ui/button";
 
 const STORAGE_KEY = "lc-compare-models";
@@ -36,79 +46,103 @@ function loadSelection(): string[] {
   }
 }
 
-const STATUS_LABEL: Record<ComparePane["status"], string> = {
-  running: "Running",
-  done: "Done",
-  error: "Error",
-};
-
-function PaneCard({
+/**
+ * One answer column — the SAME building blocks as an assistant message in the
+ * normal chat ({@link ./message.tsx}): the {@link AssistantAvatar}, the
+ * {@link MessageContent} bubble wrapping {@link Response} for the markdown, the
+ * {@link PipelineTimeline} standing in as the thinking indicator then collapsing
+ * to a slim handle, and the shared {@link ProvenanceChip} for the settled/verify
+ * verdict. It reads like a normal chat answer that happens to live in its own
+ * column, distinguished only by a small, subtle model-name label on top.
+ */
+function PaneColumn({
   pane,
   explorerBaseUrl,
+  fetchPaneJob,
+  fetchPaneWorkerStake,
 }: {
   pane: ComparePane;
   explorerBaseUrl?: string;
+  fetchPaneJob: (
+    paneChatId: string,
+    jobId: number
+  ) => Promise<OnChainJob | null>;
+  fetchPaneWorkerStake: (
+    paneChatId: string,
+    worker: string
+  ) => Promise<bigint | null>;
 }) {
+  const { paneChatId } = pane;
   const live = pane.status === "running";
+
+  // Bind the chain reads to this pane's own transport, so the shared chip
+  // verifies exactly as it does in the main chat.
+  const fetchOnChainJob = useCallback(
+    (jobId: number) => fetchPaneJob(paneChatId, jobId),
+    [fetchPaneJob, paneChatId]
+  );
+  const fetchWorkerStake = useCallback(
+    (worker: string) => fetchPaneWorkerStake(paneChatId, worker),
+    [fetchPaneWorkerStake, paneChatId]
+  );
+
   return (
-    <div className="flex min-h-[240px] snap-center flex-col overflow-hidden rounded-xl border border-border bg-surface-base-faint/40">
-      <div className="flex items-center justify-between gap-2 border-border border-b bg-background/60 px-3 py-2">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <AvailabilityDot modelId={pane.modelId} />
-          <span className="truncate font-medium text-content-strong text-sm">
-            {pane.modelName}
-          </span>
-        </span>
-        <span
-          className={cn(
-            "shrink-0 rounded-full px-1.5 py-0.5 font-medium text-[10px] uppercase tracking-wide",
-            pane.status === "done" &&
-              "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-            pane.status === "error" &&
-              "bg-red-500/10 text-red-600 dark:text-red-400",
-            pane.status === "running" && "bg-primary/10 text-primary"
-          )}
-        >
-          {STATUS_LABEL[pane.status]}
+    <div className="flex snap-center flex-col gap-2 rounded-xl border border-bdr-light bg-surface-elevation-light/40 p-3">
+      {/* Subtle model-name label — compare's one addition over a chat answer. */}
+      <div className="flex min-w-0 items-center gap-1.5">
+        <AvailabilityDot modelId={pane.modelId} />
+        <span className="truncate font-medium text-content-secondary text-xs">
+          {pane.modelName}
         </span>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5">
-        {pane.error ? (
-          <p className="rounded-lg border border-red-500/30 bg-red-500/5 px-2.5 py-2 text-red-600 text-xs dark:text-red-400">
-            {pane.error}
-          </p>
-        ) : (
-          <>
-            {pane.reasoning && (
-              <details className="rounded-lg border border-border bg-background/40 px-2.5 py-1.5">
-                <summary className="cursor-pointer text-[11px] text-content-secondary">
-                  Reasoning
-                </summary>
-                <p className="mt-1 whitespace-pre-wrap text-[11px] text-content-subtle">
-                  {pane.reasoning}
-                </p>
-              </details>
-            )}
-            {pane.text && (
-              <div className="min-w-0 break-words text-sm">
-                <Response>{pane.text}</Response>
-              </div>
-            )}
-          </>
-        )}
+      <div className="flex w-full items-start gap-2 md:gap-3">
+        <AssistantAvatar />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {pane.error ? (
+            <p className="flex items-center gap-1.5 text-red-600 text-sm dark:text-red-400">
+              <AlertTriangle className="shrink-0" size={14} />
+              <span className="min-w-0">{pane.error}</span>
+            </p>
+          ) : (
+            <>
+              {pane.reasoning && (
+                <MessageReasoning isLoading={live} reasoning={pane.reasoning} />
+              )}
+              {pane.text && (
+                <MessageContent className="bg-transparent px-0 py-0 text-left">
+                  <Response>{pane.text}</Response>
+                </MessageContent>
+              )}
+            </>
+          )}
 
-        {/* Per-job on-chain pipeline + verification. Stands in as the thinking
-            indicator before the first token, then collapses to a slim handle. */}
-        <div className="mt-auto pt-1">
+          {/* Per-job on-chain pipeline — the thinking indicator before the
+              first token, then a slim handle. Placed where the main chat puts
+              it, directly under the answer. */}
           <PipelineTimeline
             activeJobs={pane.jobs}
-            chatId={pane.paneChatId}
+            chatId={paneChatId}
             explorerBaseUrl={explorerBaseUrl}
             firstTokenSeen={pane.firstTokenSeen}
             live={live}
             progressStatus={pane.progress}
           />
+
+          {pane.jobId !== undefined && (
+            <ProvenanceChip
+              explorerBaseUrl={explorerBaseUrl}
+              fallbackWorker={pane.jobs[0]?.worker}
+              fetchOnChainJob={fetchOnChainJob}
+              fetchWorkerStake={fetchWorkerStake}
+              jobId={pane.jobId}
+              live={live}
+              metrics={null}
+              proof={null}
+              settlement={null}
+              stats={null}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -119,9 +153,10 @@ function PaneCard({
  * Compare mode — an additive, separate flow from the normal single-model chat.
  *
  * The user picks 2–4 live models, asks one question, and every answer streams
- * in parallel, side by side. Each pane is a real, independent, on-chain job
- * (its own session, fresh relay token, its own paid settlement), so the mode
- * is labelled as N paid jobs. See {@link useCompareSession} for the fan-out.
+ * in parallel, side by side. Each column is a real, independent, on-chain job
+ * (its own session, fresh relay token, its own paid settlement) rendered with
+ * the SAME answer-presentation components as the normal chat — one design, laid
+ * out in columns. See {@link useCompareSession} for the fan-out.
  */
 export function CompareView({
   chatId,
@@ -144,12 +179,13 @@ export function CompareView({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
 
-  const { panes, isRunning, run, stop } = useCompareSession({
-    chatId,
-    walletClient,
-    publicClient,
-    getMemoryPrefix,
-  });
+  const { panes, isRunning, run, stop, fetchPaneJob, fetchPaneWorkerStake } =
+    useCompareSession({
+      chatId,
+      walletClient,
+      publicClient,
+      getMemoryPrefix,
+    });
 
   // Restore last selection on mount.
   useEffect(() => {
@@ -212,7 +248,7 @@ export function CompareView({
         </Button>
       </div>
 
-      <div className="rounded-xl border border-border bg-surface-base-faint/30 p-3">
+      <div className="rounded-xl border border-bdr-light bg-surface-elevation-light/40 p-3">
         <CompareModelPicker
           disabled={isRunning}
           onChange={updateSelection}
@@ -220,17 +256,18 @@ export function CompareView({
         />
       </div>
 
-      {/* Composer */}
-      <div className="flex flex-col gap-2 rounded-xl border border-border bg-background p-2.5">
-        <textarea
-          className="max-h-40 min-h-[52px] w-full resize-none bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-content-subtle"
+      {/* Composer — the same PromptInput shell as the main chat. */}
+      <PromptInput
+        className="p-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleSend();
+        }}
+      >
+        <PromptInputTextarea
+          disabled={isRunning}
+          minHeight={52}
           onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
           placeholder={
             enoughModels
               ? "Ask all selected models the same question…"
@@ -238,37 +275,36 @@ export function CompareView({
           }
           value={prompt}
         />
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] text-content-subtle">
+        <PromptInputToolbar>
+          <span className="px-2 text-[11px] text-content-subtle">
             {isConnected
               ? "Each answer is a separate paid, verifiable job."
               : "Connect your wallet to run a comparison."}
           </span>
           {isRunning ? (
             <Button
-              className="h-8 gap-1.5 px-3"
+              className="h-8 gap-1.5 rounded-lg px-3"
               onClick={stop}
               size="sm"
+              type="button"
               variant="outline"
             >
               <Square size={13} />
               Stop
             </Button>
           ) : (
-            <Button
-              className="h-8 gap-1.5 px-3"
+            <PromptInputSubmit
+              className="h-8 bg-gradient-primary px-3 text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
               disabled={!canSend}
-              onClick={handleSend}
-              size="sm"
+              size="default"
             >
-              <ArrowUp size={14} />
               Compare {selectedModels.length > 0 ? selectedModels.length : ""}
-            </Button>
+            </PromptInputSubmit>
           )}
-        </div>
-      </div>
+        </PromptInputToolbar>
+      </PromptInput>
 
-      {/* Panes: columns on desktop, horizontal snap-scroll on mobile. */}
+      {/* Columns on desktop, horizontal snap-scroll on mobile. */}
       {panes.length > 0 && (
         <div
           className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 md:grid md:overflow-visible"
@@ -282,7 +318,12 @@ export function CompareView({
               className="w-[82vw] shrink-0 md:w-auto md:shrink"
               key={pane.paneChatId}
             >
-              <PaneCard explorerBaseUrl={explorerBaseUrl} pane={pane} />
+              <PaneColumn
+                explorerBaseUrl={explorerBaseUrl}
+                fetchPaneJob={fetchPaneJob}
+                fetchPaneWorkerStake={fetchPaneWorkerStake}
+                pane={pane}
+              />
             </div>
           ))}
         </div>
