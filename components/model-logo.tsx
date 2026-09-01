@@ -6,6 +6,7 @@ import {
   SiMeta,
 } from "@icons-pack/react-simple-icons";
 import type { ReactNode } from "react";
+import { useModels } from "@/hooks/use-models";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,9 +48,17 @@ type Brand = {
   render: (size: number) => ReactNode;
 };
 
-/** Maps a model id (by family prefix) to its maker's logo, or null if unknown. */
-function brandFor(modelId: string): Brand | null {
-  const id = modelId.toLowerCase();
+/**
+ * Maps a model FAMILY (by friendly-name prefix — "llama3-8b", "phi3-mini",
+ * "qwen2.5-3b", "gemma2-2b") to its maker's logo, or null if unknown.
+ *
+ * NB: this must be given the friendly NAME, never the bytes32 hex id every
+ * picker/column passes around — a `0x…` string matches no prefix and the logo
+ * silently disappears. {@link ModelLogo} resolves hex → name before calling
+ * this; the fix for that bug lives there.
+ */
+function brandFor(modelName: string): Brand | null {
+  const id = modelName.toLowerCase();
   if (id.startsWith("llama")) {
     return {
       provider: "Meta",
@@ -79,22 +88,40 @@ function brandFor(modelId: string): Brand | null {
   return null;
 }
 
-/** True when we have a real logo for this model (else callers keep text only). */
-export function hasModelLogo(modelId: string): boolean {
-  return brandFor(modelId) !== null;
+/**
+ * True when we have a real logo for this friendly model name (else callers keep
+ * text only). Expects the friendly name, not the hex id.
+ */
+export function hasModelLogo(modelName: string): boolean {
+  return brandFor(modelName) !== null;
 }
 
-/** Small provider logo for a model; renders nothing for unmapped models. */
+/** A bytes32 model id looks like `0x` + 64 hex chars; friendly names never do. */
+const HEX_ID = /^0x[0-9a-f]+$/i;
+
+/**
+ * Small provider logo for a model; renders nothing for unmapped models.
+ *
+ * Accepts EITHER the friendly name ("llama3-8b") or the bytes32 hex id every
+ * call site actually passes (`model.id`, `pane.modelId`). A hex id is resolved
+ * to its friendly name via the live model list before matching — without this
+ * `brandFor` never matched a `0x…` string and no logo ever rendered.
+ */
 export function ModelLogo({
   modelId,
   size = 16,
   className,
 }: {
+  /** Friendly name or bytes32 hex id — either resolves to the same logo. */
   modelId: string;
   size?: number;
   className?: string;
 }) {
-  const brand = brandFor(modelId);
+  const { models } = useModels();
+  const name = HEX_ID.test(modelId)
+    ? (models.find((m) => m.id === modelId)?.name ?? modelId)
+    : modelId;
+  const brand = brandFor(name);
   if (!brand) {
     return null;
   }

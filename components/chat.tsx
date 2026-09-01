@@ -17,6 +17,10 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useModels } from "@/hooks/use-models";
+import {
+  type MultiModel,
+  useMultiModelSession,
+} from "@/hooks/use-multi-model-session";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
@@ -49,7 +53,6 @@ import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
-import { CompareView } from "./compare-view";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { MemoryDialog } from "./memory-dialog";
@@ -109,6 +112,9 @@ function noWorkerAvailableMessage(error: unknown): string | undefined {
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
 
+/** Device-local memory of the last multi-select model set. */
+const SELECTED_MODELS_KEY = "lc-selected-models";
+
 /**
  * The live model with the most eligible workers. Iterating in live-list
  * order and switching only on a strictly-greater count makes ties stable —
@@ -162,7 +168,18 @@ export function Chat({
 
   const [input, setInput] = useState<string>("");
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
-  const [currentModelId, setCurrentModelId] = useState(initialChatModel);
+  // The model picker is now multi-select (1–4). One selected model = the
+  // unchanged single-model chat below; 2+ = the additive multi-model fan-out.
+  // Seeded single from the SSR cookie default and hydrated from localStorage
+  // post-mount (below) so SSR and first client render agree.
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([
+    initialChatModel,
+  ]);
+  // The single-model chat, its transport, and everything downstream key off one
+  // model — the first selected. With one model selected this IS that model and
+  // nothing changes; with several, this is the head of the list and the single
+  // transport simply sits idle while the multi-model path runs instead.
+  const currentModelId = selectedModelIds[0] ?? initialChatModel;
   const currentModelIdRef = useRef(currentModelId);
   // True once the user explicitly picks a model in this session, so the
   // "most workers" default below stops overriding their choice.
@@ -198,27 +215,39 @@ export function Chat({
       return;
     }
 
-    const currentIsAvailable = availableModels.some(
-      (model) => model.id === currentModelId
-    );
     const countsKnown = Object.keys(workerCounts).length > 0;
 
-    // Current model isn't in the live list at all — pick something usable now
-    // so the picker never shows "Select model". Prefer the most-workers model
-    // once counts are known, otherwise the legacy name/first-in-list default.
-    if (!currentIsAvailable) {
+    // Drop any selected model that has gone offline. A multi-selection keeps
+    // the rest; if everything went offline it falls through to the fallback.
+    const liveIds = selectedModelIds.filter((modelId) =>
+      availableModels.some((model) => model.id === modelId)
+    );
+
+    if (liveIds.length === 0) {
+      // Nothing selected is available — pick one usable model so the picker
+      // never shows "Select model". Prefer the most-workers model once counts
+      // are known, otherwise the legacy name/first-in-list default.
       const fallback = countsKnown
         ? pickModelWithMostWorkers(availableModels, workerCounts)
         : (availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
           availableModels[0]);
-      setCurrentModelId(fallback.id);
-      void saveChatModelAsCookie(fallback.id);
+      setSelectedModelIds([fallback.id]);
+      saveChatModelAsCookie(fallback.id);
       return;
     }
 
-    // The current model is in the live list. Respect an explicit in-session
-    // pick, and only apply the most-workers default once (and once counts are
-    // known) so a provisional cookie default doesn't thrash while loading.
+    // Prune offline models out of a multi-selection without disturbing order.
+    if (liveIds.length !== selectedModelIds.length) {
+      setSelectedModelIds(liveIds);
+    }
+
+    // The most-workers default only applies to a lone selection — a deliberate
+    // multi-select is never second-guessed. Respect an explicit in-session
+    // pick, and apply the default at most once (and once counts are known) so a
+    // provisional cookie default doesn't thrash while loading.
+    if (liveIds.length !== 1) {
+      return;
+    }
     if (userPickedModelRef.current || appliedWorkerDefaultRef.current) {
       return;
     }
@@ -228,16 +257,17 @@ export function Chat({
 
     appliedWorkerDefaultRef.current = true;
 
+    const soleId = liveIds[0];
     const best = pickModelWithMostWorkers(availableModels, workerCounts);
     const bestCount = workerCounts[best.id] ?? 0;
-    const currentCount = workerCounts[currentModelId] ?? 0;
+    const currentCount = workerCounts[soleId] ?? 0;
     // Switch only to a strictly better model, so the persisted cookie choice is
     // kept whenever it already ties for the most workers.
-    if (best.id !== currentModelId && bestCount > currentCount) {
-      setCurrentModelId(best.id);
-      void saveChatModelAsCookie(best.id);
+    if (best.id !== soleId && bestCount > currentCount) {
+      setSelectedModelIds([best.id]);
+      saveChatModelAsCookie(best.id);
     }
-  }, [availableModels, currentModelId, workerCounts]);
+  }, [availableModels, selectedModelIds, workerCounts]);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
@@ -248,11 +278,7 @@ export function Chat({
   const [enableWebSearch, setEnableWebSearch] = useState(false);
   const enableWebSearchRef = useRef(enableWebSearch);
 
-  // Compare mode — an additive, separate flow (protocol mode only). When on,
-  // the normal single-model chat body is swapped for the side-by-side compare
-  // view; nothing about the single-model path changes.
-  const [compareMode, setCompareMode] = useState(false);
-  const { walletClient } = useWeb3Clients();
+  const { walletClient, publicClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
 
@@ -481,11 +507,48 @@ export function Chat({
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
 
-  // Wraps the picker's change so an explicit pick is remembered for the
-  // session; cookie persistence still happens inside the picker itself.
-  const handleModelChange = useCallback((modelId: string) => {
+  // Restore a previously-chosen multi-selection post-mount (never during SSR,
+  // so hydration matches). The auto-default effect above then prunes anything
+  // that has since gone offline.
+  const hydratedSelectionRef = useRef(false);
+  useEffect(() => {
+    if (hydratedSelectionRef.current) {
+      return;
+    }
+    hydratedSelectionRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(SELECTED_MODELS_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed: unknown = JSON.parse(raw);
+      const ids = Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === "string").slice(0, 4)
+        : [];
+      if (ids.length > 0) {
+        userPickedModelRef.current = true;
+        setSelectedModelIds(ids);
+      }
+    } catch {
+      // Private mode / malformed value — keep the SSR default.
+    }
+  }, []);
+
+  // Wraps the picker's change so an explicit selection is remembered for the
+  // session and persisted (localStorage for the full set, cookie for the head
+  // so an SSR reload starts on the same first model).
+  const handleModelsChange = useCallback((ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
     userPickedModelRef.current = true;
-    setCurrentModelId(modelId);
+    setSelectedModelIds(ids);
+    try {
+      window.localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(ids));
+    } catch {
+      // Private mode / quota — the selection just won't persist across reloads.
+    }
+    saveChatModelAsCookie(ids[0]);
   }, []);
 
   useEffect(() => {
@@ -591,6 +654,73 @@ export function Chat({
     },
   });
 
+  // Multi-model fan-out (protocol mode). Drives its own N transports and
+  // streams each answer into the SAME `messages` list as a sibling assistant
+  // row via setMessages — the single-model transport above is untouched.
+  const multiModel = useMultiModelSession({
+    chatId: id,
+    walletClient,
+    publicClient,
+    address,
+    getMemoryPrefix,
+    setMessages,
+    // Same post-turn refresh the single-model onFinish does: surface the new
+    // chat in the sidebar and pull the paid-job balance changes.
+    onFinish: () => {
+      mutate(unstable_serialize(getChatHistoryPaginationKey));
+      prepaid.refetch();
+      balance.refetch();
+    },
+  });
+
+  // The live { id, name } models behind the current selection, in pick order.
+  const selectedModels = useMemo<MultiModel[]>(
+    () =>
+      selectedModelIds
+        .map((modelId) => availableModels.find((m) => m.id === modelId))
+        .filter((m): m is MultiModel => m !== undefined),
+    [selectedModelIds, availableModels]
+  );
+
+  const isMultiModel = isProtocolMode && selectedModels.length >= 2;
+
+  // The send the whole UI calls. One model → the untouched useChat/protocol
+  // path. Two or more → append the prompt once and fan it out. Same shape as
+  // useChat.sendMessage so every existing call site (composer, suggestions,
+  // ?query=) routes through here unchanged.
+  const sendChatMessage: typeof sendMessage = useCallback(
+    (message, options) => {
+      if (isMultiModel) {
+        const parts =
+          message && typeof message === "object" && "parts" in message
+            ? ((message as { parts?: ChatMessage["parts"] }).parts ?? [])
+            : [];
+        const userMessage: ChatMessage = {
+          id: generateUUID(),
+          role: "user",
+          parts,
+          metadata: { createdAt: new Date().toISOString() },
+        };
+        multiModel.run({
+          userMessage,
+          models: selectedModels,
+          groupId: generateUUID(),
+          enableWebSearch: enableWebSearchRef.current,
+          systemPrompt: systemPromptRef.current,
+          selectedVisibilityType: visibilityType,
+        });
+        return Promise.resolve();
+      }
+      return sendMessage(message, options);
+    },
+    [isMultiModel, multiModel, selectedModels, sendMessage, visibilityType]
+  );
+
+  // While a multi-model turn streams, the composer must show a Stop and the
+  // busy state even though useChat itself is idle (it isn't driving the send).
+  const effectiveStatus = multiModel.isRunning ? "streaming" : status;
+  const effectiveStop = multiModel.isRunning ? multiModel.stop : stop;
+
   // --- Conversation branching (device-local, lib/branches.ts) -------------
   // Loaded post-mount (not in useState) so SSR and the first client render
   // agree; the branched view is applied once per chat right after.
@@ -688,7 +818,7 @@ export function Chat({
         return;
       }
 
-      sendMessage({
+      sendChatMessage({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
       });
@@ -696,7 +826,7 @@ export function Chat({
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
-  }, [query, sendMessage, hasAppendedQuery, id, canPrompt]);
+  }, [query, sendChatMessage, hasAppendedQuery, id, canPrompt]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
@@ -730,109 +860,93 @@ export function Chat({
           systemPromptId={systemPromptId}
         />
 
-        {compareMode ? (
-          <CompareView
-            chatId={id}
-            explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
-            getMemoryPrefix={getMemoryPrefix}
-            onBeforeSend={canPrompt}
-            onExit={() => setCompareMode(false)}
+        <UsageWarningBanner
+          className="mx-6 mt-4"
+          subscriptionTier="basic"
+          totalTokens={usage?.totalTokens ?? 0}
+        />
+
+        {sessionRecovering && (
+          <SessionRecoveryBanner
+            className="mb-2"
+            failoverStatus={failoverStatus}
+            onNewSession={startNewSession}
+            onRetry={retryFailover}
           />
-        ) : (
-          <>
-            <UsageWarningBanner
-              className="mx-6 mt-4"
-              subscriptionTier="basic"
-              totalTokens={usage?.totalTokens ?? 0}
-            />
-
-            {sessionRecovering && (
-              <SessionRecoveryBanner
-                className="mb-2"
-                failoverStatus={failoverStatus}
-                onNewSession={startNewSession}
-                onRetry={retryFailover}
-              />
-            )}
-
-            <Messages
-              activeJobs={activeJobs}
-              branchStore={isReadonly ? undefined : branchStore}
-              chatId={id}
-              claimJobTimeout={claimJobTimeout}
-              disputeJob={disputeJob}
-              disputeResponseMismatch={disputeResponseMismatch}
-              explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
-              fetchOnChainJob={fetchOnChainJob}
-              fetchWorkerStake={fetchWorkerStake}
-              hasMismatchEvidence={hasMismatchEvidence}
-              isArtifactVisible={false}
-              isReadonly={isReadonly}
-              messages={messages}
-              onAddBranch={isReadonly ? undefined : handleAddBranch}
-              onFork={isReadonly ? undefined : handleFork}
-              onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
-              protocolProgressStatus={progressStatus}
-              regenerate={regenerate}
-              selectedModelId={initialChatModel}
-              setMessages={setMessages}
-              status={status}
-              votes={votes}
-            />
-
-            {!isReadonly && messages.length > 0 && (
-              <div className="flex justify-end px-4 pt-1">
-                <ShareTranscriptButton
-                  chatId={id}
-                  getShareEvidence={getShareEvidence}
-                  messages={messages}
-                />
-              </div>
-            )}
-
-            <div
-              className={
-                "sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4"
-              }
-            >
-              {!isReadonly && (
-                <MultimodalInput
-                  attachments={attachments}
-                  chatId={id}
-                  disabled={sessionRecovering}
-                  disabledPlaceholder="Session recovering..."
-                  enableWebSearch={enableWebSearch}
-                  input={input}
-                  memoryActive={
-                    isProtocolMode &&
-                    memoryStore.enabled &&
-                    memoryStore.entries.length > 0
-                  }
-                  messages={messages}
-                  onBeforeSubmit={canPrompt}
-                  onEnterCompare={
-                    isProtocolMode && !isReadonly
-                      ? () => setCompareMode(true)
-                      : undefined
-                  }
-                  onModelChange={handleModelChange}
-                  onOpenMemory={() => setMemoryDialogOpen(true)}
-                  onWebSearchToggle={setEnableWebSearch}
-                  searchCapable={searchCapable}
-                  selectedModelId={currentModelId}
-                  selectedVisibilityType={visibilityType}
-                  sendMessage={sendMessage}
-                  setAttachments={setAttachments}
-                  setInput={setInput}
-                  setMessages={setMessages}
-                  status={status}
-                  stop={stop}
-                  usage={usage}
-                />
-              )}
-            </div>
-          </>
         )}
+
+        <Messages
+          activeJobs={activeJobs}
+          branchStore={isReadonly ? undefined : branchStore}
+          chatId={id}
+          claimJobTimeout={claimJobTimeout}
+          disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
+          isArtifactVisible={false}
+          isReadonly={isReadonly}
+          messages={messages}
+          multiModelLive={multiModel.live}
+          onAddBranch={isReadonly ? undefined : handleAddBranch}
+          onFork={isReadonly ? undefined : handleFork}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
+          protocolProgressStatus={progressStatus}
+          regenerate={regenerate}
+          selectedModelId={currentModelId}
+          setMessages={setMessages}
+          status={status}
+          votes={votes}
+        />
+
+        {!isReadonly && messages.length > 0 && (
+          <div className="flex justify-end px-4 pt-1">
+            <ShareTranscriptButton
+              chatId={id}
+              getShareEvidence={getShareEvidence}
+              messages={messages}
+            />
+          </div>
+        )}
+
+        <div
+          className={
+            "sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4"
+          }
+        >
+          {!isReadonly && (
+            <MultimodalInput
+              attachments={attachments}
+              chatId={id}
+              disabled={sessionRecovering}
+              disabledPlaceholder="Session recovering..."
+              enableWebSearch={enableWebSearch}
+              input={input}
+              memoryActive={
+                isProtocolMode &&
+                memoryStore.enabled &&
+                memoryStore.entries.length > 0
+              }
+              messages={messages}
+              onBeforeSubmit={canPrompt}
+              onModelsChange={handleModelsChange}
+              onOpenMemory={() => setMemoryDialogOpen(true)}
+              onWebSearchToggle={setEnableWebSearch}
+              searchCapable={searchCapable}
+              selectedModelIds={selectedModelIds}
+              selectedVisibilityType={visibilityType}
+              sendMessage={sendChatMessage}
+              setAttachments={setAttachments}
+              setInput={setInput}
+              setMessages={setMessages}
+              status={effectiveStatus}
+              stop={effectiveStop}
+              usage={usage}
+            />
+          )}
+        </div>
       </div>
 
       <MemoryDialog

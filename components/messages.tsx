@@ -4,8 +4,10 @@ import { AnimatePresence } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
+import type { MultiModelLive } from "@/hooks/use-multi-model-session";
 import type { BranchStore } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
+import { groupIdFromMessage } from "@/lib/protocol/served-model";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import {
@@ -18,7 +20,48 @@ import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
 import { PreviewMessage, ThinkingMessage } from "./message";
+import { MultiModelAnswer } from "./multi-model-answer";
 import { PipelineTimeline } from "./pipeline-timeline";
+
+/**
+ * A flat message list, walked once into render items: a run of consecutive
+ * assistant rows that share a groupId (2+) becomes one multi-model column
+ * group; everything else — including a lone assistant row with a groupId —
+ * stays a single bubble, rendered exactly as before.
+ */
+type RenderItem =
+  | { kind: "single"; message: ChatMessage; index: number }
+  | { kind: "group"; messages: ChatMessage[]; startIndex: number };
+
+function toRenderItems(messages: ChatMessage[]): RenderItem[] {
+  const items: RenderItem[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const message = messages[i];
+    const groupId =
+      message.role === "assistant" ? groupIdFromMessage(message) : undefined;
+    if (groupId) {
+      const group: ChatMessage[] = [message];
+      let j = i + 1;
+      while (
+        j < messages.length &&
+        messages[j].role === "assistant" &&
+        groupIdFromMessage(messages[j]) === groupId
+      ) {
+        group.push(messages[j]);
+        j++;
+      }
+      if (group.length >= 2) {
+        items.push({ kind: "group", messages: group, startIndex: i });
+        i = j;
+        continue;
+      }
+    }
+    items.push({ kind: "single", message, index: i });
+    i++;
+  }
+  return items;
+}
 
 type MessagesProps = {
   chatId: string;
@@ -46,6 +89,8 @@ type MessagesProps = {
   onFork?: (anchorId: string) => void;
   onSwitchBranch?: (anchorId: string, index: number) => void;
   onAddBranch?: (anchorId: string) => void;
+  /** Transient per-column status for an in-flight multi-model turn. */
+  multiModelLive?: MultiModelLive;
 };
 
 function PureMessages({
@@ -70,6 +115,7 @@ function PureMessages({
   onFork,
   onSwitchBranch,
   onAddBranch,
+  multiModelLive,
 }: MessagesProps) {
   const initialScrollChatIdRef = useRef<string | null>(null);
   const {
@@ -211,15 +257,32 @@ function PureMessages({
         <ConversationContent className="flex h-full flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && <Greeting />}
 
-          {messages.map((message, index) => {
+          {toRenderItems(messages).map((item) => {
+            if (item.kind === "group") {
+              return (
+                <MultiModelAnswer
+                  chatId={chatId}
+                  explorerBaseUrl={explorerBaseUrl}
+                  fetchOnChainJob={fetchOnChainJob}
+                  fetchWorkerStake={fetchWorkerStake}
+                  group={item.messages}
+                  isReadonly={isReadonly}
+                  key={`group-${item.messages[0].id}`}
+                  live={multiModelLive}
+                  regenerate={regenerate}
+                  setMessages={setMessages}
+                />
+              );
+            }
+
             // The placeholder assistant message is represented by the thinking
             // indicator below until it has text, so rendering it here too would
             // stack an empty bubble on top of it.
-            if (awaitingFirstToken && index === messages.length - 1) {
+            if (awaitingFirstToken && item.index === messages.length - 1) {
               return null;
             }
 
-            return renderPreview(message, index);
+            return renderPreview(item.message, item.index);
           })}
 
           {protocolActive && (

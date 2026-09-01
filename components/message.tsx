@@ -49,11 +49,18 @@ const PurePreviewMessage = ({
   fetchWorkerStake,
   explorerBaseUrl,
   branch,
+  disableActions,
 }: {
   chatId: string;
   message: ChatMessage;
   vote: Vote | undefined;
   isLoading: boolean;
+  /**
+   * Suppresses the per-message action bar (copy/vote/regenerate), branch
+   * controls, and job actions. Set on multi-model answer columns, where a
+   * whole-turn regenerate or a per-column branch would target the wrong thing.
+   */
+  disableActions?: boolean;
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
@@ -498,7 +505,7 @@ const PurePreviewMessage = ({
               />
             )}
 
-          {!isReadonly && (
+          {!isReadonly && !disableActions && (
             <div className="flex items-center gap-1">
               <MessageActions
                 chatId={chatId}
@@ -515,7 +522,7 @@ const PurePreviewMessage = ({
             </div>
           )}
 
-          {!isReadonly && jobId !== undefined && (
+          {!isReadonly && !disableActions && jobId !== undefined && (
             <MessageJobActions
               jobId={jobId}
               messageRole={message.role as "user" | "assistant"}

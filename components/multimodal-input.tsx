@@ -1,10 +1,9 @@
 "use client";
 
 import type { UseChatHelpers } from "@ai-sdk/react";
-import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Brain, Columns } from "lucide-react";
+import { Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -12,41 +11,26 @@ import {
   type Dispatch,
   memo,
   type SetStateAction,
-  startTransition,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
-import { saveChatModelAsCookie } from "@/app/(chat)/actions";
-import { SelectItem } from "@/components/ui/select";
-import { useModels } from "@/hooks/use-models";
-import { useWorkerCounts } from "@/hooks/use-worker-counts";
-import { type Availability, availabilityOf } from "@/lib/ai/availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
+import { CompareModelMultiSelect } from "./compare-model-picker";
 import {
   PromptInput,
-  PromptInputModelSelect,
-  PromptInputModelSelectContent,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
 } from "./elements/prompt-input";
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  CpuIcon,
-  PaperclipIcon,
-  StopIcon,
-} from "./icons";
-import { ModelLogo } from "./model-logo";
+import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
@@ -68,8 +52,8 @@ function PureMultimodalInput({
   sendMessage,
   className,
   selectedVisibilityType,
-  selectedModelId,
-  onModelChange,
+  selectedModelIds,
+  onModelsChange,
   usage,
   enableWebSearch,
   onWebSearchToggle,
@@ -79,7 +63,6 @@ function PureMultimodalInput({
   onBeforeSubmit,
   memoryActive,
   onOpenMemory,
-  onEnterCompare,
 }: {
   chatId: string;
   input: string;
@@ -93,8 +76,9 @@ function PureMultimodalInput({
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
   className?: string;
   selectedVisibilityType: VisibilityType;
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
+  /** 1–4 selected models. One → single-model chat; 2+ → multi-model fan-out. */
+  selectedModelIds: string[];
+  onModelsChange?: (modelIds: string[]) => void;
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
@@ -102,8 +86,6 @@ function PureMultimodalInput({
   disabled?: boolean;
   disabledPlaceholder?: string;
   onBeforeSubmit?: () => boolean;
-  /** Enter side-by-side compare mode (protocol mode only). */
-  onEnterCompare?: () => void;
   /**
    * Device-local memory (lib/memory.ts) is enabled and has entries shaping
    * prompts. Indicator only — click opens the memory dialog (chat.tsx).
@@ -392,26 +374,11 @@ function PureMultimodalInput({
                 </span>
               </Button>
             )}
-            <ModelSelectorCompact
-              onModelChange={onModelChange}
-              selectedModelId={selectedModelId}
+            <CompareModelMultiSelect
+              min={1}
+              onChange={(ids) => onModelsChange?.(ids)}
+              selectedIds={selectedModelIds}
             />
-            {onEnterCompare && (
-              <Button
-                aria-label="Compare models side by side"
-                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
-                onClick={(event) => {
-                  event.preventDefault();
-                  onEnterCompare();
-                }}
-                title="Compare models — run one prompt across up to 4 models in parallel"
-                type="button"
-                variant="ghost"
-              >
-                <Columns className="size-4 text-primary" />
-                <span className="hidden sm:inline">Compare</span>
-              </Button>
-            )}
           </PromptInputTools>
 
           {status === "submitted" || status === "streaming" ? (
@@ -459,7 +426,7 @@ export const MultimodalInput = memo(
     if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
       return false;
     }
-    if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+    if (!equal(prevProps.selectedModelIds, nextProps.selectedModelIds)) {
       return false;
     }
     if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
@@ -548,150 +515,6 @@ function PureAttachmentsButton({
 // biome-ignore lint/correctness/noUnusedVariables: This is used in the future
 const AttachmentsButton = memo(PureAttachmentsButton);
 
-function PureModelSelectorCompact({
-  selectedModelId,
-  onModelChange,
-}: {
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
-}) {
-  const { models } = useModels();
-  const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
-  const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    setOptimisticModelId(selectedModelId);
-  }, [selectedModelId]);
-
-  const selectedModel = models.find((model) => model.id === optimisticModelId);
-
-  // Live per-model worker count from the WorkerRegistry. A model with a
-  // known count of 0 is not claimable, so its row is disabled; while the
-  // count is still unknown (loading or a failed read) the row stays
-  // selectable rather than being greyed on a guess.
-  const modelIds = useMemo(() => models.map((model) => model.id), [models]);
-  const { counts } = useWorkerCounts(modelIds);
-
-  // The live list only carries the models a worker is currently serving, so a
-  // filter only earns its space once that list is long enough to scan.
-  const showSearch = models.length > MODEL_SEARCH_THRESHOLD;
-
-  const filteredModels = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) {
-      return models;
-    }
-    return models.filter((model) => model.name.toLowerCase().includes(needle));
-  }, [models, query]);
-
-  return (
-    <PromptInputModelSelect
-      onOpenChange={(next) => {
-        if (!next) {
-          setQuery("");
-        }
-      }}
-      onValueChange={(modelId) => {
-        setOptimisticModelId(modelId);
-        setQuery("");
-        onModelChange?.(modelId);
-        startTransition(() => {
-          saveChatModelAsCookie(modelId);
-        });
-      }}
-      value={selectedModel?.id}
-    >
-      <Trigger
-        className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
-        type="button"
-      >
-        {selectedModel ? (
-          <AvailabilityDot modelId={selectedModel.id} />
-        ) : (
-          <CpuIcon size={16} />
-        )}
-        {selectedModel && <ModelLogo modelId={selectedModel.id} size={14} />}
-        <span className="hidden font-medium text-xs sm:block">
-          {selectedModel?.name ?? "Select model"}
-        </span>
-        <ChevronDownIcon size={16} />
-      </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
-        {showSearch && (
-          <div className="border-bdr-light border-b p-1.5">
-            <input
-              className="w-full rounded-md bg-surface-base-faint px-2 py-1 text-xs outline-none placeholder:text-content-subtle"
-              onChange={(event) => setQuery(event.target.value)}
-              // The select's typeahead would otherwise swallow every keystroke.
-              onKeyDown={(event) => event.stopPropagation()}
-              placeholder="Search models"
-              value={query}
-            />
-          </div>
-        )}
-        <div className="flex max-h-[320px] flex-col gap-px overflow-y-auto p-1">
-          {filteredModels.length === 0 && (
-            <p className="px-2 py-3 text-center text-content-subtle text-xs">
-              {models.length === 0
-                ? "No models available"
-                : `No model matches “${query}”`}
-            </p>
-          )}
-          {filteredModels.map((model) => {
-            const workerCount = counts[model.id];
-            // Only a *known* zero disables — unknown (loading/failed) stays on.
-            const disabled = workerCount === 0;
-
-            return (
-              <SelectItem
-                className="rounded-lg"
-                disabled={disabled}
-                key={model.id}
-                value={model.id}
-              >
-                <span className="flex w-full min-w-0 items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <AvailabilityDot modelId={model.id} />
-                    <ModelLogo modelId={model.id} size={14} />
-                    <h6 className="mb-0.5 truncate font-medium text-xs">
-                      {model.name}
-                    </h6>
-                  </span>
-                  {workerCount !== undefined && (
-                    <span
-                      className={cn(
-                        "ml-auto shrink-0 text-[10px]",
-                        workerCount === 0
-                          ? "text-red-500"
-                          : "text-content-subtle"
-                      )}
-                    >
-                      {workerCountLabel(workerCount)}
-                    </span>
-                  )}
-                </span>
-              </SelectItem>
-            );
-          })}
-        </div>
-      </PromptInputModelSelectContent>
-    </PromptInputModelSelect>
-  );
-}
-
-/** Above this many live models the picker grows a name filter. */
-const MODEL_SEARCH_THRESHOLD = 6;
-
-/** Subtle worker-count label for a picker row. 0 reads as "No workers". */
-function workerCountLabel(count: number): string {
-  if (count === 0) {
-    return "No workers";
-  }
-  return `${count} ${count === 1 ? "worker" : "workers"}`;
-}
-
-const ModelSelectorCompact = memo(PureModelSelectorCompact);
-
 function PureStopButton({
   stop,
   setMessages,
@@ -715,41 +538,3 @@ function PureStopButton({
 }
 
 const StopButton = memo(PureStopButton);
-
-const AVAILABILITY_STYLES: Record<
-  Availability,
-  { className: string; title: string }
-> = {
-  good: {
-    className: "bg-emerald-500",
-    title:
-      "Recent jobs on this model completed — device-local signal from your last few jobs, not a fleet-wide measurement",
-  },
-  shaky: {
-    className: "bg-amber-500",
-    title:
-      "A recent job on this model failed or timed out — device-local signal from your last few jobs, not a fleet-wide measurement",
-  },
-  unknown: {
-    className: "bg-content-subtle/30",
-    title: "No recent jobs on this model from this device yet",
-  },
-};
-
-/** Small per-row availability dot (lib/ai/availability.ts — device-local). */
-function AvailabilityDot({ modelId }: { modelId: string }) {
-  const availability = availabilityOf(modelId);
-  const style = AVAILABILITY_STYLES[availability];
-  return (
-    <span
-      aria-label={`availability: ${availability}`}
-      className={cn(
-        "inline-block size-1.5 shrink-0 rounded-full",
-        style.className
-      )}
-      data-testid={`availability-dot-${availability}`}
-      role="img"
-      title={style.title}
-    />
-  );
-}

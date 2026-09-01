@@ -38,13 +38,13 @@ export function AvailabilityDot({ modelId }: { modelId: string }) {
 }
 
 /**
- * Compact multi-select for compare mode: pick between {@link MIN_COMPARE_MODELS}
- * and {@link MAX_COMPARE_MODELS} models to run the same prompt against.
+ * The main composer's model picker: a compact multi-select for 1–4 models
+ * ({@link min}..{@link MAX_COMPARE_MODELS}). One selected model is the ordinary
+ * single-model chat; two or more fan the same prompt out to a column each.
  *
- * A dropdown so it can live *inside* the composer's toolbar — the same slot the
- * single-model picker sits in on the normal chat — instead of a separate card.
- * The trigger reads as one restrained toolbar control ("N models"); opening it
- * reveals the checkable list.
+ * A dropdown so it lives *inside* the composer's toolbar. The trigger adapts —
+ * one selected model shows its logo + name (reading like the old single-model
+ * picker), several read as "N models"; opening it reveals the checkable list.
  *
  * Only models a worker is currently serving are selectable — the worker count
  * (WorkerRegistry.getEligibleWorkers, the same data the single-model picker
@@ -57,10 +57,18 @@ export function CompareModelMultiSelect({
   selectedIds,
   onChange,
   disabled,
+  min = MIN_COMPARE_MODELS,
 }: {
   selectedIds: string[];
   onChange: (ids: string[]) => void;
   disabled?: boolean;
+  /**
+   * Fewest models the selection may hold — deselecting the last one below this
+   * is refused so the composer always has at least one model to send to. The
+   * main chat passes 1 (the picker doubles as the single-model selector);
+   * compare kept the default of 2.
+   */
+  min?: number;
 }) {
   const { models } = useModels();
   const modelIds = useMemo(() => models.map((m) => m.id), [models]);
@@ -70,6 +78,8 @@ export function CompareModelMultiSelect({
 
   const toggle = (id: string) => {
     if (selectedIds.includes(id)) {
+      // Never drop below the floor — the last kept model can't be removed.
+      if (selectedIds.length <= min) return;
       onChange(selectedIds.filter((x) => x !== id));
     } else if (!atCap) {
       onChange([...selectedIds, id]);
@@ -77,8 +87,8 @@ export function CompareModelMultiSelect({
   };
 
   const count = selectedIds.length;
-  const label =
-    count === 0 ? "Select models" : `${count} model${count === 1 ? "" : "s"}`;
+  const soleModel =
+    count === 1 ? models.find((m) => m.id === selectedIds[0]) : undefined;
 
   return (
     <DropdownMenu>
@@ -87,8 +97,22 @@ export function CompareModelMultiSelect({
           className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-surface-base-faint"
           type="button"
         >
-          <Layers className="size-4 text-primary" />
-          <span className="font-medium text-xs">{label}</span>
+          {count === 1 ? (
+            <>
+              {soleModel && <AvailabilityDot modelId={soleModel.id} />}
+              {soleModel && <ModelLogo modelId={soleModel.id} size={14} />}
+              <span className="hidden font-medium text-xs sm:block">
+                {soleModel?.name ?? "1 model"}
+              </span>
+            </>
+          ) : (
+            <>
+              <Layers className="size-4 text-primary" />
+              <span className="font-medium text-xs">
+                {count === 0 ? "Select models" : `${count} models`}
+              </span>
+            </>
+          )}
           <ChevronDown className="size-4" />
         </button>
       </DropdownMenuTrigger>
@@ -98,10 +122,10 @@ export function CompareModelMultiSelect({
       >
         <div className="flex items-baseline justify-between gap-2 px-2 py-1">
           <span className="font-medium text-[11px] text-content-strong uppercase tracking-[0.08em]">
-            Compare
+            Models
           </span>
           <span className="text-[11px] text-content-subtle">
-            {count}/{MAX_COMPARE_MODELS} selected
+            {count}/{MAX_COMPARE_MODELS} · pick up to {MAX_COMPARE_MODELS}
           </span>
         </div>
         {models.length === 0 && (

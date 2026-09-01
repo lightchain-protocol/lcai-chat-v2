@@ -21,6 +21,10 @@ export type WebSearchSource = {
 export const messageMetadataSchema = z.object({
   createdAt: z.string(),
   jobId: z.number().int().optional(),
+  // Per-turn id shared by the N sibling assistant rows of a multi-model send.
+  // The load-bearing copy is carried inside protocolMeta (persisted + rehydrated
+  // by convertToUIMessages); this top-level field mirrors it for convenience.
+  groupId: z.string().optional(),
   protocolMeta: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -92,6 +96,9 @@ export type CustomUIDataTypes = {
     correlationId?: string;
     completedAt?: string;
     model?: string;
+    // Set only on the sibling rows of a multi-model turn, so a reloaded chat
+    // reassembles them into columns. Absent on ordinary single-model answers.
+    groupId?: string;
   };
   // What the model itself measured for the generation. Arrives on its own
   // frame kind from the worker rather than being inferred client-side.

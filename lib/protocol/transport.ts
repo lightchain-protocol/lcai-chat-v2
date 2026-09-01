@@ -413,6 +413,10 @@ export class ProtocolTransport {
    */
   async sendMessages(options: {
     messages: Array<{
+      // Optional in the type, but the user-row persist reads it — callers that
+      // want the message stored under a stable id (the multi-model fan-out, so
+      // every model writes and dedupes the same row) must pass it.
+      id?: string;
       role: string;
       parts?: Array<{ type: string; text?: string }>;
     }>;
@@ -538,6 +542,13 @@ export class ProtocolTransport {
       friendlyModelId:
         typeof options.body?.friendlyModelId === "string"
           ? options.body.friendlyModelId
+          : undefined,
+      // Multi-model fan-out: the shared per-turn id, so the N sibling assistant
+      // rows persist with it and a reloaded chat reassembles them into columns.
+      // Absent on ordinary single-model sends.
+      groupId:
+        typeof options.body?.groupId === "string"
+          ? options.body.groupId
           : undefined,
       onJobIdResolved: (jobId) => {
         persist.settle(jobId);
@@ -1658,6 +1669,13 @@ export class ProtocolTransport {
      * protocolMeta so tier labels and transcripts name what served it.
      */
     friendlyModelId?: string;
+    /**
+     * Multi-model fan-out only: the per-turn id shared by every sibling
+     * assistant row of this send. Folded into protocolMeta so it rides the live
+     * data-protocolMeta part AND is persisted with the message; a reloaded chat
+     * groups rows by it into columns. Undefined for single-model sends.
+     */
+    groupId?: string;
     /** Fired once, with the first jobId this stream learns about. */
     onJobIdResolved: (jobId: number) => void;
     /** Fired once when the stream ends, with the jobId if one was learned. */
@@ -1669,6 +1687,7 @@ export class ProtocolTransport {
       prelude,
       signal,
       friendlyModelId,
+      groupId,
       onJobIdResolved,
       onTerminated,
     } = args;
@@ -1882,6 +1901,8 @@ export class ProtocolTransport {
             // Friendly catalogue id ("agentworld-35b-max") so tier labels
             // and transcripts can name what served the answer.
             model: friendlyModelId,
+            // Only present on a multi-model turn's sibling rows.
+            ...(groupId ? { groupId } : {}),
           };
           relayClient?.beginAssistantMessage({
             jobId,
