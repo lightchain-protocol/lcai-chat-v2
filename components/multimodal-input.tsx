@@ -3,7 +3,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { Brain } from "lucide-react";
+import { AlertTriangle, Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -18,6 +18,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
@@ -121,6 +122,14 @@ function PureMultimodalInput({
   );
 
   const canUseChat = session.status === "authenticated";
+
+  // A full worker fails the draw rather than queueing, so a prompt sent now
+  // would be paid for and then time out. Block the composer and say why.
+  // Busy only when every selected model is full — one busy column should not
+  // stop a fan-out the others can serve. `unknown` never blocks.
+  const { isBusy: noWorkersAvailable } =
+    useWorkerAvailability(selectedModelIds);
+  const inputBlocked = disabled || noWorkersAvailable;
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -287,6 +296,19 @@ function PureMultimodalInput({
           }
         }}
       >
+        {noWorkersAvailable && (
+          <output
+            className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-700 text-xs dark:text-amber-400"
+            data-testid="no-workers-banner"
+          >
+            <AlertTriangle className="mt-px size-3.5 shrink-0" />
+            <span>
+              No workers available right now — every worker is at capacity, so a
+              prompt sent now would not be picked up. This clears on its own;
+              please check back shortly.
+            </span>
+          </output>
+        )}
         {(attachments.length > 0 || uploadQueue.length > 0) && (
           <div
             className="flex flex-row items-end gap-2 overflow-x-scroll"
@@ -334,14 +356,16 @@ function PureMultimodalInput({
             className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
-            disabled={disabled || !canUseChat}
+            disabled={inputBlocked || !canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
             placeholder={
-              disabled && disabledPlaceholder
-                ? disabledPlaceholder
-                : "Send a message..."
+              noWorkersAvailable
+                ? "No workers available right now — please check back shortly"
+                : disabled && disabledPlaceholder
+                  ? disabledPlaceholder
+                  : "Send a message..."
             }
             ref={textareaRef}
             rows={1}
@@ -386,7 +410,7 @@ function PureMultimodalInput({
           ) : (
             <PromptInputSubmit
               className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
-              disabled={disabled || !input.trim() || uploadQueue.length > 0}
+              disabled={inputBlocked || !input.trim() || uploadQueue.length > 0}
               status={status}
             >
               <ArrowUpIcon size={14} />
@@ -399,7 +423,7 @@ function PureMultimodalInput({
         attachments.length === 0 &&
         uploadQueue.length === 0 &&
         canUseChat &&
-        !disabled && (
+        !inputBlocked && (
           <SuggestedActions
             chatId={chatId}
             onBeforeSubmit={onBeforeSubmit}

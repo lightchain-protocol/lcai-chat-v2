@@ -144,6 +144,22 @@ export class ProtocolAuthExpiredError extends Error {
   }
 }
 
+export type WorkerAvailabilityStatus = "available" | "busy" | "unknown";
+
+export type WorkerModelAvailability = {
+  modelId: string;
+  eligibleWorkers: number;
+  freeSlots: number | null;
+  status: WorkerAvailabilityStatus;
+};
+
+export type WorkerAvailability = {
+  status: WorkerAvailabilityStatus;
+  maxConcurrentJobs: number | null;
+  models: WorkerModelAvailability[];
+  checkedAt: number;
+};
+
 export class GatewayClient {
   private readonly baseUrl: string;
   private readonly auth?: AuthProvider;
@@ -377,6 +393,38 @@ export class GatewayClient {
       return { sessionStatus: data.sessionStatus ?? "active" };
     } catch {
       return { sessionStatus: "unknown" };
+    }
+  }
+
+  /**
+   * Whether a prompt sent now would find a worker.
+   *
+   * `claimSession` refuses the draw once a worker holds `maxConcurrentJobs`
+   * jobs in flight, so submitting against a full worker is not slow — it is
+   * paid for and then times out, surfacing as "No worker available". Asking
+   * first lets the composer say so before anyone spends anything.
+   *
+   * Unauthenticated, and it never throws: a gateway that cannot answer yields
+   * `unknown`, which callers must not treat as busy.
+   */
+  async getWorkerAvailability(
+    modelIds?: string[]
+  ): Promise<WorkerAvailability> {
+    const query =
+      modelIds && modelIds.length > 0
+        ? `?models=${encodeURIComponent(modelIds.join(","))}`
+        : "";
+    try {
+      return await this.get<WorkerAvailability>(
+        `/api/workers/availability${query}`
+      );
+    } catch {
+      return {
+        status: "unknown",
+        maxConcurrentJobs: null,
+        models: [],
+        checkedAt: Math.floor(Date.now() / 1000),
+      };
     }
   }
 
