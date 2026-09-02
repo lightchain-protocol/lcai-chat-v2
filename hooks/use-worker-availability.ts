@@ -23,6 +23,11 @@ export type UseWorkerAvailability = {
   isBusy: boolean;
   /** Spare slots across all models, or null while unknown. */
   freeSlots: number | null;
+  /**
+   * Whether any worker is registered for these models at all. False means the
+   * network has nobody, which waits very differently from everyone being busy.
+   */
+  hasEligibleWorkers: boolean;
   isLoading: boolean;
 };
 
@@ -49,6 +54,10 @@ export default function useWorkerAvailability(
       ? data.models.reduce((total, m) => total + (m.freeSlots ?? 0), 0)
       : null;
 
+  const hasEligibleWorkers = Boolean(
+    data?.models.some((m) => m.eligibleWorkers > 0)
+  );
+
   return {
     availability: data,
     // `unknown` must never block. If our own gateway or its RPC is having a
@@ -56,6 +65,7 @@ export default function useWorkerAvailability(
     // the product on a reading we do not trust.
     isBusy: data?.status === "busy",
     freeSlots,
+    hasEligibleWorkers,
     isLoading,
   };
 }

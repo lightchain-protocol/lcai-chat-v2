@@ -3,7 +3,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
-import { AlertTriangle, Brain } from "lucide-react";
+import { Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -18,6 +18,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
+import { NoWorkersNotice } from "@/components/no-workers-notice";
 import useWorkerAvailability from "@/hooks/use-worker-availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -127,7 +128,7 @@ function PureMultimodalInput({
   // would be paid for and then time out. Block the composer and say why.
   // Busy only when every selected model is full — one busy column should not
   // stop a fan-out the others can serve. `unknown` never blocks.
-  const { isBusy: noWorkersAvailable } =
+  const { isBusy: noWorkersAvailable, hasEligibleWorkers } =
     useWorkerAvailability(selectedModelIds);
   const inputBlocked = disabled || noWorkersAvailable;
 
@@ -297,17 +298,7 @@ function PureMultimodalInput({
         }}
       >
         {noWorkersAvailable && (
-          <output
-            className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-700 text-xs dark:text-amber-400"
-            data-testid="no-workers-banner"
-          >
-            <AlertTriangle className="mt-px size-3.5 shrink-0" />
-            <span>
-              No workers available right now — every worker is at capacity, so a
-              prompt sent now would not be picked up. This clears on its own;
-              please check back shortly.
-            </span>
-          </output>
+          <NoWorkersNotice hasEligibleWorkers={hasEligibleWorkers} />
         )}
         {(attachments.length > 0 || uploadQueue.length > 0) && (
           <div
@@ -361,11 +352,9 @@ function PureMultimodalInput({
             minHeight={44}
             onChange={handleInput}
             placeholder={
-              noWorkersAvailable
-                ? "No workers available right now — please check back shortly"
-                : disabled && disabledPlaceholder
-                  ? disabledPlaceholder
-                  : "Send a message..."
+              disabled && disabledPlaceholder
+                ? disabledPlaceholder
+                : "Send a message..."
             }
             ref={textareaRef}
             rows={1}
