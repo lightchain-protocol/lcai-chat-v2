@@ -45,7 +45,9 @@ export default function useWorkerAvailability(
     // exactly when they are waiting to be told it has cleared.
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
-    staleTime: POLL_INTERVAL_MS,
+    // Focus refetch only fires for stale data; with staleTime equal to the poll
+    // interval a returning user always saw the previous poll's answer.
+    staleTime: 0,
     retry: false,
   });
 
