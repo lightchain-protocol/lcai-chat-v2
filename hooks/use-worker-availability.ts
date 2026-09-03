@@ -31,21 +31,34 @@ export type UseWorkerAvailability = {
   isLoading: boolean;
 };
 
+/**
+ * `poll: false` is for a consumer that only needs a rarely-changing answer —
+ * whether a model is staffed at all — and can share whatever the query cache
+ * already holds. It matters where the hook is called once per rendered row:
+ * one poller per message is a lot of gateway traffic for a fact that changes
+ * when a worker registers. The composer, which gates sending on a live "is
+ * anyone free right now", keeps polling.
+ */
 export default function useWorkerAvailability(
-  modelIds?: string[]
+  modelIds?: string[],
+  options?: { poll?: boolean }
 ): UseWorkerAvailability {
   const key =
     modelIds && modelIds.length > 0 ? [...modelIds].sort().join(",") : "all";
+  const poll = options?.poll !== false;
 
   const { data, isLoading } = useQuery({
     queryKey: ["worker-availability", key],
     queryFn: () => new GatewayClient().getWorkerAvailability(modelIds),
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: poll ? POLL_INTERVAL_MS : false,
     // Keep polling while the user is looking at a blocked composer; that is
     // exactly when they are waiting to be told it has cleared.
     refetchIntervalInBackground: false,
+    refetchOnMount: poll,
     refetchOnWindowFocus: true,
-    staleTime: POLL_INTERVAL_MS,
+    // Focus refetch only fires for stale data; with staleTime equal to the poll
+    // interval a returning user always saw the previous poll's answer.
+    staleTime: 0,
     retry: false,
   });
 

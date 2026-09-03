@@ -144,7 +144,12 @@ export type TrackedJob = {
   worker: string;
   /** Unix seconds — from on-chain Job.deadline */
   deadline: number;
-  /** Unix seconds — from on-chain Job.completedAt (0 if not yet completed) */
+  /**
+   * Unix seconds. On-chain Job.completedAt when a chain read has seen it;
+   * otherwise the local time the relay reported completion. 0 while the job
+   * is still running. Relay evidence, not chain evidence: anything that needs
+   * the block's own timestamp reads getJob itself.
+   */
   completedAt: number;
   /** Wei — from on-chain Job.escrowedFee */
   escrowedFee: bigint;
@@ -699,6 +704,31 @@ export class ProtocolTransport {
       let unsubscribe: (() => void) | null = null;
       let streamed = "";
       let timeout: ReturnType<typeof setTimeout> | null = null;
+      // Set once the submit call goes out; resolves to the jobId (wallet mode)
+      // or null (delegated mode learns it from the first frame).
+      let submitted: Promise<number | null> | null = null;
+      // True once the relay routed a frame here: the handler is bound and the
+      // relay has already observed the jobId.
+      let bound = false;
+
+      // This transport is shared by every message row, so a job whose listener
+      // went away (abort, timeout, relay error) must not have its late frames
+      // adopted by the next synthesis on this session — the contract
+      // sendMessages() keeps for prompts. A bound handler already observed the
+      // jobId; only an unbound one needs a tombstone. A submit that never went
+      // out, or failed, left nothing live on chain.
+      const tombstoneOrphan = () => {
+        submitted?.then(
+          (jobId) => {
+            if (bound) return;
+            if (jobId !== null) relayClient.tombstoneJobId(jobId);
+            else relayClient.tombstonePendingSubmission(sessionId);
+          },
+          () => {
+            // A failed submit put nothing on chain; the submit chain reports it.
+          }
+        );
+      };
 
       const onAbort = () => {
         finish(
@@ -724,6 +754,7 @@ export class ProtocolTransport {
         settled = true;
         cleanup();
         if (err !== undefined) {
+          tombstoneOrphan();
           reject(err instanceof Error ? err : new Error(String(err)));
         } else if (bytes) {
           resolve(bytes);
@@ -749,6 +780,7 @@ export class ProtocolTransport {
       // await-chain a quickly-decrypted frame could overtake an earlier one.
       let chain: Promise<void> = Promise.resolve();
       const handleFrame = (frame: WSFrame | WSErrorFrame) => {
+        bound = true;
         chain = chain.then(async () => {
           if (settled) {
             return;
@@ -808,9 +840,10 @@ export class ProtocolTransport {
 
       // ORDER MATTERS: subscribe by session first, submit second — the same
       // guarantee sendMessages() relies on, so a worker that answers before the
-      // submit call returns doesn't lose its frames. A dedicated TTS transport
-      // is used serially, so an unbound pending handler should never exist; if
-      // one somehow does, bail rather than orphan its frames.
+      // submit call returns doesn't lose its frames. The read-aloud hook stops
+      // the previous speaker before starting a new one, so this transport is
+      // used serially and an unbound pending handler should never exist; the
+      // check stays as a guard — bail rather than orphan another job's frames.
       if (relayClient.hasUnboundPendingJob(sessionId)) {
         finish(
           undefined,
@@ -826,10 +859,11 @@ export class ProtocolTransport {
       }
 
       this.setProgressStatus("submitting_job");
-      this.sessionMgr
+      submitted = this.sessionMgr
         .submitJob(plaintext)
-        .then((result) => {
-          const jobId = normalizeJobId(result.jobId);
+        .then((result) => normalizeJobId(result.jobId));
+      submitted
+        .then((jobId) => {
           // Converge the pending handler onto the authoritative jobId when
           // wallet-mode submit returns one; delegated mode binds on first frame.
           if (jobId !== null) {
@@ -837,298 +871,6 @@ export class ProtocolTransport {
           }
         })
         .catch((err) => finish(undefined, err));
-    });
-  }
-
-  /**
-   * One-off streaming completion for compare mode. Submits `text` as an
-   * ordinary protocol job on this transport's model and streams the answer
-   * back through callbacks — WITHOUT persisting anything to the chat database
-   * or driving the useChat pipeline. Compare mode renders its own side-by-side
-   * panes and must leave no trace in the normal thread, so this drives the same
-   * session/submit/decrypt machinery directly and simply forwards tokens.
-   *
-   * Same robustness contract as {@link synthesizeSpeech}: the session is
-   * initialized, a FRESH relay token is minted, and the socket is confirmed
-   * connected before anything is submitted (subscribe-before-submit). A stale
-   * reused session is thrown away and rebuilt once. The job is a real, paid,
-   * on-chain job that settles and is verifiable like any other — the tracked
-   * job it registers (under `paneChatId`) is what feeds that pane's
-   * PipelineTimeline and verification.
-   */
-  async streamComparison(
-    text: string,
-    paneChatId: string,
-    callbacks: {
-      /** Fired once with the on-chain jobId as soon as it is known. */
-      onJobId?: (jobId: number) => void;
-      /** A reasoning-channel delta (thinking models stream this first). */
-      onReasoning?: (delta: string) => void;
-      /** Fired the first time any answer text arrives. */
-      onFirstToken?: () => void;
-      /** An answer-text delta to append to the pane. */
-      onToken?: (delta: string) => void;
-      /** The pane's displayed text should be cleared (a worker retry restarted the stream). */
-      onReset?: () => void;
-      /** The authoritative full answer — the pane should render exactly this. */
-      onComplete?: (fullText: string) => void;
-      /** A terminal error for this pane; never thrown past the caller. */
-      onError?: (message: string) => void;
-    },
-    opts?: { signal?: AbortSignal; searchEnabled?: boolean }
-  ): Promise<void> {
-    const plaintext = text.trim();
-    if (!plaintext) {
-      throw new Error("No prompt to send");
-    }
-
-    // Identical establish() shape to synthesizeSpeech: initialize, re-mint the
-    // relay token, open a socket, and wait for the authenticated handshake —
-    // so a fast delegated submit can never race the worker's first frame.
-    const establish = async (): Promise<RelayClient> => {
-      this.setProgressStatus("preparing_chat");
-      await this.sessionMgr.initialize(
-        opts?.searchEnabled ? { requiredCapabilities: ["search"] } : undefined
-      );
-      if (this.sessionMgr.status !== "ready") {
-        throw new Error("Session is not ready");
-      }
-      if (this.sessionMgr.sessionId === null) {
-        throw new Error("Session ID not available after initialization");
-      }
-      this.setProgressStatus("waiting_for_relay");
-      await this.connectRelayWithFreshToken();
-      const client = this.relayClient;
-      if (!client) {
-        throw new Error("Relay client not connected");
-      }
-      await this.waitForRelayConnected(client, { signal: opts?.signal });
-      return client;
-    };
-
-    let relayClient: RelayClient;
-    try {
-      relayClient = await establish();
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        throw err;
-      }
-      // The reused session was stale — drop it and build one clean session.
-      this.startNewSession();
-      relayClient = await establish();
-    }
-
-    const sessionId = this.sessionMgr.sessionId;
-    if (sessionId === null) {
-      throw new Error("Session ID not available after initialization");
-    }
-
-    return await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let unsubscribe: (() => void) | null = null;
-      let boundJobId: number | null = null;
-      let started = false;
-      let streamedText = "";
-      let suppressRetryChunks = false;
-      let firstFrameTimer: ReturnType<typeof setTimeout> | null = null;
-
-      const onAbort = () => {
-        finish(new DOMException("Comparison cancelled", "AbortError"));
-      };
-
-      function cleanup() {
-        if (firstFrameTimer) {
-          clearTimeout(firstFrameTimer);
-          firstFrameTimer = null;
-        }
-        unsubscribe?.();
-        unsubscribe = null;
-        opts?.signal?.removeEventListener("abort", onAbort);
-      }
-
-      const finish = (err?: unknown) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        if (err === undefined) {
-          callbacks.onComplete?.(streamedText);
-          resolve();
-          return;
-        }
-        const isAbort =
-          err instanceof DOMException && err.name === "AbortError";
-        if (!isAbort) {
-          callbacks.onError?.(err instanceof Error ? err.message : String(err));
-        }
-        reject(err instanceof Error ? err : new Error(String(err)));
-      };
-
-      const resolveJobId = (candidate: number) => {
-        const jobId = normalizeJobId(candidate);
-        if (jobId === null || boundJobId !== null) return;
-        boundJobId = jobId;
-        callbacks.onJobId?.(jobId);
-        // Register a TrackedJob so this pane's PipelineTimeline can latch onto
-        // it and follow it to settlement. Best-effort — a failed chain read
-        // degrades the timeline, never the answer.
-        this.trackJobDeadline(jobId, paneChatId).catch(() => {
-          // Best-effort — see trackJobDeadline.
-        });
-      };
-
-      // Serialize async frame handling — decryptResponse is async, so without
-      // an await-chain a quickly-decrypted frame could overtake an earlier one
-      // and corrupt the assembled text.
-      let chain: Promise<void> = Promise.resolve();
-      const handleFrame = (frame: WSFrame | WSErrorFrame) => {
-        chain = chain.then(async () => {
-          if (settled) return;
-          resolveJobId(frame.jobId);
-          const jobId = boundJobId ?? frame.jobId;
-
-          if (frame.type === "error") {
-            const errorFrame = frame as WSErrorFrame;
-            if (
-              errorFrame.code === "RATE_LIMITED" &&
-              errorFrame.droppedSeq > 0
-            ) {
-              return;
-            }
-            finish(new Error(errorFrame.message || UNSPECIFIED_RELAY_ERROR));
-            return;
-          }
-
-          const wsFrame = frame as WSFrame;
-
-          // Metadata frames carry no answer text. A terminal frame with no
-          // payload settles on the accumulated chunks, if any.
-          if (wsFrame.type === "metadata" || !wsFrame.payload) {
-            if (wsFrame.type === "complete") {
-              if (started && streamedText.trim()) {
-                this.updateJobStatus(jobId, "completed");
-                this.clearJobTimer(jobId);
-                finish();
-              } else {
-                this.updateJobStatus(jobId, "completed");
-                finish(new Error(EMPTY_ANSWER_ERROR));
-              }
-            }
-            return;
-          }
-
-          if (!started) {
-            started = true;
-            if (firstFrameTimer) {
-              clearTimeout(firstFrameTimer);
-              firstFrameTimer = null;
-            }
-            this.updateJobStatus(jobId, "streaming");
-          }
-
-          const kind = frameKind(wsFrame);
-
-          // Reasoning streams into the pane's thought channel, separate from
-          // the answer text it must never be mixed into.
-          if (wsFrame.type !== "complete" && kind === "reasoning") {
-            const decrypted = await this.sessionMgr.decryptResponse(
-              wsFrame.payload
-            );
-            callbacks.onReasoning?.(decrypted);
-            return;
-          }
-          // Other non-text channels (stats, artifacts) aren't shown in the
-          // compact compare pane — drop them rather than corrupt the answer.
-          if (wsFrame.type !== "complete" && kind !== "text") {
-            return;
-          }
-
-          const decrypted = await this.sessionMgr.decryptResponse(
-            wsFrame.payload
-          );
-
-          if (wsFrame.type === "complete") {
-            // The terminal frame carries the authoritative full answer; the
-            // pane renders exactly this regardless of what streamed.
-            if (!decrypted.trim() && !streamedText.trim()) {
-              this.updateJobStatus(jobId, "completed");
-              finish(new Error(EMPTY_ANSWER_ERROR));
-              return;
-            }
-            const finalText = decrypted.trim() ? decrypted : streamedText;
-            if (!streamedText) callbacks.onFirstToken?.();
-            streamedText = finalText;
-            this.updateJobStatus(jobId, "completed");
-            this.clearJobTimer(jobId);
-            finish();
-            return;
-          }
-
-          // Streaming chunk. A worker retry restarts the sequence from seq 1 —
-          // drop what we showed and let the terminal frame render the retry's
-          // authoritative text (chunks stay suppressed until then).
-          if (wsFrame.seq === 1 && streamedText.length > 0) {
-            streamedText = "";
-            suppressRetryChunks = true;
-            callbacks.onReset?.();
-          }
-          if (!streamedText && decrypted) {
-            callbacks.onFirstToken?.();
-          }
-          streamedText += decrypted;
-          if (!suppressRetryChunks && decrypted) {
-            callbacks.onToken?.(decrypted);
-          }
-        });
-        chain.catch((err) => finish(err));
-      };
-
-      if (opts?.signal) {
-        if (opts.signal.aborted) {
-          finish(new DOMException("Comparison cancelled", "AbortError"));
-          return;
-        }
-        opts.signal.addEventListener("abort", onAbort);
-      }
-
-      firstFrameTimer = setTimeout(() => {
-        firstFrameTimer = null;
-        if (settled || started) return;
-        const offline = relayClient.getStatus() !== "connected";
-        finish(
-          new Error(
-            offline
-              ? "Lost the connection to the relay before the answer arrived. This job was paid for and may still complete."
-              : "No answer came back from the worker in time. This job was paid for and may still complete."
-          )
-        );
-      }, FIRST_FRAME_DEADLINE_MS);
-
-      // ORDER MATTERS: subscribe by session first, submit second — a dedicated
-      // per-pane transport is used serially, so an unbound pending handler
-      // should never exist; if one somehow does, bail rather than orphan frames.
-      if (relayClient.hasUnboundPendingJob(sessionId)) {
-        finish(
-          new Error("Another comparison is already in flight on this session")
-        );
-        return;
-      }
-      try {
-        unsubscribe = relayClient.onPendingJob(sessionId, handleFrame);
-      } catch (err) {
-        finish(err);
-        return;
-      }
-
-      this.setProgressStatus("submitting_job");
-      this.sessionMgr
-        .submitJob(plaintext, { searchEnabled: opts?.searchEnabled === true })
-        .then((result) => {
-          const jobId = normalizeJobId(result.jobId);
-          if (jobId !== null) {
-            relayClient.bindPendingJob(sessionId, jobId);
-          }
-        })
-        .catch((err) => finish(err));
     });
   }
 
@@ -1373,6 +1115,12 @@ export class ProtocolTransport {
     const job = this.activeJobs.get(jobId);
     if (!job) return;
     job.status = status;
+    // The relay reports completion before any chain read does. Stamp the
+    // moment so "is this job finished" checks keyed off completedAt stop
+    // seeing a live job. Nothing overwrites it later on the relay path.
+    if (status === "completed" && job.completedAt === 0) {
+      job.completedAt = Math.floor(Date.now() / 1000);
+    }
     this.onJobUpdateCallback?.(job);
   }
 

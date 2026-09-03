@@ -15,18 +15,30 @@ import { ProtocolTransport } from "@/lib/protocol/transport";
  */
 export type SpeechState = "idle" | "synthesizing" | "playing";
 
+// One transport for the whole app, keyed by chain and wallet so a wallet
+// switch replaces it. Every message's button shares the same speech session
+// and relay socket instead of each holding its own from first click until
+// that message unmounts.
+const sharedTransports = new Map<string, ProtocolTransport>();
+
+// One transport means one relay session, and synthesizeSpeech refuses a second
+// job while one is still in its unbound window — so a new read-aloud stops the
+// previous one first. That is also what a listener wants: two messages talking
+// over each other helps nobody.
+let activeSpeakerStop: (() => void) | null = null;
+
 /**
  * Drives the assistant-message "read aloud" button.
  *
- * Builds its own ProtocolTransport bound to the TTS model (tts-piper) and,
+ * Gets the shared ProtocolTransport bound to the TTS model (tts-piper) and,
  * on demand, submits the message text as a one-off protocol job through the
  * exact same session/submit/decrypt machinery a normal prompt uses — see
  * ProtocolTransport.synthesizeSpeech. The job's base64-MP3 response is decoded
  * and played through an <audio> element. Nothing is written to the chat thread
  * or the database: read-aloud leaves no trace in the conversation.
  *
- * The transport is created lazily on first use and reused across clicks (the
- * session, once bound to a worker, is reused). It is torn down on unmount.
+ * The transport is created lazily on first use and shared by every message
+ * for the connected wallet; nothing is torn down per message.
  */
 export function useTextToSpeech() {
   const { walletClient, publicClient } = useWeb3Clients();
@@ -34,7 +46,6 @@ export function useTextToSpeech() {
 
   const [state, setState] = useState<SpeechState>("idle");
 
-  const transportRef = useRef<ProtocolTransport | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -61,32 +72,44 @@ export function useTextToSpeech() {
     }
   }, []);
 
+  // This hook's own stop, so the speaker slot is only ever cleared by the hook
+  // that still holds it.
+  const stopRef = useRef<(() => void) | null>(null);
+
+  const releaseSpeaker = useCallback(() => {
+    if (activeSpeakerStop === stopRef.current) {
+      activeSpeakerStop = null;
+    }
+  }, []);
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     releaseAudio();
     setState("idle");
-  }, [releaseAudio]);
+    releaseSpeaker();
+  }, [releaseAudio, releaseSpeaker]);
+  stopRef.current = stop;
 
-  // Full teardown on unmount: abort any in-flight job, drop the audio, and
-  // release the transport's relay connection.
+  // Teardown on unmount: abort any in-flight job and drop the audio. The
+  // transport is shared across messages and outlives this component.
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
       abortRef.current = null;
       releaseAudio();
-      transportRef.current?.release();
-      transportRef.current = null;
     };
   }, [releaseAudio]);
 
   const getTransport = useCallback(() => {
-    if (transportRef.current) {
-      return transportRef.current;
-    }
     const client = walletClient;
     if (!client?.account) {
       throw new Error("Wallet not connected — cannot read aloud");
+    }
+    const key = `${protocolChainId}:${client.account.address}`;
+    const existing = sharedTransports.get(key);
+    if (existing) {
+      return existing;
     }
 
     const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
@@ -126,7 +149,15 @@ export function useTextToSpeech() {
         },
       },
     });
-    transportRef.current = transport;
+    // A single shared transport for the app: a wallet switch releases the
+    // previous wallet's session and socket instead of leaving it open.
+    for (const [otherKey, other] of sharedTransports) {
+      if (otherKey !== key) {
+        other.release();
+        sharedTransports.delete(otherKey);
+      }
+    }
+    sharedTransports.set(key, transport);
     return transport;
   }, [walletClient, publicClient, protocolChainId]);
 
@@ -149,6 +180,11 @@ export function useTextToSpeech() {
       if (!clean) {
         return;
       }
+
+      // Take the floor: whoever was reading is stopped before this synthesis
+      // starts, so the shared session never has two jobs in flight.
+      activeSpeakerStop?.();
+      activeSpeakerStop = stop;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -179,6 +215,7 @@ export function useTextToSpeech() {
           }
           releaseAudio();
           setState("idle");
+          releaseSpeaker();
         };
         audio.onerror = () => {
           if (abortRef.current === controller) {
@@ -186,6 +223,7 @@ export function useTextToSpeech() {
           }
           releaseAudio();
           setState("idle");
+          releaseSpeaker();
         };
 
         await audio.play();
@@ -196,14 +234,17 @@ export function useTextToSpeech() {
         }
         releaseAudio();
         setState("idle");
-        // A user-initiated cancel is not an error worth surfacing.
+        releaseSpeaker();
+        // A user-initiated cancel is not an error worth surfacing — including
+        // the abort stop() raises when another message takes the floor, which
+        // reaches here as the transport's AbortError.
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
         throw err;
       }
     },
-    [state, stop, getTransport, releaseAudio]
+    [state, stop, getTransport, releaseAudio, releaseSpeaker]
   );
 
   return { state, isAvailable, speak, stop };

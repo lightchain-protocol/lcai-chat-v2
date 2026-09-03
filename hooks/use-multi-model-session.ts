@@ -98,6 +98,8 @@ export function useMultiModelSession(args: {
 
   // Warm transports, keyed by model id, reused across turns for context.
   const transportsRef = useRef<Map<string, ProtocolTransport>>(new Map());
+  // The current turn's group id, read by each transport at persist time.
+  const groupIdRef = useRef("");
   // In-flight aborts, keyed by placeholder row id, cleared each run.
   const abortRef = useRef<Map<string, AbortController>>(new Map());
   // The (chat, wallet) the warm transports belong to; a change tears them down.
@@ -139,7 +141,7 @@ export function useMultiModelSession(args: {
   );
 
   const getTransport = useCallback(
-    (model: MultiModel, groupId: string): ProtocolTransport => {
+    (model: MultiModel): ProtocolTransport => {
       const existing = transportsRef.current.get(model.id);
       if (existing) return existing;
       if (!walletClient) {
@@ -151,7 +153,7 @@ export function useMultiModelSession(args: {
         walletClient,
         publicClient,
         getMemoryPrefix,
-        groupId,
+        getGroupId: () => groupIdRef.current,
       });
       transportsRef.current.set(model.id, transport);
       return transport;
@@ -204,7 +206,7 @@ export function useMultiModelSession(args: {
 
       let transport: ProtocolTransport;
       try {
-        transport = getTransport(model, runArgs.groupId);
+        transport = getTransport(model);
       } catch (err) {
         patchLive(rowId, {
           live: false,
@@ -322,6 +324,7 @@ export function useMultiModelSession(args: {
       const { userMessage, models, groupId } = runArgs;
       if (models.length < 2) return;
       if (!walletClient?.account) return;
+      groupIdRef.current = groupId;
 
       // Append the one user bubble + one placeholder assistant row per model.
       const now = new Date().toISOString();

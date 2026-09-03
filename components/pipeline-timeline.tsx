@@ -13,6 +13,15 @@ import {
 } from "@/contracts/pipeline-events-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
+import { isCompletedJobState } from "@/lib/protocol/job-state";
+import {
+  buildSteps,
+  type Evidence,
+  isZeroAddress,
+  isZeroHash,
+  type PipelineStep,
+  type StepState,
+} from "@/lib/protocol/pipeline-steps";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ProtocolLoadingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -24,7 +33,7 @@ import { LCAIIcon } from "./icons";
  *
  * Ordered pipeline:
  *   Requested → Worker selected → Session ready → Job submitted →
- *   Acknowledged → Generating → Response committed → Settled.
+ *   Acknowledged → Generating → Response committed → Completed → Settled.
  *
  * Two rules keep the animation honest in real time:
  *  - A step turns green ONLY when its own completion is actually observed for
@@ -37,182 +46,30 @@ import { LCAIIcon } from "./icons";
  *    filtered by the indexed identifiers of this exact request: the session id
  *    and job id created by this send.
  *
- * Scope: the timeline latches onto the un-settled job created by the current
+ * Scope: the timeline latches onto the unfinished job created by the current
  * send and follows only it, so a previously completed job can never paint the
  * steps green. State resets on each new prompt.
  *
  * Nothing here gates the answer: tokens render as they arrive, and the
- * Response-committed / Settled nodes keep animating in the background after the
- * text is already on screen. Missing evidence leaves a step pending rather than
- * throwing.
+ * Response-committed / Completed / Settled nodes keep animating in the
+ * background after the text is already on screen. Missing evidence leaves a
+ * step pending rather than throwing.
  *
  * Presentation (two lifecycle states, one mounted instance so evidence never
  * resets mid-turn):
  *  - Before the answer streams, it stands in for the plain "thinking" bubble as
  *    a compact panel attached to the assistant message.
  *  - Once the answer is on screen it collapses to a slim, inline one-line
- *    provenance handle on that message ("Settling on-chain…" → "Settled on
- *    chain"), expandable to the full step list — so it never reads as though the
- *    answer itself is still loading.
+ *    provenance handle on that message ("Completing on-chain…" → "Completed
+ *    on-chain"), expandable to the full step list — so it never reads as
+ *    though the answer itself is still loading.
  */
 
-const ZERO_HASH =
-  "0x0000000000000000000000000000000000000000000000000000000000000000";
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const POLL_MS = 2000;
-
-type StepState = "pending" | "active" | "done" | "failed";
-
-type PipelineStep = {
-  key: string;
-  label: string;
-  state: StepState;
-  txHash?: string;
-  address?: string;
-  note?: string;
-};
-
-type Evidence = {
-  session?: { sessionId: number; worker: string; txHash: string };
-  job?: { jobId: number; txHash: string };
-  /** getJob() observed state ≥ Acknowledged (or ackTimestamp > 0). */
-  acknowledged?: boolean;
-  /** getJob() responseBlobHash committed (non-zero). */
-  responseCommitted?: boolean;
-  completed?: { txHash: string };
-};
 
 function truncate(hex?: string): string {
   if (!hex) return "";
   return hex.length > 12 ? `${hex.slice(0, 6)}…${hex.slice(-4)}` : hex;
-}
-
-function isZeroHash(v?: string): boolean {
-  return !v || v.toLowerCase() === ZERO_HASH;
-}
-
-function isZeroAddress(v?: string): boolean {
-  return !v || v.toLowerCase() === ZERO_ADDRESS;
-}
-
-// Text shown under the one active step, so the wait always says what it is
-// waiting for rather than sitting silent.
-const ACTIVE_NOTES: Record<string, string> = {
-  worker: "finding a worker",
-  session: "opening the session",
-  submitted: "submitting the job",
-  acknowledged: "waiting for the worker",
-  generating: "model is generating",
-  committed: "committing the response",
-  settled: "finalizing on chain",
-};
-
-// biome-ignore lint/nursery/useMaxParams: five flat inputs read clearer here than an options bag for a pure builder.
-function buildSteps(
-  job: TrackedJob | undefined,
-  ev: Evidence,
-  firstTokenSeen: boolean,
-  isError: boolean,
-  activeAllowed: boolean
-): { steps: PipelineStep[]; settled: boolean } {
-  const worker = isZeroAddress(ev.session?.worker)
-    ? isZeroAddress(job?.worker)
-      ? undefined
-      : job?.worker
-    : ev.session?.worker;
-  const sessionId = ev.session?.sessionId ?? job?.sessionId;
-  const jobId = ev.job?.jobId ?? job?.jobId;
-  const sessionTx = ev.session?.txHash;
-  const jobTx = ev.job?.txHash;
-  const completionTx = ev.completed?.txHash;
-
-  const hasSession = ev.session !== undefined || job !== undefined;
-  const hasJob = ev.job !== undefined || job?.jobId !== undefined;
-  const acknowledged = ev.acknowledged === true;
-  const settled =
-    ev.completed !== undefined || (job !== undefined && job.completedAt > 0);
-  const committed = ev.responseCommitted === true || settled;
-
-  const defs: Omit<PipelineStep, "state">[] = [
-    { key: "requested", label: "Requested", note: "prompt request sent" },
-    {
-      key: "worker",
-      label: "Worker selected",
-      address: worker,
-      txHash: sessionTx,
-    },
-    {
-      key: "session",
-      label: "Session ready",
-      txHash: sessionTx,
-      note: sessionId !== undefined ? `session #${sessionId}` : undefined,
-    },
-    {
-      key: "submitted",
-      label: "Job submitted",
-      txHash: jobTx,
-      note: jobId !== undefined ? `job #${jobId}` : undefined,
-    },
-    {
-      key: "acknowledged",
-      label: "Acknowledged",
-      note: acknowledged ? "worker picked up the job" : undefined,
-    },
-    {
-      key: "generating",
-      label: "Generating",
-      note: firstTokenSeen ? "answer streaming" : undefined,
-    },
-    {
-      key: "committed",
-      label: "Response committed",
-      txHash: completionTx,
-      note: committed ? "blob hash on chain" : undefined,
-    },
-    {
-      key: "settled",
-      label: "Settled",
-      txHash: completionTx,
-      note: settled ? "completion committed on chain" : undefined,
-    },
-  ];
-
-  // Strict, evidence-only completion — no step turns green from how far the
-  // loading label has advanced.
-  const done: boolean[] = [
-    true, // requested: the send happened (component only renders once in flight)
-    !!worker,
-    hasSession,
-    hasJob,
-    acknowledged,
-    firstTokenSeen,
-    committed,
-    settled,
-  ];
-
-  // A genuinely-observed later milestone proves the earlier ones (settled ⇒
-  // committed ⇒ generated ⇒ …), so backfill in case an in-between read lagged.
-  // Safe now that every flag is real evidence, never a label threshold.
-  const lastDone = done.lastIndexOf(true);
-  for (let i = 0; i < lastDone; i++) done[i] = true;
-
-  let frontierAssigned = false;
-  const steps: PipelineStep[] = defs.map((d, i) => {
-    let state: StepState;
-    if (done[i]) {
-      state = "done";
-    } else if (frontierAssigned) {
-      state = "pending";
-    } else {
-      frontierAssigned = true;
-      state = isError ? "failed" : activeAllowed ? "active" : "pending";
-    }
-    // The active step always narrates what it is waiting for.
-    const note = state === "active" && !d.note ? ACTIVE_NOTES[d.key] : d.note;
-    return { ...d, note, state };
-  });
-
-  return { steps, settled };
 }
 
 /** Small, restrained node: hollow ring pending, gentle accent pulse active,
@@ -371,7 +228,7 @@ function StepList({
   );
 }
 
-/** Soft, low-amplitude animated ellipsis for the collapsed "settling" line. */
+/** Soft, low-amplitude animated ellipsis for the collapsed "completing" line. */
 function Ellipsis() {
   return (
     <span aria-hidden className="inline-flex">
@@ -416,7 +273,7 @@ function PurePipelineTimeline({
   const chainId = config.chains[0].id;
   const registry = config.jobRegistryAddress[chainId];
 
-  // The job THIS send created. We latch onto the newest un-settled job for the
+  // The job THIS send created. We latch onto the newest unfinished job for the
   // chat while live and then follow only it — a previously completed job is
   // never picked up, so the steps can't be painted green by stale events.
   const [currentJobId, setCurrentJobId] = useState<number | null>(null);
@@ -437,13 +294,18 @@ function PurePipelineTimeline({
     prevLiveRef.current = live;
   }, [live]);
 
-  // Latch onto the in-flight job once the transport registers it. Only a job
-  // that has not completed yet is eligible, so the just-finished prior job is
-  // ignored even before its events are filtered out.
+  // Latch onto the in-flight job once the transport registers it. A job that
+  // completed, timed out, was claimed or disputed is finished whatever its
+  // completedAt says; only a job still being served is a candidate, so the
+  // just-finished prior job is ignored even before its events are filtered out.
   useEffect(() => {
     if (currentJobId !== null || !live) return;
     const fresh = (activeJobs ?? [])
-      .filter((j) => j.chatId === chatId && j.completedAt === 0)
+      .filter(
+        (j) =>
+          j.chatId === chatId &&
+          (j.status === "submitted" || j.status === "streaming")
+      )
       .reduce<TrackedJob | undefined>(
         (a, b) => (a && a.startedAt > b.startedAt ? a : b),
         undefined
@@ -459,24 +321,39 @@ function PurePipelineTimeline({
     [activeJobs, currentJobId]
   );
 
-  const settled =
+  // The poll reads the latest job/evidence through refs so that a new evidence
+  // object — set by the poll itself — does not tear the interval down and
+  // refire the tick. The effect re-arms only when what it watches changes.
+  const jobRef = useRef(job);
+  jobRef.current = job;
+  const evidenceRef = useRef(evidence);
+  evidenceRef.current = evidence;
+
+  // Chain evidence only, matching buildSteps: the relay's completion stamp on
+  // the job is not proof completeJob landed, so the poll keeps running (and
+  // the Completed step stays active) until a log or a getJob read says so.
+  const completed =
     evidence.completed !== undefined ||
-    (job !== undefined && job.completedAt > 0);
+    (evidence.jobState !== undefined && isCompletedJobState(evidence.jobState));
 
   // Scan the chain for the authoritative hashes while live, and afterwards
-  // until settlement lands (so the last two nodes finish in the background).
+  // until completion lands (so the last two nodes finish in the background).
   const watching =
     !!publicClient &&
     !!registry &&
     registry !== "0x" &&
     !!address &&
-    (live || (!!job && !settled));
+    (live || (!!job && !completed));
 
   useEffect(() => {
     if (!watching) return;
     let cancelled = false;
 
     const tick = async () => {
+      // biome-ignore lint/nursery/noShadow: reads the latest value through the ref under the outer name, see the ref comment above.
+      const job = jobRef.current;
+      // biome-ignore lint/nursery/noShadow: same as above, for evidence.
+      const evidence = evidenceRef.current;
       if (cancelled) return;
       try {
         if (fromBlockRef.current === null) {
@@ -563,10 +440,12 @@ function PurePipelineTimeline({
             if (!cancelled) {
               const ack = Number(j.state) >= 1 || Number(j.ackTimestamp) > 0;
               const committed = !isZeroHash(j.responseBlobHash);
+              const state = Number(j.state);
               setEvidence((prev) => {
                 if (
                   prev.acknowledged === ack &&
-                  prev.responseCommitted === committed
+                  prev.responseCommitted === committed &&
+                  prev.jobState === state
                 ) {
                   return prev;
                 }
@@ -574,6 +453,7 @@ function PurePipelineTimeline({
                   ...prev,
                   acknowledged: prev.acknowledged || ack,
                   responseCommitted: prev.responseCommitted || committed,
+                  jobState: state,
                 };
               });
             }
@@ -581,7 +461,7 @@ function PurePipelineTimeline({
             // read failed — leave those steps as they are, retry next tick.
           }
 
-          // Settlement tx: JobCompleted for THIS job id only.
+          // Completion tx: JobCompleted for THIS job id only.
           if (!evidence.completed) {
             const logs = await publicClient.getLogs({
               address: reg,
@@ -614,13 +494,12 @@ function PurePipelineTimeline({
       cancelled = true;
       clearInterval(interval);
     };
-    // sid/jid are derived from job + evidence, already in the dep list.
-  }, [watching, publicClient, registry, address, job, evidence]);
+  }, [watching, publicClient, registry, address]);
 
   const isError = progressStatus === "error";
-  const activeAllowed = live || (!!job && !settled);
+  const activeAllowed = live || (!!job && !completed);
 
-  const { steps, settled: builtSettled } = buildSteps(
+  const { steps, completed: builtCompleted } = buildSteps(
     job,
     evidence,
     firstTokenSeen,
@@ -668,19 +547,19 @@ function PurePipelineTimeline({
 
   // ── Collapsed provenance handle ───────────────────────────────────────────
   // The answer is on screen; shrink to a slim inline line on the message. It
-  // reads as settlement progress, never as "the answer is still loading".
+  // reads as completion progress, never as "the answer is still loading".
   const failed = isError;
   const activeStep = steps.find((s) => s.state === "active");
 
   let label: React.ReactNode;
   if (failed) {
-    label = "Settlement failed";
-  } else if (builtSettled) {
-    label = "Settled on-chain";
+    label = "Failed on-chain";
+  } else if (builtCompleted) {
+    label = "Completed on-chain";
   } else {
     label = (
       <span className="inline-flex items-baseline">
-        <span>Settling on-chain</span>
+        <span>Completing on-chain</span>
         <Ellipsis />
       </span>
     );
@@ -689,21 +568,21 @@ function PurePipelineTimeline({
   return (
     <div
       className="w-full pl-10 md:pl-11"
-      data-settled={builtSettled ? "true" : "false"}
+      data-completed={builtCompleted ? "true" : "false"}
       data-testid="pipeline-timeline"
     >
       <button
         aria-expanded={expanded}
         className={cn(
           "flex w-full max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs transition-colors hover:bg-surface-base-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          builtSettled && "text-emerald-600 dark:text-emerald-400",
+          builtCompleted && "text-emerald-600 dark:text-emerald-400",
           failed && "text-red-600 dark:text-red-400",
-          !(builtSettled || failed) && "text-content-secondary"
+          !(builtCompleted || failed) && "text-content-secondary"
         )}
         onClick={() => setExpanded((v) => !v)}
         type="button"
       >
-        {builtSettled ? (
+        {builtCompleted ? (
           <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full border border-emerald-600/30 bg-emerald-500/10">
             <Check size={9} strokeWidth={3} />
           </span>
@@ -721,7 +600,7 @@ function PurePipelineTimeline({
           />
         )}
         <span className="truncate font-medium">{label}</span>
-        {!(builtSettled || failed) && activeStep?.note && (
+        {!(builtCompleted || failed) && activeStep?.note && (
           <span className="hidden truncate font-mono text-[11px] text-content-subtle sm:inline">
             · {activeStep.note}
           </span>

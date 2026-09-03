@@ -107,9 +107,3 @@ export const jobCompletedEvent = {
   name: "JobCompleted",
   type: "event",
 } as const;
-
-export const pipelineEventsAbi = [
-  sessionCreatedEvent,
-  jobSubmittedEvent,
-  jobCompletedEvent,
-] as const;

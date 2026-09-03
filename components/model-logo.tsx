@@ -88,14 +88,6 @@ function brandFor(modelName: string): Brand | null {
   return null;
 }
 
-/**
- * True when we have a real logo for this friendly model name (else callers keep
- * text only). Expects the friendly name, not the hex id.
- */
-export function hasModelLogo(modelName: string): boolean {
-  return brandFor(modelName) !== null;
-}
-
 /** A bytes32 model id looks like `0x` + 64 hex chars; friendly names never do. */
 const HEX_ID = /^0x[0-9a-f]+$/i;
 
