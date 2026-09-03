@@ -66,7 +66,10 @@ export function PureMessageActions({
   // Read-aloud is a paid job on the speech model; offer it only where a worker
   // actually serves that model. A failed reading (status unknown) still shows
   // the button — hiding it on an RPC blink would be the worse outage.
-  const speech = useWorkerAvailability([ttsModelId]);
+  // No poll: this renders once per message, and whether a worker serves the
+  // speech model changes on worker registration, not by the second. The
+  // composer's own polling call keeps this cache warm.
+  const speech = useWorkerAvailability([ttsModelId], { poll: false });
   const speechUnstaffed =
     speech.availability !== undefined &&
     speech.availability.status !== "unknown" &&
