@@ -2,9 +2,10 @@
 
 import { useMemo } from "react";
 import useSWR from "swr";
-import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 import config from "@/config";
+import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { reconcileWorkerCount } from "@/lib/protocol/worker-counts";
 
 /**
  * Per-model live worker count, read on-chain from the WorkerRegistry.
@@ -117,21 +118,11 @@ export function useWorkerCounts(modelIds: string[]): {
             );
 
           const cached = lastKnownGood.get(cacheKey);
-
-          if (observedLengths.length === 0) {
-            // Every attempt errored: unknown for this fetch. Fall back to the
-            // last known good so an already-seen model isn't wrongly blanked;
-            // if we've never seen it, omit it (undefined) rather than count 0.
-            return [id, cached] as const;
+          const count = reconcileWorkerCount(observedLengths, cached);
+          if (count !== undefined && count > 0) {
+            lastKnownGood.set(cacheKey, count);
           }
-
-          // Highest count seen this fetch, reconciled with the session best so
-          // a positive count is never downgraded to a flaky 0.
-          const best = Math.max(...observedLengths, cached ?? 0);
-          if (best > 0) {
-            lastKnownGood.set(cacheKey, best);
-          }
-          return [id, best] as const;
+          return [id, count] as const;
         })
       );
       const result: Record<string, number> = {};
