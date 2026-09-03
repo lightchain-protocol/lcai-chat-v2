@@ -67,8 +67,9 @@ export function PureMessageActions({
   // actually serves that model. A failed reading (status unknown) still shows
   // the button — hiding it on an RPC blink would be the worse outage.
   // No poll: this renders once per message, and whether a worker serves the
-  // speech model changes on worker registration, not by the second. The
-  // composer's own polling call keeps this cache warm.
+  // speech model changes on worker registration, not by the second. This is
+  // its own query key (the composer polls the selected models, not this one);
+  // a window focus or the next mount refetches it.
   const speech = useWorkerAvailability([ttsModelId], { poll: false });
   const speechUnstaffed =
     speech.availability !== undefined &&
