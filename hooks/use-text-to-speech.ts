@@ -15,9 +15,10 @@ import { ProtocolTransport } from "@/lib/protocol/transport";
  */
 export type SpeechState = "idle" | "synthesizing" | "playing";
 
-// One transport per wallet for the whole app. Every message's button shares
-// the same speech session and relay socket instead of each holding its own
-// from first click until that message unmounts.
+// One transport for the whole app, keyed by chain and wallet so a wallet
+// switch replaces it. Every message's button shares the same speech session
+// and relay socket instead of each holding its own from first click until
+// that message unmounts.
 const sharedTransports = new Map<string, ProtocolTransport>();
 
 /**
@@ -130,6 +131,14 @@ export function useTextToSpeech() {
         },
       },
     });
+    // A single shared transport for the app: a wallet switch releases the
+    // previous wallet's session and socket instead of leaving it open.
+    for (const [otherKey, other] of sharedTransports) {
+      if (otherKey !== key) {
+        other.release();
+        sharedTransports.delete(otherKey);
+      }
+    }
     sharedTransports.set(key, transport);
     return transport;
   }, [walletClient, publicClient, protocolChainId]);
