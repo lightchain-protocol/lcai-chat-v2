@@ -13,7 +13,15 @@ import {
 } from "@/contracts/pipeline-events-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
-import { isSettledJobState } from "@/lib/protocol/job-state";
+import { isCompletedJobState } from "@/lib/protocol/job-state";
+import {
+  buildSteps,
+  type Evidence,
+  isZeroAddress,
+  isZeroHash,
+  type PipelineStep,
+  type StepState,
+} from "@/lib/protocol/pipeline-steps";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ProtocolLoadingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -57,176 +65,11 @@ import { LCAIIcon } from "./icons";
  *    though the answer itself is still loading.
  */
 
-const ZERO_HASH =
-  "0x0000000000000000000000000000000000000000000000000000000000000000";
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const POLL_MS = 2000;
-
-type StepState = "pending" | "active" | "done" | "failed";
-
-type PipelineStep = {
-  key: string;
-  label: string;
-  state: StepState;
-  txHash?: string;
-  address?: string;
-  note?: string;
-};
-
-type Evidence = {
-  session?: { sessionId: number; worker: string; txHash: string };
-  job?: { jobId: number; txHash: string };
-  /** getJob() observed state ≥ Acknowledged (or ackTimestamp > 0). */
-  acknowledged?: boolean;
-  /** getJob() responseBlobHash committed (non-zero). */
-  responseCommitted?: boolean;
-  completed?: { txHash: string };
-  /** getJob() state. Settled once it reads Resolved (5) or Released (6). */
-  jobState?: number;
-};
 
 function truncate(hex?: string): string {
   if (!hex) return "";
   return hex.length > 12 ? `${hex.slice(0, 6)}…${hex.slice(-4)}` : hex;
-}
-
-function isZeroHash(v?: string): boolean {
-  return !v || v.toLowerCase() === ZERO_HASH;
-}
-
-function isZeroAddress(v?: string): boolean {
-  return !v || v.toLowerCase() === ZERO_ADDRESS;
-}
-
-// Text shown under the one active step, so the wait always says what it is
-// waiting for rather than sitting silent.
-const ACTIVE_NOTES: Record<string, string> = {
-  worker: "finding a worker",
-  session: "opening the session",
-  submitted: "submitting the job",
-  acknowledged: "waiting for the worker",
-  generating: "model is generating",
-  committed: "committing the response",
-  completed: "finalizing on chain",
-};
-
-// biome-ignore lint/nursery/useMaxParams: five flat inputs read clearer here than an options bag for a pure builder.
-function buildSteps(
-  job: TrackedJob | undefined,
-  ev: Evidence,
-  firstTokenSeen: boolean,
-  isError: boolean,
-  activeAllowed: boolean
-): { steps: PipelineStep[]; completed: boolean } {
-  const worker = isZeroAddress(ev.session?.worker)
-    ? isZeroAddress(job?.worker)
-      ? undefined
-      : job?.worker
-    : ev.session?.worker;
-  const sessionId = ev.session?.sessionId ?? job?.sessionId;
-  const jobId = ev.job?.jobId ?? job?.jobId;
-  const sessionTx = ev.session?.txHash;
-  const jobTx = ev.job?.txHash;
-  const completionTx = ev.completed?.txHash;
-
-  const hasSession = ev.session !== undefined || job !== undefined;
-  const hasJob = ev.job !== undefined || job?.jobId !== undefined;
-  const acknowledged = ev.acknowledged === true;
-  const completed =
-    ev.completed !== undefined || (job !== undefined && job.completedAt > 0);
-  const committed = ev.responseCommitted === true || completed;
-  const settled = ev.jobState !== undefined && isSettledJobState(ev.jobState);
-
-  const defs: Omit<PipelineStep, "state">[] = [
-    { key: "requested", label: "Requested", note: "prompt request sent" },
-    {
-      key: "worker",
-      label: "Worker selected",
-      address: worker,
-      txHash: sessionTx,
-    },
-    {
-      key: "session",
-      label: "Session ready",
-      txHash: sessionTx,
-      note: sessionId !== undefined ? `session #${sessionId}` : undefined,
-    },
-    {
-      key: "submitted",
-      label: "Job submitted",
-      txHash: jobTx,
-      note: jobId !== undefined ? `job #${jobId}` : undefined,
-    },
-    {
-      key: "acknowledged",
-      label: "Acknowledged",
-      note: acknowledged ? "worker picked up the job" : undefined,
-    },
-    {
-      key: "generating",
-      label: "Generating",
-      note: firstTokenSeen ? "answer streaming" : undefined,
-    },
-    {
-      key: "committed",
-      label: "Response committed",
-      txHash: completionTx,
-      note: committed ? "blob hash on chain" : undefined,
-    },
-    {
-      key: "completed",
-      label: "Completed",
-      txHash: completionTx,
-      note: completed ? "completion committed on chain" : undefined,
-    },
-    {
-      key: "settled",
-      label: "Settled",
-      note: settled
-        ? "fee finalized on chain"
-        : completed
-          ? "awaiting the dispute window"
-          : undefined,
-    },
-  ];
-
-  // Strict, evidence-only completion — no step turns green from how far the
-  // loading label has advanced.
-  const done: boolean[] = [
-    true, // requested: the send happened (component only renders once in flight)
-    !!worker,
-    hasSession,
-    hasJob,
-    acknowledged,
-    firstTokenSeen,
-    committed,
-    completed,
-    settled,
-  ];
-
-  // A genuinely-observed later milestone proves the earlier ones (completed ⇒
-  // committed ⇒ generated ⇒ …), so backfill in case an in-between read lagged.
-  // Safe now that every flag is real evidence, never a label threshold.
-  const lastDone = done.lastIndexOf(true);
-  for (let i = 0; i < lastDone; i++) done[i] = true;
-
-  let frontierAssigned = false;
-  const steps: PipelineStep[] = defs.map((d, i) => {
-    let state: StepState;
-    if (done[i]) {
-      state = "done";
-    } else if (frontierAssigned) {
-      state = "pending";
-    } else {
-      frontierAssigned = true;
-      state = isError ? "failed" : activeAllowed ? "active" : "pending";
-    }
-    // The active step always narrates what it is waiting for.
-    const note = state === "active" && !d.note ? ACTIVE_NOTES[d.key] : d.note;
-    return { ...d, note, state };
-  });
-
-  return { steps, completed };
 }
 
 /** Small, restrained node: hollow ring pending, gentle accent pulse active,
@@ -451,13 +294,18 @@ function PurePipelineTimeline({
     prevLiveRef.current = live;
   }, [live]);
 
-  // Latch onto the in-flight job once the transport registers it. Only a job
-  // that has not completed yet is eligible, so the just-finished prior job is
-  // ignored even before its events are filtered out.
+  // Latch onto the in-flight job once the transport registers it. A job that
+  // completed, timed out, was claimed or disputed is finished whatever its
+  // completedAt says; only a job still being served is a candidate, so the
+  // just-finished prior job is ignored even before its events are filtered out.
   useEffect(() => {
     if (currentJobId !== null || !live) return;
     const fresh = (activeJobs ?? [])
-      .filter((j) => j.chatId === chatId && j.completedAt === 0)
+      .filter(
+        (j) =>
+          j.chatId === chatId &&
+          (j.status === "submitted" || j.status === "streaming")
+      )
       .reduce<TrackedJob | undefined>(
         (a, b) => (a && a.startedAt > b.startedAt ? a : b),
         undefined
@@ -481,9 +329,12 @@ function PurePipelineTimeline({
   const evidenceRef = useRef(evidence);
   evidenceRef.current = evidence;
 
+  // Chain evidence only, matching buildSteps: the relay's completion stamp on
+  // the job is not proof completeJob landed, so the poll keeps running (and
+  // the Completed step stays active) until a log or a getJob read says so.
   const completed =
     evidence.completed !== undefined ||
-    (job !== undefined && job.completedAt > 0);
+    (evidence.jobState !== undefined && isCompletedJobState(evidence.jobState));
 
   // Scan the chain for the authoritative hashes while live, and afterwards
   // until completion lands (so the last two nodes finish in the background).

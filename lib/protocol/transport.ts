@@ -145,9 +145,10 @@ export type TrackedJob = {
   /** Unix seconds — from on-chain Job.deadline */
   deadline: number;
   /**
-   * Unix seconds. On-chain Job.completedAt once a chain read has seen it;
-   * before that, the local time the relay reported completion. 0 while the
-   * job is still running.
+   * Unix seconds. On-chain Job.completedAt when a chain read has seen it;
+   * otherwise the local time the relay reported completion. 0 while the job
+   * is still running. Relay evidence, not chain evidence: anything that needs
+   * the block's own timestamp reads getJob itself.
    */
   completedAt: number;
   /** Wei — from on-chain Job.escrowedFee */
@@ -1086,9 +1087,8 @@ export class ProtocolTransport {
     if (!job) return;
     job.status = status;
     // The relay reports completion before any chain read does. Stamp the
-    // moment so every "is this job finished" check keyed off completedAt (the
-    // timeline's latch, the dispute-window countdown) stops seeing a live job;
-    // a later chain read overwrites it with the block's own timestamp.
+    // moment so "is this job finished" checks keyed off completedAt stop
+    // seeing a live job. Nothing overwrites it later on the relay path.
     if (status === "completed" && job.completedAt === 0) {
       job.completedAt = Math.floor(Date.now() / 1000);
     }
