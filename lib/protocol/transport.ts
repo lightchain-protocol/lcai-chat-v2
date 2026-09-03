@@ -704,6 +704,31 @@ export class ProtocolTransport {
       let unsubscribe: (() => void) | null = null;
       let streamed = "";
       let timeout: ReturnType<typeof setTimeout> | null = null;
+      // Set once the submit call goes out; resolves to the jobId (wallet mode)
+      // or null (delegated mode learns it from the first frame).
+      let submitted: Promise<number | null> | null = null;
+      // True once the relay routed a frame here: the handler is bound and the
+      // relay has already observed the jobId.
+      let bound = false;
+
+      // This transport is shared by every message row, so a job whose listener
+      // went away (abort, timeout, relay error) must not have its late frames
+      // adopted by the next synthesis on this session — the contract
+      // sendMessages() keeps for prompts. A bound handler already observed the
+      // jobId; only an unbound one needs a tombstone. A submit that never went
+      // out, or failed, left nothing live on chain.
+      const tombstoneOrphan = () => {
+        submitted?.then(
+          (jobId) => {
+            if (bound) return;
+            if (jobId !== null) relayClient.tombstoneJobId(jobId);
+            else relayClient.tombstonePendingSubmission(sessionId);
+          },
+          () => {
+            // A failed submit put nothing on chain; the submit chain reports it.
+          }
+        );
+      };
 
       const onAbort = () => {
         finish(
@@ -729,6 +754,7 @@ export class ProtocolTransport {
         settled = true;
         cleanup();
         if (err !== undefined) {
+          tombstoneOrphan();
           reject(err instanceof Error ? err : new Error(String(err)));
         } else if (bytes) {
           resolve(bytes);
@@ -754,6 +780,7 @@ export class ProtocolTransport {
       // await-chain a quickly-decrypted frame could overtake an earlier one.
       let chain: Promise<void> = Promise.resolve();
       const handleFrame = (frame: WSFrame | WSErrorFrame) => {
+        bound = true;
         chain = chain.then(async () => {
           if (settled) {
             return;
@@ -832,10 +859,11 @@ export class ProtocolTransport {
       }
 
       this.setProgressStatus("submitting_job");
-      this.sessionMgr
+      submitted = this.sessionMgr
         .submitJob(plaintext)
-        .then((result) => {
-          const jobId = normalizeJobId(result.jobId);
+        .then((result) => normalizeJobId(result.jobId));
+      submitted
+        .then((jobId) => {
           // Converge the pending handler onto the authoritative jobId when
           // wallet-mode submit returns one; delegated mode binds on first frame.
           if (jobId !== null) {
