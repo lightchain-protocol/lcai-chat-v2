@@ -34,8 +34,12 @@ export function createMultiModelTransport(args: {
   publicClient: PublicClient;
   /** Device-local private-memory prefix, shared with the main chat. */
   getMemoryPrefix?: () => string;
-  /** Per-turn group id, stamped into the persisted user row's protocolMeta. */
-  groupId: string;
+  /**
+   * Reads the current turn's group id at persist time. The transport stays warm
+   * across turns, so a value captured at construction would stamp every later
+   * turn's user row with the first turn's id.
+   */
+  getGroupId: () => string;
 }): ProtocolTransport {
   const chainId = config.chains[0].id;
   const jobRegistryAddress = config.jobRegistryAddress[chainId];
@@ -98,7 +102,7 @@ export function createMultiModelTransport(args: {
             protocolMeta: {
               ...(jobId != null ? { jobId } : {}),
               sessionId,
-              groupId: args.groupId,
+              groupId: args.getGroupId(),
             },
           }
         );
