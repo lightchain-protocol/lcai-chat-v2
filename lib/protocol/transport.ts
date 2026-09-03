@@ -144,7 +144,11 @@ export type TrackedJob = {
   worker: string;
   /** Unix seconds — from on-chain Job.deadline */
   deadline: number;
-  /** Unix seconds — from on-chain Job.completedAt (0 if not yet completed) */
+  /**
+   * Unix seconds. On-chain Job.completedAt once a chain read has seen it;
+   * before that, the local time the relay reported completion. 0 while the
+   * job is still running.
+   */
   completedAt: number;
   /** Wei — from on-chain Job.escrowedFee */
   escrowedFee: bigint;
@@ -1373,6 +1377,13 @@ export class ProtocolTransport {
     const job = this.activeJobs.get(jobId);
     if (!job) return;
     job.status = status;
+    // The relay reports completion before any chain read does. Stamp the
+    // moment so every "is this job finished" check keyed off completedAt (the
+    // timeline's latch, the dispute-window countdown) stops seeing a live job;
+    // a later chain read overwrites it with the block's own timestamp.
+    if (status === "completed" && job.completedAt === 0) {
+      job.completedAt = Math.floor(Date.now() / 1000);
+    }
     this.onJobUpdateCallback?.(job);
   }
 
