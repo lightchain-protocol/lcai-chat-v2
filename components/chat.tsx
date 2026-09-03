@@ -684,6 +684,8 @@ export function Chat({
 
   const isMultiModel = isProtocolMode && selectedModels.length >= 2;
 
+  const runMultiModel = multiModel.run;
+
   // The send the whole UI calls. One model → the untouched useChat/protocol
   // path. Two or more → append the prompt once and fan it out. Same shape as
   // useChat.sendMessage so every existing call site (composer, suggestions,
@@ -701,7 +703,7 @@ export function Chat({
           parts,
           metadata: { createdAt: new Date().toISOString() },
         };
-        multiModel.run({
+        runMultiModel({
           userMessage,
           models: selectedModels,
           groupId: generateUUID(),
@@ -713,7 +715,7 @@ export function Chat({
       }
       return sendMessage(message, options);
     },
-    [isMultiModel, multiModel, selectedModels, sendMessage, visibilityType]
+    [isMultiModel, runMultiModel, selectedModels, sendMessage, visibilityType]
   );
 
   // While a multi-model turn streams, the composer must show a Stop and the

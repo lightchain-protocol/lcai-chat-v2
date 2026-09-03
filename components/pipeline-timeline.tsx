@@ -473,6 +473,14 @@ function PurePipelineTimeline({
     [activeJobs, currentJobId]
   );
 
+  // The poll reads the latest job/evidence through refs so that a new evidence
+  // object — set by the poll itself — does not tear the interval down and
+  // refire the tick. The effect re-arms only when what it watches changes.
+  const jobRef = useRef(job);
+  jobRef.current = job;
+  const evidenceRef = useRef(evidence);
+  evidenceRef.current = evidence;
+
   const completed =
     evidence.completed !== undefined ||
     (job !== undefined && job.completedAt > 0);
@@ -491,6 +499,10 @@ function PurePipelineTimeline({
     let cancelled = false;
 
     const tick = async () => {
+      // biome-ignore lint/nursery/noShadow: reads the latest value through the ref under the outer name, see the ref comment above.
+      const job = jobRef.current;
+      // biome-ignore lint/nursery/noShadow: same as above, for evidence.
+      const evidence = evidenceRef.current;
       if (cancelled) return;
       try {
         if (fromBlockRef.current === null) {
@@ -631,8 +643,7 @@ function PurePipelineTimeline({
       cancelled = true;
       clearInterval(interval);
     };
-    // sid/jid are derived from job + evidence, already in the dep list.
-  }, [watching, publicClient, registry, address, job, evidence]);
+  }, [watching, publicClient, registry, address]);
 
   const isError = progressStatus === "error";
   const activeAllowed = live || (!!job && !completed);
