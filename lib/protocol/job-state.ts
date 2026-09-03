@@ -15,3 +15,12 @@
 export function isCompletedJobState(state: number): boolean {
   return state === 2 || state === 5 || state === 6;
 }
+
+/**
+ * States in which the fee reached its final owner: Resolved after a dispute,
+ * Released after a clean payout. Completed is not one of them — the job is
+ * still disputable until the window closes.
+ */
+export function isSettledJobState(state: number): boolean {
+  return state === 5 || state === 6;
+}
