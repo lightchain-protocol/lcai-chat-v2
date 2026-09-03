@@ -13,7 +13,9 @@ import { memo, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
+import { ttsModelId } from "@/config";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import type { ChatMessage } from "@/lib/types";
@@ -60,6 +62,16 @@ export function PureMessageActions({
   // Read-aloud: synthesizes the message as speech via a one-off protocol job
   // on the TTS model and plays the returned MP3. Never added to the thread.
   const tts = useTextToSpeech();
+
+  // Read-aloud is a paid job on the speech model; offer it only where a worker
+  // actually serves that model. A failed reading (status unknown) still shows
+  // the button — hiding it on an RPC blink would be the worse outage.
+  const speech = useWorkerAvailability([ttsModelId]);
+  const speechUnstaffed =
+    speech.availability !== undefined &&
+    speech.availability.status !== "unknown" &&
+    !speech.hasEligibleWorkers;
+
   const handleReadAloud = async () => {
     if (!textFromParts) {
       return;
@@ -130,28 +142,30 @@ export function PureMessageActions({
         {copied ? <CopyCheck /> : <Copy />}
       </Action>
 
-      <Action
-        data-testid="message-read-aloud"
-        // Spinner state is inert; the busy job either finishes or is cancelled
-        // by clicking again once it is playing.
-        disabled={!tts.isAvailable || tts.state === "synthesizing"}
-        onClick={handleReadAloud}
-        tooltip={
-          tts.isAvailable
-            ? tts.state === "playing"
-              ? "Stop"
-              : "Read aloud (submits a paid job)"
-            : "Connect a wallet to read messages aloud"
-        }
-      >
-        {tts.state === "synthesizing" ? (
-          <Loader className="animate-spin" />
-        ) : tts.state === "playing" ? (
-          <Square />
-        ) : (
-          <Volume2 />
-        )}
-      </Action>
+      {!speechUnstaffed && (
+        <Action
+          data-testid="message-read-aloud"
+          // Spinner state is inert; the busy job either finishes or is cancelled
+          // by clicking again once it is playing.
+          disabled={!tts.isAvailable || tts.state === "synthesizing"}
+          onClick={handleReadAloud}
+          tooltip={
+            tts.isAvailable
+              ? tts.state === "playing"
+                ? "Stop"
+                : "Read aloud (submits a paid job)"
+              : "Connect a wallet to read messages aloud"
+          }
+        >
+          {tts.state === "synthesizing" ? (
+            <Loader className="animate-spin" />
+          ) : tts.state === "playing" ? (
+            <Square />
+          ) : (
+            <Volume2 />
+          )}
+        </Action>
+      )}
 
       {regenerate && (
         // Every regeneration is a new on-chain job with its own fee, so this
