@@ -12,8 +12,10 @@ export const isSortitionEnabled =
 // the button without a source edit — and falls back to the registered
 // tts-piper model. Direct `process.env.NEXT_PUBLIC_*` access (not dynamic
 // indexing) is required so Next.js inlines the value into the client bundle.
+// An undeclared or empty build arg arrives as an empty string, which must
+// fall through to the default — hence `||`, not `??`.
 export const ttsModelId =
-  (process.env.NEXT_PUBLIC_TTS_MODEL_ID as `0x${string}` | undefined) ??
+  (process.env.NEXT_PUBLIC_TTS_MODEL_ID as `0x${string}` | undefined) ||
   "0x8c350127cf0c957d1c2ee6837fa793af56430150d69c4543c82b74e1e8dc7784";
 
 // Testnet contract addresses are build-arg overridable so local devnets
