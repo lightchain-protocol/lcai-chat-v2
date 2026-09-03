@@ -813,9 +813,10 @@ export class ProtocolTransport {
 
       // ORDER MATTERS: subscribe by session first, submit second — the same
       // guarantee sendMessages() relies on, so a worker that answers before the
-      // submit call returns doesn't lose its frames. A dedicated TTS transport
-      // is used serially, so an unbound pending handler should never exist; if
-      // one somehow does, bail rather than orphan its frames.
+      // submit call returns doesn't lose its frames. The read-aloud hook stops
+      // the previous speaker before starting a new one, so this transport is
+      // used serially and an unbound pending handler should never exist; the
+      // check stays as a guard — bail rather than orphan another job's frames.
       if (relayClient.hasUnboundPendingJob(sessionId)) {
         finish(
           undefined,
