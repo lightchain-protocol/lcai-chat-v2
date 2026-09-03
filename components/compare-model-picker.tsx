@@ -167,7 +167,9 @@ export function CompareModelMultiSelect({
                       workerCount === 0 ? "text-red-500" : "text-content-subtle"
                     )}
                   >
-                    {workerCount}w
+                    {workerCount === 0
+                      ? "No workers"
+                      : `${workerCount} worker${workerCount === 1 ? "" : "s"}`}
                   </span>
                 )}
               </span>
