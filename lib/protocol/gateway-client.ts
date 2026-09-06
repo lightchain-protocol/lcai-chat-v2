@@ -196,9 +196,10 @@ export class GatewayClient {
 
   /**
    * Sortition session bootstrap — Step 1.
-   * Consumer-api blocks while a worker self-claims the slot (typically
-   * ~10-25 s; server-capped at CLAIM_TIMEOUT_MS, 60 s by default).
-   * Throws GatewayClientError with status 408 when no worker claims in time.
+   * Consumer-api blocks while a worker self-claims the slot (a couple of
+   * blocks when a live worker is eligible; server-capped at CLAIM_TIMEOUT_MS,
+   * 12 s by default, so a genuinely unstaffed model fails fast rather than
+   * hanging). Throws GatewayClientError with status 408 when no worker claims.
    */
   async requestSortitionSession(
     modelId: string,

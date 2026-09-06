@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicClient, WalletClient } from "viem";
 import { recordModelOutcome } from "@/lib/ai/availability";
+import { friendlyProtocolError } from "@/lib/protocol/friendly-error";
 import { createMultiModelTransport } from "@/lib/protocol/multi-model-transport";
 import type { ProtocolTransport, TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, ProtocolLoadingStatus } from "@/lib/types";
@@ -210,7 +211,7 @@ export function useMultiModelSession(args: {
       } catch (err) {
         patchLive(rowId, {
           live: false,
-          error: err instanceof Error ? err.message : "Could not start",
+          error: friendlyProtocolError(err, model.name),
           progress: "error",
         });
         return;
@@ -303,11 +304,7 @@ export function useMultiModelSession(args: {
         patchLive(rowId, {
           live: false,
           progress: isAbort ? "idle" : "error",
-          error: isAbort
-            ? "Stopped"
-            : err instanceof Error
-              ? err.message
-              : "Something went wrong",
+          error: isAbort ? "Stopped" : friendlyProtocolError(err, model.name),
         });
         if (!isAbort) {
           recordModelOutcome(model.id, "failed");
