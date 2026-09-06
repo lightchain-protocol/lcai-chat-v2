@@ -416,6 +416,33 @@ export class ProtocolTransport {
    * on-chain TX via wallet), and returns a Response with a streaming body
    * fed by relay WebSocket frames.
    */
+  /**
+   * Optimistically establish the on-chain session ahead of the first send, so
+   * the sortition handshake overlaps with the user composing their prompt.
+   *
+   * The real {@link sendMessages} calls the same idempotent
+   * {@link SessionManager.initialize} and reuses the session this warmed, so a
+   * warm hit turns the first message's ~multi-second init into an instant send.
+   * Best-effort by design: it no-ops once a session is ready or already in
+   * progress, and any failure is swallowed here — the next real send re-runs
+   * initialize and surfaces the error in the message row exactly as before.
+   * Callers must only invoke this on the sortition path (the delegate signs
+   * server-side); the legacy wallet-TX path would pop a signature prompt.
+   */
+  async prewarm(opts?: { requiredCapabilities?: string[] }): Promise<void> {
+    if (
+      this.sessionMgr.status !== "idle" &&
+      this.sessionMgr.status !== "error"
+    ) {
+      return;
+    }
+    try {
+      await this.sessionMgr.initialize(opts);
+    } catch {
+      // Swallow — the real send retries initialize and reports any failure.
+    }
+  }
+
   async sendMessages(options: {
     messages: Array<{
       // Optional in the type, but the user-row persist reads it — callers that

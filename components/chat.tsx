@@ -13,6 +13,7 @@ import { useAccount, useBalance } from "wagmi";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
+import { isSortitionEnabled } from "@/config";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { useLiveWorkerCounts } from "@/hooks/use-live-worker-counts";
@@ -689,6 +690,43 @@ export function Chat({
   );
 
   const isMultiModel = isProtocolMode && selectedModels.length >= 2;
+
+  // Optimistic session pre-warm: once the user starts composing, kick off the
+  // on-chain sortition handshake for a single selected model so it overlaps
+  // typing instead of blocking the first send. Gated hard so it can never
+  // change existing behaviour:
+  //   - protocol + sortition only (the delegate signs server-side; the legacy
+  //     wallet-TX path would pop a signature prompt while typing);
+  //   - single model only (compare mode would speculatively open N sessions);
+  //   - once per selected model (retyping never re-fires; switching models
+  //     re-arms for the new one);
+  //   - best-effort in the transport (no-ops if ready/in-progress, swallows
+  //     errors), so a warm that never lands leaves the send path unchanged.
+  const prewarmedForRef = useRef<string | null>(null);
+  const prewarmRef = useRef(multiModel.prewarm);
+  useEffect(() => {
+    prewarmRef.current = multiModel.prewarm;
+  }, [multiModel.prewarm]);
+  useEffect(() => {
+    if (!(isProtocolMode && isSortitionEnabled)) {
+      return;
+    }
+    if (input.trim().length === 0 || selectedModelIds.length !== 1) {
+      return;
+    }
+    const modelId = selectedModelIds[0];
+    if (prewarmedForRef.current === modelId) {
+      return;
+    }
+    const model = availableModels.find((m) => m.id === modelId);
+    if (!model) {
+      return;
+    }
+    prewarmedForRef.current = modelId;
+    prewarmRef.current?.([model], {
+      enableWebSearch: enableWebSearchRef.current,
+    });
+  }, [input, selectedModelIds, availableModels]);
 
   const runMultiModel = multiModel.run;
 

@@ -173,6 +173,13 @@ export class SessionManager {
   // UI layer having to remember.
   private requestedCapabilities: string[] = [];
   private onStatusChange?: (status: SessionStatus) => void;
+  /**
+   * The in-flight initialize() promise, if one is running. Lets a concurrent
+   * caller (e.g. a send that fires while a pre-warm is still establishing the
+   * session) await the SAME init instead of returning early and then tripping
+   * the "session not ready" guard.
+   */
+  private initInFlight: Promise<void> | null = null;
 
   private readonly gateway: GatewayClient;
   private readonly modelId: string;
@@ -253,236 +260,254 @@ export class SessionManager {
       // Stale session — reset and fall through to create a new one
       this.reset();
     }
+    // An init is already running (typically a pre-warm): await that exact run
+    // rather than returning and letting the caller race ahead of a not-yet-
+    // ready session.
+    if (this.initInFlight) {
+      return this.initInFlight;
+    }
     if (this.state.status !== "idle" && this.state.status !== "error") {
-      return; // Already in progress
+      return; // in an in-between state with no tracked promise — leave as-is
     }
 
-    // Check if the wallet has enough balance before preparing the session to avoid misleading errors
-    const account = this.walletClient.account;
-    if (!account) throw new Error("Wallet account not available");
+    const run = (async () => {
+      // Check if the wallet has enough balance before preparing the session to avoid misleading errors
+      const account = this.walletClient.account;
+      if (!account) throw new Error("Wallet account not available");
 
-    const balance = await this.publicClient.getBalance({
-      address: account.address,
-    });
+      const balance = await this.publicClient.getBalance({
+        address: account.address,
+      });
 
-    if (balance === 0n) {
-      throw new Error("Wallet has no balance");
-    }
+      if (balance === 0n) {
+        throw new Error("Wallet has no balance");
+      }
 
-    // Persist the requested capability set so failover/reassignment can
-    // re-request the same constraint without the UI layer having to
-    // remember.
-    this.requestedCapabilities = opts?.requiredCapabilities ?? [];
+      // Persist the requested capability set so failover/reassignment can
+      // re-request the same constraint without the UI layer having to
+      // remember.
+      this.requestedCapabilities = opts?.requiredCapabilities ?? [];
 
-    try {
-      if (isSortitionEnabled) {
-        // ----------------------------------------------------------------
-        // SORTITION PATH: request → wrap keys (0x-hex) → provideKeys
-        // Delegate signs createSession on-chain server-side — no wallet TX.
-        // ----------------------------------------------------------------
+      try {
+        if (isSortitionEnabled) {
+          // ----------------------------------------------------------------
+          // SORTITION PATH: request → wrap keys (0x-hex) → provideKeys
+          // Delegate signs createSession on-chain server-side — no wallet TX.
+          // ----------------------------------------------------------------
 
-        // Step 1: Request — consumer-api blocks until a worker self-claims
-        // (typically ~10-25 s; the server caps the wait at CLAIM_TIMEOUT_MS,
-        // 60 s by default). A 408 means no worker claimed in time.
-        this.setState("preparing");
-        let req: SortitionRequestResponse;
-        try {
-          // The capability constraint rides the session request and is
-          // enforced on-chain at claimSession — only a worker that declared
-          // every required capability can claim.
-          req = await this.gateway.requestSortitionSession(this.modelId, {
+          // Step 1: Request — consumer-api blocks until a worker self-claims
+          // (typically ~10-25 s; the server caps the wait at CLAIM_TIMEOUT_MS,
+          // 60 s by default). A 408 means no worker claimed in time.
+          this.setState("preparing");
+          let req: SortitionRequestResponse;
+          try {
+            // The capability constraint rides the session request and is
+            // enforced on-chain at claimSession — only a worker that declared
+            // every required capability can claim.
+            req = await this.gateway.requestSortitionSession(this.modelId, {
+              requiredCapabilities: this.requestedCapabilities,
+            });
+          } catch (err) {
+            // 408: consumer-api's own "no worker claimed within CLAIM_TIMEOUT_MS".
+            // 504: a proxy/LB in front of consumer-api timed out this same
+            // long-poll before the 408 could return (the fronting request timeout
+            // sits at ~the same ceiling). To the user both mean the same thing —
+            // no worker claimed — so surface the clean retry message instead of a
+            // raw "Gateway API error: 504".
+            if (
+              err instanceof GatewayClientError &&
+              (err.status === 408 || err.status === 504)
+            ) {
+              // Hard fail: when capabilities were required, say which
+              // lever the user has instead of a generic retry message.
+              throw new NoWorkerAvailableError(
+                this.requestedCapabilities.length > 0
+                  ? "No search-capable worker available — try again or turn off web search."
+                  : undefined
+              );
+            }
+            throw err;
+          }
+
+          // Step 2: ECDH key exchange using 0x-hex encoded keys (mirrors the
+          // rewrapAndUpdateKey / updateSessionKey path at session.ts:600-616).
+          this.setState("key_exchange");
+          const sessionKey = await generateSessionKey();
+          this.sessionKey = sessionKey;
+
+          // Defence-in-depth: hexToBytes does `hex.slice(2)` unconditionally, so a
+          // prefix-less key silently loses its leading byte. The API should return
+          // 0x-hex, but normalise here too so a raw-hex key can't corrupt the key.
+          const as0xHex = (k: string): `0x${string}` =>
+            (k.startsWith("0x") ? k : `0x${k}`) as `0x${string}`;
+
+          const workerPubRaw = hexToBytes(as0xHex(req.workerEncryptionKey));
+          const workerPub = await importPublicKey(workerPubRaw);
+          const encWorkerKeyBytes = await encryptSessionKey(
+            sessionKey,
+            workerPub
+          );
+          const encWorkerKey = toHex(encWorkerKeyBytes);
+
+          let encDisputerKey = "0x";
+          if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
+            this.disputerEncryptionKey = req.disputerEncryptionKey;
+            const disputerPubRaw = hexToBytes(
+              as0xHex(req.disputerEncryptionKey)
+            );
+            const disputerPub = await importPublicKey(disputerPubRaw);
+            const encDisputerKeyBytes = await encryptSessionKey(
+              sessionKey,
+              disputerPub
+            );
+            encDisputerKey = toHex(encDisputerKeyBytes);
+          }
+
+          // Step 3: Provide keys — consumer-api submits createSession on-chain
+          // via the delegate (no wallet popup).
+          this.setState("creating");
+          const { sessionId: sessionIdStr } =
+            await this.gateway.provideSortitionKeys(
+              req.reqId,
+              encWorkerKey,
+              encDisputerKey
+            );
+          const sessionId = Number(sessionIdStr);
+
+          // Capture session metadata for downstream use.
+          this.state.workerCapabilities = req.capabilities;
+          // Store disputer key for failover rewrap — only when a non-empty key was returned.
+          if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
+            this.disputerEncryptionKey = req.disputerEncryptionKey;
+          }
+
+          // Step 4: Wait for relay token (unchanged — Layer B mints it).
+          const relayToken = await this.waitForRelayToken(sessionId);
+
+          this.state = {
+            status: "ready",
+            sessionId,
+            relayUrl: this.relayUrl,
+            relayToken,
+            error: null,
+            workerCapabilities: this.state.workerCapabilities,
+          };
+          this.onStatusChange?.("ready");
+          this.persist();
+        } else {
+          // ----------------------------------------------------------------
+          // LEGACY PATH: select → prepare → createSessionOnChain (wallet TX)
+          // ----------------------------------------------------------------
+
+          // Step 1: Select — dispatcher picks a worker and commits (worker, nonce,
+          // expiry) to short-lived storage. We receive the worker's encryption key
+          // so we can encrypt the session key for it before returning in Step 3.
+          this.setState("preparing");
+          let selected = await this.gateway.selectSession(this.modelId, {
             requiredCapabilities: this.requestedCapabilities,
           });
-        } catch (err) {
-          // 408: consumer-api's own "no worker claimed within CLAIM_TIMEOUT_MS".
-          // 504: a proxy/LB in front of consumer-api timed out this same
-          // long-poll before the 408 could return (the fronting request timeout
-          // sits at ~the same ceiling). To the user both mean the same thing —
-          // no worker claimed — so surface the clean retry message instead of a
-          // raw "Gateway API error: 504".
-          if (
-            err instanceof GatewayClientError &&
-            (err.status === 408 || err.status === 504)
-          ) {
-            // Hard fail: when capabilities were required, say which
-            // lever the user has instead of a generic retry message.
-            throw new NoWorkerAvailableError(
-              this.requestedCapabilities.length > 0
-                ? "No search-capable worker available — try again or turn off web search."
-                : undefined
-            );
-          }
-          throw err;
-        }
 
-        // Step 2: ECDH key exchange using 0x-hex encoded keys (mirrors the
-        // rewrapAndUpdateKey / updateSessionKey path at session.ts:600-616).
-        this.setState("key_exchange");
-        const sessionKey = await generateSessionKey();
-        this.sessionKey = sessionKey;
+          // Step 2: ECDH key exchange — encrypt the generated session key for the
+          // worker (and disputer, if provided).
+          this.setState("key_exchange");
+          let keyExchange = await this.performKeyExchange(selected);
+          this.sessionKey = keyExchange.sessionKey;
 
-        // Defence-in-depth: hexToBytes does `hex.slice(2)` unconditionally, so a
-        // prefix-less key silently loses its leading byte. The API should return
-        // 0x-hex, but normalise here too so a raw-hex key can't corrupt the key.
-        const as0xHex = (k: string): `0x${string}` =>
-          (k.startsWith("0x") ? k : `0x${k}`) as `0x${string}`;
+          // Step 3: Prepare — send the encrypted keys back; dispatcher signs the
+          // committed (worker, nonce, expiry) tuple with the keys bound into the
+          // EIP-712 domain (audit requirement).
+          let prepared = await this.gateway.prepareSession({
+            modelId: this.modelId,
+            encWorkerKey: keyExchange.encWorkerKey,
+            encDisputerKey: keyExchange.encDisputerKey,
+            requiredCapabilities: this.requestedCapabilities,
+            selectionId: selected.selectionId,
+          });
 
-        const workerPubRaw = hexToBytes(as0xHex(req.workerEncryptionKey));
-        const workerPub = await importPublicKey(workerPubRaw);
-        const encWorkerKeyBytes = await encryptSessionKey(
-          sessionKey,
-          workerPub
-        );
-        const encWorkerKey = toHex(encWorkerKeyBytes);
+          // Record the bound worker's full capability list so the UI can gate
+          // per-message features. Dispatcher echoes this from the heartbeat at
+          // selection time; an empty/undefined list = legacy worker.
+          this.state.workerCapabilities =
+            prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
 
-        let encDisputerKey = "0x";
-        if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
-          this.disputerEncryptionKey = req.disputerEncryptionKey;
-          const disputerPubRaw = hexToBytes(as0xHex(req.disputerEncryptionKey));
-          const disputerPub = await importPublicKey(disputerPubRaw);
-          const encDisputerKeyBytes = await encryptSessionKey(
-            sessionKey,
-            disputerPub
-          );
-          encDisputerKey = toHex(encDisputerKeyBytes);
-        }
+          // Step 4: Create session on-chain via user's wallet
+          this.setState("creating");
+          const modelIdBytes32 = padHexTo32Bytes(this.modelId);
+          this.modelIdBytes32 = modelIdBytes32;
 
-        // Step 3: Provide keys — consumer-api submits createSession on-chain
-        // via the delegate (no wallet popup).
-        this.setState("creating");
-        const { sessionId: sessionIdStr } =
-          await this.gateway.provideSortitionKeys(
-            req.reqId,
-            encWorkerKey,
-            encDisputerKey
-          );
-        const sessionId = Number(sessionIdStr);
-
-        // Capture session metadata for downstream use.
-        this.state.workerCapabilities = req.capabilities;
-        // Store disputer key for failover rewrap — only when a non-empty key was returned.
-        if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
-          this.disputerEncryptionKey = req.disputerEncryptionKey;
-        }
-
-        // Step 4: Wait for relay token (unchanged — Layer B mints it).
-        const relayToken = await this.waitForRelayToken(sessionId);
-
-        this.state = {
-          status: "ready",
-          sessionId,
-          relayUrl: this.relayUrl,
-          relayToken,
-          error: null,
-          workerCapabilities: this.state.workerCapabilities,
-        };
-        this.onStatusChange?.("ready");
-        this.persist();
-      } else {
-        // ----------------------------------------------------------------
-        // LEGACY PATH: select → prepare → createSessionOnChain (wallet TX)
-        // ----------------------------------------------------------------
-
-        // Step 1: Select — dispatcher picks a worker and commits (worker, nonce,
-        // expiry) to short-lived storage. We receive the worker's encryption key
-        // so we can encrypt the session key for it before returning in Step 3.
-        this.setState("preparing");
-        let selected = await this.gateway.selectSession(this.modelId, {
-          requiredCapabilities: this.requestedCapabilities,
-        });
-
-        // Step 2: ECDH key exchange — encrypt the generated session key for the
-        // worker (and disputer, if provided).
-        this.setState("key_exchange");
-        let keyExchange = await this.performKeyExchange(selected);
-        this.sessionKey = keyExchange.sessionKey;
-
-        // Step 3: Prepare — send the encrypted keys back; dispatcher signs the
-        // committed (worker, nonce, expiry) tuple with the keys bound into the
-        // EIP-712 domain (audit requirement).
-        let prepared = await this.gateway.prepareSession({
-          modelId: this.modelId,
-          encWorkerKey: keyExchange.encWorkerKey,
-          encDisputerKey: keyExchange.encDisputerKey,
-          requiredCapabilities: this.requestedCapabilities,
-          selectionId: selected.selectionId,
-        });
-
-        // Record the bound worker's full capability list so the UI can gate
-        // per-message features. Dispatcher echoes this from the heartbeat at
-        // selection time; an empty/undefined list = legacy worker.
-        this.state.workerCapabilities =
-          prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
-
-        // Step 4: Create session on-chain via user's wallet
-        this.setState("creating");
-        const modelIdBytes32 = padHexTo32Bytes(this.modelId);
-        this.modelIdBytes32 = modelIdBytes32;
-
-        let sessionId: number;
-        try {
-          sessionId = await this.createSessionOnChain(
-            modelIdBytes32,
-            { ...selected, signature: prepared.signature },
-            keyExchange
-          );
-        } catch (err) {
-          // Retry once on stale dispatcher signature (nonce consumed, or the
-          // pending selection TTL expired mid-flight — both signal a fresh
-          // select → prepare round is needed).
-          if (
-            isStaleSignatureError(err) ||
-            isPendingSelectionMissing(err) ||
-            isSelectionSuperseded(err)
-          ) {
-            selected = await this.gateway.selectSession(this.modelId, {
-              requiredCapabilities: this.requestedCapabilities,
-            });
-            keyExchange = await this.performKeyExchange(selected);
-            this.sessionKey = keyExchange.sessionKey;
-            prepared = await this.gateway.prepareSession({
-              modelId: this.modelId,
-              encWorkerKey: keyExchange.encWorkerKey,
-              encDisputerKey: keyExchange.encDisputerKey,
-              requiredCapabilities: this.requestedCapabilities,
-              selectionId: selected.selectionId,
-            });
-            this.state.workerCapabilities =
-              prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
+          let sessionId: number;
+          try {
             sessionId = await this.createSessionOnChain(
               modelIdBytes32,
               { ...selected, signature: prepared.signature },
               keyExchange
             );
-          } else {
-            throw err;
+          } catch (err) {
+            // Retry once on stale dispatcher signature (nonce consumed, or the
+            // pending selection TTL expired mid-flight — both signal a fresh
+            // select → prepare round is needed).
+            if (
+              isStaleSignatureError(err) ||
+              isPendingSelectionMissing(err) ||
+              isSelectionSuperseded(err)
+            ) {
+              selected = await this.gateway.selectSession(this.modelId, {
+                requiredCapabilities: this.requestedCapabilities,
+              });
+              keyExchange = await this.performKeyExchange(selected);
+              this.sessionKey = keyExchange.sessionKey;
+              prepared = await this.gateway.prepareSession({
+                modelId: this.modelId,
+                encWorkerKey: keyExchange.encWorkerKey,
+                encDisputerKey: keyExchange.encDisputerKey,
+                requiredCapabilities: this.requestedCapabilities,
+                selectionId: selected.selectionId,
+              });
+              this.state.workerCapabilities =
+                prepared.workerCapabilities ??
+                selected.workerCapabilities ??
+                [];
+              sessionId = await this.createSessionOnChain(
+                modelIdBytes32,
+                { ...selected, signature: prepared.signature },
+                keyExchange
+              );
+            } else {
+              throw err;
+            }
           }
+
+          const relayToken = await this.waitForRelayToken(sessionId);
+
+          this.state = {
+            status: "ready",
+            sessionId,
+            relayUrl: this.relayUrl,
+            relayToken,
+            error: null,
+            // Preserve the capability list captured during prepareSession above —
+            // ready-state writes must NOT clobber it.
+            workerCapabilities: this.state.workerCapabilities,
+          };
+          this.onStatusChange?.("ready");
+          this.persist();
         }
-
-        const relayToken = await this.waitForRelayToken(sessionId);
-
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         this.state = {
-          status: "ready",
-          sessionId,
-          relayUrl: this.relayUrl,
-          relayToken,
-          error: null,
-          // Preserve the capability list captured during prepareSession above —
-          // ready-state writes must NOT clobber it.
-          workerCapabilities: this.state.workerCapabilities,
+          ...this.state,
+          status: "error",
+          error: msg,
         };
-        this.onStatusChange?.("ready");
-        this.persist();
+        this.onStatusChange?.("error");
+        throw err;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.state = {
-        ...this.state,
-        status: "error",
-        error: msg,
-      };
-      this.onStatusChange?.("error");
-      throw err;
+    })();
+    this.initInFlight = run;
+    try {
+      await run;
+    } finally {
+      this.initInFlight = null;
     }
   }
 
