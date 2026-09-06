@@ -15,6 +15,7 @@ import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import { useLiveWorkerCounts } from "@/hooks/use-live-worker-counts";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useModels } from "@/hooks/use-models";
 import {
@@ -24,7 +25,6 @@ import {
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
-import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { recordModelOutcome } from "@/lib/ai/availability";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import {
@@ -202,13 +202,14 @@ export function Chat({
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
   const { models: availableModels } = useModels();
-  // Live per-model worker count (WorkerRegistry.getEligibleWorkers). Drives
-  // the "default to the model with the most active workers" behaviour below.
+  // Live per-model worker count from the liveness-aware availability endpoint
+  // (heartbeat-intersected — dead boxes excluded). Drives the "default to the
+  // model with the most active workers" behaviour below.
   const workerCountModelIds = useMemo(
     () => availableModels.map((model) => model.id),
     [availableModels]
   );
-  const { counts: workerCounts } = useWorkerCounts(workerCountModelIds);
+  const { counts: workerCounts } = useLiveWorkerCounts(workerCountModelIds);
   // Ref so the protocol fetch wrapper can name the serving model without
   // re-creating the transport whenever the live model list refreshes.
   const availableModelsRef = useRef(availableModels);

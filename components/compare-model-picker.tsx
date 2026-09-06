@@ -8,30 +8,45 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  type ModelLiveness,
+  useLiveWorkerCounts,
+} from "@/hooks/use-live-worker-counts";
 import { useModels } from "@/hooks/use-models";
-import { useWorkerCounts } from "@/hooks/use-worker-counts";
-import { type Availability, availabilityOf } from "@/lib/ai/availability";
 import { cn } from "@/lib/utils";
 import { ModelLogo } from "./model-logo";
 
 export const MIN_COMPARE_MODELS = 2;
 export const MAX_COMPARE_MODELS = 4;
 
-const AVAILABILITY_CLASS: Record<Availability, string> = {
-  good: "bg-emerald-500",
-  shaky: "bg-amber-500",
-  unknown: "bg-content-subtle/30",
-};
+/**
+ * Fleet availability dot, driven by the liveness-aware availability endpoint
+ * (heartbeat-intersected), not a device-local guess:
+ *   green  — live workers with spare capacity, ready now
+ *   amber  — live workers but all busy (a request would queue/refuse)
+ *   red    — nobody heartbeating for this model right now
+ *   grey   — unknown (read failed); never used to block
+ */
+function dotClass(liveness?: ModelLiveness): string {
+  if (!liveness || liveness.count === undefined) {
+    return "bg-content-subtle/30";
+  }
+  if (liveness.count === 0) {
+    return "bg-red-500";
+  }
+  if (liveness.freeSlots !== null && liveness.freeSlots <= 0) {
+    return "bg-amber-500";
+  }
+  return "bg-emerald-500";
+}
 
-/** Small device-local availability dot, matching the single-model picker. */
-export function AvailabilityDot({ modelId }: { modelId: string }) {
-  const availability = availabilityOf(modelId);
+export function AvailabilityDot({ liveness }: { liveness?: ModelLiveness }) {
   return (
     <span
       aria-hidden
       className={cn(
         "inline-block size-1.5 shrink-0 rounded-full",
-        AVAILABILITY_CLASS[availability]
+        dotClass(liveness)
       )}
     />
   );
@@ -46,10 +61,11 @@ export function AvailabilityDot({ modelId }: { modelId: string }) {
  * one selected model shows its logo + name (reading like the old single-model
  * picker), several read as "N models"; opening it reveals the checkable list.
  *
- * Only models a worker is currently serving are selectable — the worker count
- * (WorkerRegistry.getEligibleWorkers, the same data the single-model picker
- * disables on) is reused, and a model showing 0 workers is disabled because it
- * genuinely cannot take a job. Once the cap is reached, unselected rows are
+ * Only models a worker is currently serving are selectable — the count comes
+ * from the liveness-aware availability endpoint (on-chain eligibility
+ * intersected with the gateway heartbeat store), so a model whose only workers
+ * are dead boxes shows "Offline" and is disabled rather than luring a session
+ * into a timeout. Once the cap is reached, unselected rows are
  * disabled so the selection can never exceed the max. Selecting a row keeps the
  * menu open (preventDefault) so several models can be toggled in one pass.
  */
@@ -72,7 +88,7 @@ export function CompareModelMultiSelect({
 }) {
   const { models } = useModels();
   const modelIds = useMemo(() => models.map((m) => m.id), [models]);
-  const { counts } = useWorkerCounts(modelIds);
+  const { byModel } = useLiveWorkerCounts(modelIds);
 
   const atCap = selectedIds.length >= MAX_COMPARE_MODELS;
 
@@ -99,7 +115,11 @@ export function CompareModelMultiSelect({
         >
           {count === 1 ? (
             <>
-              {soleModel && <AvailabilityDot modelId={soleModel.id} />}
+              {soleModel && (
+                <AvailabilityDot
+                  liveness={byModel[soleModel.id.toLowerCase()]}
+                />
+              )}
               {soleModel && <ModelLogo modelId={soleModel.id} size={14} />}
               <span className="hidden font-medium text-xs sm:block">
                 {soleModel?.name ?? "1 model"}
@@ -134,12 +154,19 @@ export function CompareModelMultiSelect({
           </p>
         )}
         {models.map((model) => {
-          // Undefined count = read failed; treat as available rather than
-          // wrongly locking a model out (matches the single-model picker).
-          const workerCount = counts[model.id];
+          // Liveness-aware count from the availability endpoint. Undefined =
+          // unknown read; treat as available rather than false-disabling
+          // (fail-open, matching the old behaviour).
+          const liveness = byModel[model.id.toLowerCase()];
+          const workerCount = liveness?.count;
           const hasWorker = workerCount === undefined || workerCount > 0;
           const selected = selectedIds.includes(model.id);
           const isDisabled = disabled || !hasWorker || (!selected && atCap);
+          const allBusy =
+            typeof workerCount === "number" &&
+            workerCount > 0 &&
+            liveness?.freeSlots !== null &&
+            (liveness?.freeSlots ?? 0) <= 0;
 
           return (
             <DropdownMenuCheckboxItem
@@ -154,7 +181,7 @@ export function CompareModelMultiSelect({
             >
               <span className="flex w-full min-w-0 items-center justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <AvailabilityDot modelId={model.id} />
+                  <AvailabilityDot liveness={liveness} />
                   <ModelLogo modelId={model.id} size={14} />
                   <span className="truncate font-medium text-xs">
                     {model.name}
@@ -164,12 +191,18 @@ export function CompareModelMultiSelect({
                   <span
                     className={cn(
                       "ml-auto shrink-0 font-mono text-[10px]",
-                      workerCount === 0 ? "text-red-500" : "text-content-subtle"
+                      workerCount === 0
+                        ? "text-red-500"
+                        : allBusy
+                          ? "text-amber-500"
+                          : "text-content-subtle"
                     )}
                   >
                     {workerCount === 0
-                      ? "No workers"
-                      : `${workerCount} worker${workerCount === 1 ? "" : "s"}`}
+                      ? "Offline"
+                      : allBusy
+                        ? "Busy"
+                        : `${workerCount} online`}
                   </span>
                 )}
               </span>
