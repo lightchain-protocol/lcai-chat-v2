@@ -17,7 +17,7 @@
 import { withMemoryPrefix } from "../memory";
 import type { ProtocolLoadingStatus } from "../types";
 import { parseArtifactDescriptor } from "./artifact";
-import { bytesToBase64 } from "./base64";
+import { base64ToBytes, bytesToBase64 } from "./base64";
 import type { GatewayClient } from "./gateway-client";
 import { isCompletedJobState } from "./job-state";
 import type {
@@ -69,6 +69,26 @@ const EMPTY_ANSWER_ERROR =
 
 /** Cap on retained mismatch evidence entries (FIFO eviction past this). */
 const MAX_MISMATCH_EVIDENCE = 50;
+
+/**
+ * Ceiling on how long a one-off speech-synthesis job may wait for its answer.
+ * Piper is fast, but the job still has to bind a worker and settle on-chain, so
+ * this mirrors the generous first-frame budget rather than a tight audio one —
+ * it exists only so a genuinely broken job can't leave the button spinning.
+ */
+const SPEECH_SYNTHESIS_DEADLINE_MS = 180_000;
+
+/**
+ * How long a one-off speech job waits for its relay socket to finish the
+ * authenticated handshake before giving up. The relay registers a connection
+ * for a session only once its per-session token authenticates on WS open, and
+ * it routes a worker's response to that session solely by the connections it
+ * has registered — a frame published before the socket is live is dropped, not
+ * queued. The normal chat path is masked from this by wallet-signature and
+ * blob-upload latency; a fast delegated TTS submit is not, so this job must
+ * wait for the socket to be genuinely connected before it submits.
+ */
+const RELAY_CONNECT_DEADLINE_MS = 20_000;
 
 /**
  * A response stream whose relay subscription is wired up independently of the
@@ -124,7 +144,12 @@ export type TrackedJob = {
   worker: string;
   /** Unix seconds — from on-chain Job.deadline */
   deadline: number;
-  /** Unix seconds — from on-chain Job.completedAt (0 if not yet completed) */
+  /**
+   * Unix seconds. On-chain Job.completedAt when a chain read has seen it;
+   * otherwise the local time the relay reported completion. 0 while the job
+   * is still running. Relay evidence, not chain evidence: anything that needs
+   * the block's own timestamp reads getJob itself.
+   */
   completedAt: number;
   /** Wei — from on-chain Job.escrowedFee */
   escrowedFee: bigint;
@@ -393,6 +418,10 @@ export class ProtocolTransport {
    */
   async sendMessages(options: {
     messages: Array<{
+      // Optional in the type, but the user-row persist reads it — callers that
+      // want the message stored under a stable id (the multi-model fan-out, so
+      // every model writes and dedupes the same row) must pass it.
+      id?: string;
       role: string;
       parts?: Array<{ type: string; text?: string }>;
     }>;
@@ -519,6 +548,13 @@ export class ProtocolTransport {
         typeof options.body?.friendlyModelId === "string"
           ? options.body.friendlyModelId
           : undefined,
+      // Multi-model fan-out: the shared per-turn id, so the N sibling assistant
+      // rows persist with it and a reloaded chat reassembles them into columns.
+      // Absent on ordinary single-model sends.
+      groupId:
+        typeof options.body?.groupId === "string"
+          ? options.body.groupId
+          : undefined,
       onJobIdResolved: (jobId) => {
         persist.settle(jobId);
         // Deadline tracking is best-effort; failure must not block delivery.
@@ -593,6 +629,249 @@ export class ProtocolTransport {
         },
       }),
     };
+  }
+
+  /**
+   * One-off text-to-speech job. Submits `text` as an ordinary protocol job on
+   * this transport's model — a TTS model (tts-piper) returns base64-encoded MP3
+   * bytes as its response payload instead of text — waits for the settled
+   * answer, and returns the decoded MP3 bytes.
+   *
+   * Deliberately does NOT go through sendMessages(): that pipeline persists a
+   * user message and an assistant message to the chat database and drives the
+   * useChat stream. Read-aloud must leave no trace in the visible thread, so
+   * this drives the same session/submit/decrypt machinery directly and simply
+   * collects the response. The job is still a real, paid, on-chain job that
+   * settles and is verifiable like any other.
+   */
+  async synthesizeSpeech(
+    text: string,
+    opts?: { signal?: AbortSignal }
+  ): Promise<Uint8Array> {
+    const plaintext = text.trim();
+    if (!plaintext) {
+      throw new Error("No text to synthesize");
+    }
+
+    // Establish a session with a LIVE relay socket. A session (and its
+    // sessionStorage snapshot) outlives its short-lived relay token, so a
+    // restored/long-reused session can hand back an on-chain-valid session
+    // whose token has expired — connecting with it silently 401s and the
+    // worker's answer is never routed. So: initialize, re-mint the token, open
+    // a socket with it, and wait for the authenticated handshake. If any of
+    // that fails on a reused session, throw it away and build a fresh one once.
+    const establish = async (): Promise<RelayClient> => {
+      this.setProgressStatus("preparing_chat");
+      await this.sessionMgr.initialize();
+      if (this.sessionMgr.status !== "ready") {
+        throw new Error("Session is not ready — cannot synthesize speech");
+      }
+      if (this.sessionMgr.sessionId === null) {
+        throw new Error("Session ID not available after initialization");
+      }
+      this.setProgressStatus("waiting_for_relay");
+      await this.connectRelayWithFreshToken();
+      const client = this.relayClient;
+      if (!client) {
+        throw new Error("Relay client not connected");
+      }
+      await this.waitForRelayConnected(client, { signal: opts?.signal });
+      return client;
+    };
+
+    let relayClient: RelayClient;
+    try {
+      relayClient = await establish();
+    } catch (err) {
+      // An abort is the user's choice, not a stale session — don't burn a
+      // fresh-session retry (and a wallet TX in legacy mode) on it.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw err;
+      }
+      // The reused session was stale (dead worker, unmintable token, rejected
+      // socket). Drop it and its snapshot, then build one clean session.
+      this.startNewSession();
+      relayClient = await establish();
+    }
+
+    const sessionId = this.sessionMgr.sessionId;
+    if (sessionId === null) {
+      throw new Error("Session ID not available after initialization");
+    }
+
+    return await new Promise<Uint8Array>((resolve, reject) => {
+      let settled = false;
+      let unsubscribe: (() => void) | null = null;
+      let streamed = "";
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      // Set once the submit call goes out; resolves to the jobId (wallet mode)
+      // or null (delegated mode learns it from the first frame).
+      let submitted: Promise<number | null> | null = null;
+      // True once the relay routed a frame here: the handler is bound and the
+      // relay has already observed the jobId.
+      let bound = false;
+
+      // This transport is shared by every message row, so a job whose listener
+      // went away (abort, timeout, relay error) must not have its late frames
+      // adopted by the next synthesis on this session — the contract
+      // sendMessages() keeps for prompts. A bound handler already observed the
+      // jobId; only an unbound one needs a tombstone. A submit that never went
+      // out, or failed, left nothing live on chain.
+      const tombstoneOrphan = () => {
+        submitted?.then(
+          (jobId) => {
+            if (bound) return;
+            if (jobId !== null) relayClient.tombstoneJobId(jobId);
+            else relayClient.tombstonePendingSubmission(sessionId);
+          },
+          () => {
+            // A failed submit put nothing on chain; the submit chain reports it.
+          }
+        );
+      };
+
+      const onAbort = () => {
+        finish(
+          undefined,
+          new DOMException("Speech synthesis cancelled", "AbortError")
+        );
+      };
+
+      function cleanup() {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        unsubscribe?.();
+        unsubscribe = null;
+        opts?.signal?.removeEventListener("abort", onAbort);
+      }
+
+      function finish(bytes?: Uint8Array, err?: unknown) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        if (err !== undefined) {
+          tombstoneOrphan();
+          reject(err instanceof Error ? err : new Error(String(err)));
+        } else if (bytes) {
+          resolve(bytes);
+        } else {
+          reject(new Error("Speech synthesis produced no audio"));
+        }
+      }
+
+      const decode = (base64: string) => {
+        const trimmed = base64.trim();
+        if (!trimmed) {
+          finish(undefined, new Error("The worker returned no audio"));
+          return;
+        }
+        try {
+          finish(base64ToBytes(trimmed));
+        } catch (err) {
+          finish(undefined, err);
+        }
+      };
+
+      // Serialize frame handling: decryptResponse is async, so without an
+      // await-chain a quickly-decrypted frame could overtake an earlier one.
+      let chain: Promise<void> = Promise.resolve();
+      const handleFrame = (frame: WSFrame | WSErrorFrame) => {
+        bound = true;
+        chain = chain.then(async () => {
+          if (settled) {
+            return;
+          }
+          if (frame.type === "error") {
+            const errorFrame = frame as WSErrorFrame;
+            if (
+              errorFrame.code === "RATE_LIMITED" &&
+              errorFrame.droppedSeq > 0
+            ) {
+              return;
+            }
+            finish(
+              undefined,
+              new Error(errorFrame.message || UNSPECIFIED_RELAY_ERROR)
+            );
+            return;
+          }
+          const wsFrame = frame as WSFrame;
+          // Metadata frames (e.g. web-search sources) never carry audio.
+          if (wsFrame.type === "metadata" || !wsFrame.payload) {
+            if (wsFrame.type === "complete") {
+              decode(streamed);
+            }
+            return;
+          }
+          const decrypted = await this.sessionMgr.decryptResponse(
+            wsFrame.payload
+          );
+          // The terminal `complete` frame carries the full, authoritative
+          // answer (the base64 MP3). Chunk frames, if any, are accumulated as
+          // a fallback for a worker that only streams.
+          if (wsFrame.type === "complete") {
+            decode(decrypted || streamed);
+          } else {
+            streamed += decrypted;
+          }
+        });
+        chain.catch((err) => finish(undefined, err));
+      };
+
+      if (opts?.signal) {
+        if (opts.signal.aborted) {
+          finish(
+            undefined,
+            new DOMException("Speech synthesis cancelled", "AbortError")
+          );
+          return;
+        }
+        opts.signal.addEventListener("abort", onAbort);
+      }
+
+      timeout = setTimeout(
+        () => finish(undefined, new Error("Timed out waiting for speech")),
+        SPEECH_SYNTHESIS_DEADLINE_MS
+      );
+
+      // ORDER MATTERS: subscribe by session first, submit second — the same
+      // guarantee sendMessages() relies on, so a worker that answers before the
+      // submit call returns doesn't lose its frames. The read-aloud hook stops
+      // the previous speaker before starting a new one, so this transport is
+      // used serially and an unbound pending handler should never exist; the
+      // check stays as a guard — bail rather than orphan another job's frames.
+      if (relayClient.hasUnboundPendingJob(sessionId)) {
+        finish(
+          undefined,
+          new Error("Another synthesis is already in flight on this session")
+        );
+        return;
+      }
+      try {
+        unsubscribe = relayClient.onPendingJob(sessionId, handleFrame);
+      } catch (err) {
+        finish(undefined, err);
+        return;
+      }
+
+      this.setProgressStatus("submitting_job");
+      submitted = this.sessionMgr
+        .submitJob(plaintext)
+        .then((result) => normalizeJobId(result.jobId));
+      submitted
+        .then((jobId) => {
+          // Converge the pending handler onto the authoritative jobId when
+          // wallet-mode submit returns one; delegated mode binds on first frame.
+          if (jobId !== null) {
+            relayClient.bindPendingJob(sessionId, jobId);
+          }
+        })
+        .catch((err) => finish(undefined, err));
+    });
   }
 
   /**
@@ -750,6 +1029,78 @@ export class ProtocolTransport {
     this.relayClient.connect();
   }
 
+  /**
+   * Tears down any existing relay socket and opens a new one authenticated with
+   * a freshly-minted relay token for the active session.
+   *
+   * `ensureRelayConnected` deliberately reuses a live socket and whatever token
+   * it already holds — correct for a long chat session that keeps the same
+   * connection warm. A one-off speech job is the opposite case: the session
+   * (and its token) may have been restored from a previous page load or reused
+   * for many minutes, so the held token can be expired. Reconnecting with a
+   * stale token silently 401s at the relay and the response is never routed, so
+   * this re-mints the token (the same acquisition `initialize` uses) and binds
+   * the new socket to it before anything is submitted.
+   */
+  private async connectRelayWithFreshToken(): Promise<void> {
+    await this.sessionMgr.refreshRelayToken();
+
+    const relayUrl = this.sessionMgr.getRelayUrl();
+    const relayToken = this.sessionMgr.relayToken;
+    if (!relayUrl || !relayToken) {
+      throw new Error("Relay URL or token not available");
+    }
+
+    if (this.relayClient) {
+      this.relayClient.disconnect();
+      this.relayClient = null;
+    }
+
+    this.relayClient = new RelayClient(relayUrl, relayToken);
+    this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
+    this.relayClient.onReconnect(() => this.handleReconnect());
+    this.relayClient.connect();
+  }
+
+  /**
+   * Resolves once the relay socket has reached "connected" — i.e. the WS
+   * handshake completed and the per-session token authenticated, at which point
+   * the relay has registered a connection for this session and will route its
+   * responses. `connect()` only *starts* the handshake, so callers that submit
+   * immediately (a fast delegated job) must await this first or race the
+   * worker's publish. A transient mid-handshake close is tolerated — the client
+   * auto-reconnects, so this keeps waiting until the deadline rather than
+   * failing on a blip.
+   */
+  private waitForRelayConnected(
+    relayClient: RelayClient,
+    opts?: { signal?: AbortSignal; timeoutMs?: number }
+  ): Promise<void> {
+    if (relayClient.getStatus() === "connected") {
+      return Promise.resolve();
+    }
+    const deadline =
+      Date.now() + (opts?.timeoutMs ?? RELAY_CONNECT_DEADLINE_MS);
+    return new Promise<void>((resolve, reject) => {
+      const check = () => {
+        if (opts?.signal?.aborted) {
+          reject(new DOMException("Speech synthesis cancelled", "AbortError"));
+          return;
+        }
+        if (relayClient.getStatus() === "connected") {
+          resolve();
+          return;
+        }
+        if (Date.now() > deadline) {
+          reject(new Error("Timed out connecting to the relay"));
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      setTimeout(check, 50);
+    });
+  }
+
   private setProgressStatus(status: ProtocolLoadingStatus) {
     this.onProgressStatusChange?.(status);
   }
@@ -764,6 +1115,12 @@ export class ProtocolTransport {
     const job = this.activeJobs.get(jobId);
     if (!job) return;
     job.status = status;
+    // The relay reports completion before any chain read does. Stamp the
+    // moment so "is this job finished" checks keyed off completedAt stop
+    // seeing a live job. Nothing overwrites it later on the relay path.
+    if (status === "completed" && job.completedAt === 0) {
+      job.completedAt = Math.floor(Date.now() / 1000);
+    }
     this.onJobUpdateCallback?.(job);
   }
 
@@ -1060,6 +1417,13 @@ export class ProtocolTransport {
      * protocolMeta so tier labels and transcripts name what served it.
      */
     friendlyModelId?: string;
+    /**
+     * Multi-model fan-out only: the per-turn id shared by every sibling
+     * assistant row of this send. Folded into protocolMeta so it rides the live
+     * data-protocolMeta part AND is persisted with the message; a reloaded chat
+     * groups rows by it into columns. Undefined for single-model sends.
+     */
+    groupId?: string;
     /** Fired once, with the first jobId this stream learns about. */
     onJobIdResolved: (jobId: number) => void;
     /** Fired once when the stream ends, with the jobId if one was learned. */
@@ -1071,6 +1435,7 @@ export class ProtocolTransport {
       prelude,
       signal,
       friendlyModelId,
+      groupId,
       onJobIdResolved,
       onTerminated,
     } = args;
@@ -1284,6 +1649,8 @@ export class ProtocolTransport {
             // Friendly catalogue id ("agentworld-35b-max") so tier labels
             // and transcripts can name what served the answer.
             model: friendlyModelId,
+            // Only present on a multi-model turn's sibling rows.
+            ...(groupId ? { groupId } : {}),
           };
           relayClient?.beginAssistantMessage({
             jobId,

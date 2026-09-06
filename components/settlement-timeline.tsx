@@ -148,21 +148,25 @@ function PureSettlementTimeline({
   const nodes = buildNodes(settlement, verification, live);
 
   return (
+    // Container query, not a viewport breakpoint: this timeline renders inside
+    // a compare column that stays narrow even on a wide screen, so it has to
+    // respond to its own width. Below ~30rem it stacks vertically (labels get
+    // a full line each); above it, the original horizontal rail.
     <ol
       aria-label="Settlement timeline"
-      className="flex items-stretch gap-0"
+      className="@container/settlement flex list-none flex-col gap-2.5 @[30rem]/settlement:flex-row @[30rem]/settlement:items-stretch @[30rem]/settlement:gap-0"
       data-testid="settlement-timeline"
     >
       {nodes.map((node, i) => (
         <li
-          className="flex min-w-0 flex-1 flex-col items-center gap-1"
+          className="flex min-w-0 items-stretch gap-2.5 @[30rem]/settlement:flex-1 @[30rem]/settlement:flex-col @[30rem]/settlement:items-center @[30rem]/settlement:gap-1"
           key={node.key}
         >
-          <div className="flex w-full items-center">
+          <div className="flex shrink-0 flex-col items-center @[30rem]/settlement:w-full @[30rem]/settlement:flex-row">
             {i > 0 && (
               <div
                 className={cn(
-                  "h-px flex-1",
+                  "hidden h-px flex-1 @[30rem]/settlement:block",
                   nodes[i - 1].state === "done"
                     ? "bg-content-extraLight"
                     : "bg-border"
@@ -188,18 +192,21 @@ function PureSettlementTimeline({
               <NodeIcon state={node.state} />
             </motion.div>
             {i < nodes.length - 1 && (
+              // Vertical rail when stacked, horizontal rule when in a row.
               <div
                 className={cn(
-                  "h-px flex-1",
+                  "w-px flex-1 @[30rem]/settlement:h-px @[30rem]/settlement:w-auto",
                   node.state === "done" ? "bg-content-extraLight" : "bg-border"
                 )}
               />
             )}
           </div>
-          <div className="flex flex-col items-center gap-0.5 text-center">
+          <div className="flex min-w-0 flex-col gap-0.5 pb-1.5 @[30rem]/settlement:items-center @[30rem]/settlement:pb-0 @[30rem]/settlement:px-1 @[30rem]/settlement:text-center">
             <span
               className={cn(
-                "font-medium text-[10px] uppercase tracking-[0.08em]",
+                // break-words stops ACKNOWLEDGED spilling into its neighbour
+                // once the row layout squeezes each column.
+                "break-words font-medium text-[10px] uppercase tracking-[0.08em]",
                 node.state === "done" && "text-content-strong",
                 node.state === "active" && "text-content-strong",
                 node.state === "failed" && "text-red-600 dark:text-red-400",

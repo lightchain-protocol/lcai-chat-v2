@@ -10,16 +10,21 @@ import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { useAccount, useBalance } from "wagmi";
+import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
-import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
 import { useModels } from "@/hooks/use-models";
+import {
+  type MultiModel,
+  useMultiModelSession,
+} from "@/hooks/use-multi-model-session";
+import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
-import { saveChatModelAsCookie } from "@/app/(chat)/actions";
+import { useWorkerCounts } from "@/hooks/use-worker-counts";
 import { recordModelOutcome } from "@/lib/ai/availability";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import {
@@ -33,12 +38,6 @@ import {
 } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
-import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
-import { NoWorkerAvailableError } from "@/lib/protocol/session";
-import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
-import type { AppUsage } from "@/lib/usage";
-import { parseWeb3Error } from "@/lib/utils/web3-errors";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import {
   addMemoryEntry,
   EMPTY_MEMORY_STORE,
@@ -48,6 +47,17 @@ import {
   removeMemoryEntry,
   saveMemoryStore,
 } from "@/lib/memory";
+import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import { NoWorkerAvailableError } from "@/lib/protocol/session";
+import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
+import type { AppUsage } from "@/lib/usage";
+import {
+  fetcher,
+  fetchWithErrorHandlers,
+  generateUUID,
+  votesFetcher,
+} from "@/lib/utils";
+import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
 import { MemoryDialog } from "./memory-dialog";
@@ -102,10 +112,35 @@ function noWorkerAvailableMessage(error: unknown): string | undefined {
   if (error instanceof Error && error.cause instanceof NoWorkerAvailableError) {
     return error.cause.message || undefined;
   }
-  return undefined;
+  return;
 }
 
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
+
+/** Device-local memory of the last multi-select model set. */
+const SELECTED_MODELS_KEY = "lc-selected-models";
+
+/**
+ * The live model with the most eligible workers. Iterating in live-list
+ * order and switching only on a strictly-greater count makes ties stable —
+ * the first model among the max wins. Falls back to the first model when no
+ * count is known yet, so callers always get a concrete choice.
+ */
+function pickModelWithMostWorkers(
+  models: { id: string; name: string }[],
+  counts: Record<string, number>
+): { id: string; name: string } {
+  let best = models[0];
+  let bestCount = counts[best.id] ?? 0;
+  for (const model of models) {
+    const count = counts[model.id] ?? 0;
+    if (count > bestCount) {
+      best = model;
+      bestCount = count;
+    }
+  }
+  return best;
+}
 
 export function Chat({
   id,
@@ -138,8 +173,25 @@ export function Chat({
 
   const [input, setInput] = useState<string>("");
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
-  const [currentModelId, setCurrentModelId] = useState(initialChatModel);
+  // The model picker is now multi-select (1–4). One selected model = the
+  // unchanged single-model chat below; 2+ = the additive multi-model fan-out.
+  // Seeded single from the SSR cookie default and hydrated from localStorage
+  // post-mount (below) so SSR and first client render agree.
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([
+    initialChatModel,
+  ]);
+  // The single-model chat, its transport, and everything downstream key off one
+  // model — the first selected. With one model selected this IS that model and
+  // nothing changes; with several, this is the head of the list and the single
+  // transport simply sits idle while the multi-model path runs instead.
+  const currentModelId = selectedModelIds[0] ?? initialChatModel;
   const currentModelIdRef = useRef(currentModelId);
+  // True once the user explicitly picks a model in this session, so the
+  // "most workers" default below stops overriding their choice.
+  const userPickedModelRef = useRef(false);
+  // The most-workers default is applied at most once per session (after the
+  // first time worker counts are known) so it can't thrash the selection.
+  const appliedWorkerDefaultRef = useRef(false);
   // The model id of the in-flight send, recorded into the device-local
   // availability heuristic on finish/error.
   const lastSentModelRef = useRef<string | null>(null);
@@ -150,6 +202,13 @@ export function Chat({
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
   const { models: availableModels } = useModels();
+  // Live per-model worker count (WorkerRegistry.getEligibleWorkers). Drives
+  // the "default to the model with the most active workers" behaviour below.
+  const workerCountModelIds = useMemo(
+    () => availableModels.map((model) => model.id),
+    [availableModels]
+  );
+  const { counts: workerCounts } = useWorkerCounts(workerCountModelIds);
   // Ref so the protocol fetch wrapper can name the serving model without
   // re-creating the transport whenever the live model list refreshes.
   const availableModelsRef = useRef(availableModels);
@@ -160,25 +219,71 @@ export function Chat({
     if (availableModels.length === 0) {
       return;
     }
-    if (availableModels.some((model) => model.id === currentModelId)) {
+
+    const countsKnown = Object.keys(workerCounts).length > 0;
+
+    // Drop any selected model that has gone offline. A multi-selection keeps
+    // the rest; if everything went offline it falls through to the fallback.
+    const liveIds = selectedModelIds.filter((modelId) =>
+      availableModels.some((model) => model.id === modelId)
+    );
+
+    if (liveIds.length === 0) {
+      // Nothing selected is available — pick one usable model so the picker
+      // never shows "Select model". Prefer the most-workers model once counts
+      // are known, otherwise the legacy name/first-in-list default.
+      const fallback = countsKnown
+        ? pickModelWithMostWorkers(availableModels, workerCounts)
+        : (availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
+          availableModels[0]);
+      setSelectedModelIds([fallback.id]);
+      saveChatModelAsCookie(fallback.id);
       return;
     }
-    const fallback =
-      availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
-      availableModels[0];
-    setCurrentModelId(fallback.id);
-    void saveChatModelAsCookie(fallback.id);
-  }, [availableModels, currentModelId]);
+
+    // Prune offline models out of a multi-selection without disturbing order.
+    if (liveIds.length !== selectedModelIds.length) {
+      setSelectedModelIds(liveIds);
+    }
+
+    // The most-workers default only applies to a lone selection — a deliberate
+    // multi-select is never second-guessed. Respect an explicit in-session
+    // pick, and apply the default at most once (and once counts are known) so a
+    // provisional cookie default doesn't thrash while loading.
+    if (liveIds.length !== 1) {
+      return;
+    }
+    if (userPickedModelRef.current || appliedWorkerDefaultRef.current) {
+      return;
+    }
+    if (!countsKnown) {
+      return;
+    }
+
+    appliedWorkerDefaultRef.current = true;
+
+    const soleId = liveIds[0];
+    const best = pickModelWithMostWorkers(availableModels, workerCounts);
+    const bestCount = workerCounts[best.id] ?? 0;
+    const currentCount = workerCounts[soleId] ?? 0;
+    // Switch only to a strictly better model, so the persisted cookie choice is
+    // kept whenever it already ties for the most workers.
+    if (best.id !== soleId && bestCount > currentCount) {
+      setSelectedModelIds([best.id]);
+      saveChatModelAsCookie(best.id);
+    }
+  }, [availableModels, selectedModelIds, workerCounts]);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
   const [enableWebSearch, setEnableWebSearch] = useState(false);
   const enableWebSearchRef = useRef(enableWebSearch);
-  const { walletClient } = useWeb3Clients();
+
+  const { walletClient, publicClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
 
@@ -388,14 +493,14 @@ export function Chat({
       });
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -406,6 +511,50 @@ export function Chat({
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  // Restore a previously-chosen multi-selection post-mount (never during SSR,
+  // so hydration matches). The auto-default effect above then prunes anything
+  // that has since gone offline.
+  const hydratedSelectionRef = useRef(false);
+  useEffect(() => {
+    if (hydratedSelectionRef.current) {
+      return;
+    }
+    hydratedSelectionRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(SELECTED_MODELS_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed: unknown = JSON.parse(raw);
+      const ids = Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === "string").slice(0, 4)
+        : [];
+      if (ids.length > 0) {
+        userPickedModelRef.current = true;
+        setSelectedModelIds(ids);
+      }
+    } catch {
+      // Private mode / malformed value — keep the SSR default.
+    }
+  }, []);
+
+  // Wraps the picker's change so an explicit selection is remembered for the
+  // session and persisted (localStorage for the full set, cookie for the head
+  // so an SSR reload starts on the same first model).
+  const handleModelsChange = useCallback((ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
+    userPickedModelRef.current = true;
+    setSelectedModelIds(ids);
+    try {
+      window.localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(ids));
+    } catch {
+      // Private mode / quota — the selection just won't persist across reloads.
+    }
+    saveChatModelAsCookie(ids[0]);
+  }, []);
 
   useEffect(() => {
     systemPromptRef.current = systemPrompt;
@@ -434,7 +583,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -454,7 +603,7 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
@@ -499,9 +648,7 @@ export function Chat({
         const message =
           noWorkerAvailableMessage(error) ??
           "No worker available right now — please try again.";
-        toast.custom((errorId) => (
-          <AlertError id={errorId} title={message} />
-        ));
+        toast.custom((errorId) => <AlertError id={errorId} title={message} />);
         return;
       }
 
@@ -511,6 +658,75 @@ export function Chat({
       ));
     },
   });
+
+  // Multi-model fan-out (protocol mode). Drives its own N transports and
+  // streams each answer into the SAME `messages` list as a sibling assistant
+  // row via setMessages — the single-model transport above is untouched.
+  const multiModel = useMultiModelSession({
+    chatId: id,
+    walletClient,
+    publicClient,
+    address,
+    getMemoryPrefix,
+    setMessages,
+    // Same post-turn refresh the single-model onFinish does: surface the new
+    // chat in the sidebar and pull the paid-job balance changes.
+    onFinish: () => {
+      mutate(unstable_serialize(getChatHistoryPaginationKey));
+      prepaid.refetch();
+      balance.refetch();
+    },
+  });
+
+  // The live { id, name } models behind the current selection, in pick order.
+  const selectedModels = useMemo<MultiModel[]>(
+    () =>
+      selectedModelIds
+        .map((modelId) => availableModels.find((m) => m.id === modelId))
+        .filter((m): m is MultiModel => m !== undefined),
+    [selectedModelIds, availableModels]
+  );
+
+  const isMultiModel = isProtocolMode && selectedModels.length >= 2;
+
+  const runMultiModel = multiModel.run;
+
+  // The send the whole UI calls. One model → the untouched useChat/protocol
+  // path. Two or more → append the prompt once and fan it out. Same shape as
+  // useChat.sendMessage so every existing call site (composer, suggestions,
+  // ?query=) routes through here unchanged.
+  const sendChatMessage: typeof sendMessage = useCallback(
+    (message, options) => {
+      if (isMultiModel) {
+        const parts =
+          message && typeof message === "object" && "parts" in message
+            ? ((message as { parts?: ChatMessage["parts"] }).parts ?? [])
+            : [];
+        const userMessage: ChatMessage = {
+          id: generateUUID(),
+          role: "user",
+          parts,
+          metadata: { createdAt: new Date().toISOString() },
+        };
+        runMultiModel({
+          userMessage,
+          models: selectedModels,
+          groupId: generateUUID(),
+          enableWebSearch: enableWebSearchRef.current,
+          systemPrompt: systemPromptRef.current,
+          selectedVisibilityType: visibilityType,
+        });
+        return Promise.resolve();
+      }
+      return sendMessage(message, options);
+    },
+    [isMultiModel, runMultiModel, selectedModels, sendMessage, visibilityType]
+  );
+
+  // While a multi-model turn streams, the composer must show a Stop and the
+  // busy state even though useChat itself is idle (it isn't driving the send).
+  const effectiveStatus = multiModel.isRunning ? "streaming" : status;
+  const effectiveStop = multiModel.isRunning ? multiModel.stop : stop;
 
   // --- Conversation branching (device-local, lib/branches.ts) -------------
   // Loaded post-mount (not in useState) so SSR and the first client render
@@ -541,7 +757,12 @@ export function Chat({
         return;
       }
       const now = new Date().toISOString();
-      const next = forkAt(branchStore, anchorId, messages.slice(index + 1), now);
+      const next = forkAt(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
       setBranchStore(next);
       saveBranchStore(id, next);
       setMessages(messages.slice(0, index + 1));
@@ -580,7 +801,12 @@ export function Chat({
         return;
       }
       const now = new Date().toISOString();
-      const next = addBranch(branchStore, anchorId, messages.slice(index + 1), now);
+      const next = addBranch(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
       setBranchStore(next);
       saveBranchStore(id, next);
       setMessages(messages.slice(0, index + 1));
@@ -599,7 +825,7 @@ export function Chat({
         return;
       }
 
-      sendMessage({
+      sendChatMessage({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
       });
@@ -607,11 +833,11 @@ export function Chat({
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
-  }, [query, sendMessage, hasAppendedQuery, id, canPrompt]);
+  }, [query, sendChatMessage, hasAppendedQuery, id, canPrompt]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    votesFetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -670,12 +896,13 @@ export function Chat({
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          multiModelLive={multiModel.live}
           onAddBranch={isReadonly ? undefined : handleAddBranch}
           onFork={isReadonly ? undefined : handleFork}
           onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
-          selectedModelId={initialChatModel}
+          selectedModelId={currentModelId}
           setMessages={setMessages}
           status={status}
           votes={votes}
@@ -711,18 +938,18 @@ export function Chat({
               }
               messages={messages}
               onBeforeSubmit={canPrompt}
-              onModelChange={setCurrentModelId}
+              onModelsChange={handleModelsChange}
               onOpenMemory={() => setMemoryDialogOpen(true)}
               onWebSearchToggle={setEnableWebSearch}
               searchCapable={searchCapable}
-              selectedModelId={currentModelId}
+              selectedModelIds={selectedModelIds}
               selectedVisibilityType={visibilityType}
-              sendMessage={sendMessage}
+              sendMessage={sendChatMessage}
               setAttachments={setAttachments}
               setInput={setInput}
               setMessages={setMessages}
-              status={status}
-              stop={stop}
+              status={effectiveStatus}
+              stop={effectiveStop}
               usage={usage}
             />
           )}

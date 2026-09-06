@@ -696,6 +696,28 @@ export class SessionManager {
   }
 
   /**
+   * Re-mints the relay token for the currently-active session from the same
+   * source `initialize()` uses (`getSessionToken` → the gateway's ES256K relay
+   * token), replacing whatever is in state, and returns it.
+   *
+   * A relay token is short-lived, but a session — and its sessionStorage
+   * snapshot — is not: a restored or long-reused session keeps a token that
+   * has since expired, and reconnecting with it earns a silent 401 from the
+   * relay. Callers that must have a live socket right now (a one-off speech
+   * job whose worker answers in a second) re-mint first so the handshake can
+   * actually authenticate.
+   */
+  async refreshRelayToken(): Promise<string> {
+    if (this.state.sessionId === null) {
+      throw new Error("No active session — cannot refresh relay token");
+    }
+    const relayToken = await this.waitForRelayToken(this.state.sessionId);
+    this.state = { ...this.state, relayToken, relayUrl: this.relayUrl };
+    this.persist();
+    return relayToken;
+  }
+
+  /**
    * Returns true if all prerequisites for rewrapping the session key are
    * available (disputer encryption key cached). Call before reassignSession()
    * to avoid stranding the on-chain session in Reassigning state.

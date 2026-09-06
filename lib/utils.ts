@@ -27,6 +27,26 @@ export const fetcher = async (url: string) => {
   return response.json();
 };
 
+/**
+ * Votes fetcher. A 404 here just means the chat has no persisted votes yet
+ * (a brand-new or not-yet-saved chat), so it is a normal empty state rather
+ * than an error. Returning [] instead of throwing stops SWR from retrying the
+ * benign 404 in a tight loop — the console spam seen on fresh chats.
+ */
+export const votesFetcher = async (url: string) => {
+  const response = await $http.get(url);
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    const { code, cause } = await response.json();
+    throw new ChatSDKError(code as ErrorCode, cause);
+  }
+
+  return response.json();
+};
+
 export async function fetchWithErrorHandlers(
   input: RequestInfo | URL,
   init?: RequestInit,

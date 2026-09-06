@@ -21,10 +21,10 @@ function PureSuggestedActions({
   onBeforeSubmit,
 }: SuggestedActionsProps) {
   const suggestedActions = [
-    "What is Lightchain AI?",
-    "What are the advantages of using Next.js?",
-    "Write code to demonstrate bitcoin's algorithm",
-    "Help me write an essay about Blockchain",
+    "What makes LightChain AI different from ChatGPT?",
+    "How is every answer here verifiable on-chain?",
+    "Explain how decentralized AI inference works",
+    "Write a haiku about trustless machines",
   ];
 
   return (

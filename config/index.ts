@@ -5,6 +5,19 @@ export const isTestnet = process.env.NEXT_PUBLIC_LCAI_IS_TESTNET === "true";
 export const isSortitionEnabled =
   process.env.NEXT_PUBLIC_SORTITION_ENABLED === "true";
 
+// Model that backs the assistant-message "read aloud" button. Submitting a
+// normal protocol job with this modelId and a plain-text `input` makes the
+// worker synthesize speech and return base64-encoded MP3 bytes instead of
+// text. Overridable — a devnet with its own tts-piper deployment can retarget
+// the button without a source edit — and falls back to the registered
+// tts-piper model. Direct `process.env.NEXT_PUBLIC_*` access (not dynamic
+// indexing) is required so Next.js inlines the value into the client bundle.
+// An undeclared or empty build arg arrives as an empty string, which must
+// fall through to the default — hence `||`, not `??`.
+export const ttsModelId =
+  (process.env.NEXT_PUBLIC_TTS_MODEL_ID as `0x${string}` | undefined) ||
+  "0x8c350127cf0c957d1c2ee6837fa793af56430150d69c4543c82b74e1e8dc7784";
+
 // Testnet contract addresses are build-arg overridable so local devnets
 // (chainId 8200, freshly-deployed contracts) and forks can point the
 // frontend at their own deployments without a source edit. When the env

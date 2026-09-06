@@ -4,13 +4,18 @@ import {
   CopyCheck,
   Loader,
   RefreshCw,
+  Square,
   ThumbsDown,
   ThumbsUp,
+  Volume2,
 } from "lucide-react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
+import { ttsModelId } from "@/config";
+import { useTextToSpeech } from "@/hooks/use-text-to-speech";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import type { ChatMessage } from "@/lib/types";
@@ -52,6 +57,50 @@ export function PureMessageActions({
     await copyToClipboard(textFromParts);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
+  };
+
+  // Read-aloud: synthesizes the message as speech via a one-off protocol job
+  // on the TTS model and plays the returned MP3. Never added to the thread.
+  const tts = useTextToSpeech();
+
+  // Read-aloud is a paid job on the speech model; offer it only where a worker
+  // actually serves that model. A failed reading (status unknown) still shows
+  // the button — hiding it on an RPC blink would be the worse outage.
+  // No poll: this renders once per message, and whether a worker serves the
+  // speech model changes on worker registration, not by the second. This is
+  // its own query key (the composer polls the selected models, not this one);
+  // a window focus or the next mount refetches it.
+  const speech = useWorkerAvailability([ttsModelId], { poll: false });
+  const speechUnstaffed =
+    speech.availability !== undefined &&
+    speech.availability.status !== "unknown" &&
+    !speech.hasEligibleWorkers;
+
+  const handleReadAloud = async () => {
+    if (!textFromParts) {
+      return;
+    }
+    try {
+      await tts.speak(textFromParts);
+    } catch (err) {
+      const timedOut =
+        err instanceof Error && err.message.toLowerCase().includes("timed out");
+      toast.custom((toastId) => (
+        <AlertError
+          description={
+            timedOut
+              ? "The audio didn't arrive in time. Please try again."
+              : undefined
+          }
+          id={toastId}
+          title={
+            timedOut
+              ? "Read aloud timed out"
+              : "Couldn't read this message aloud."
+          }
+        />
+      ));
+    }
   };
 
   if (isLoading) {
@@ -96,6 +145,31 @@ export function PureMessageActions({
       <Action onClick={handleCopy} tooltip="Copy">
         {copied ? <CopyCheck /> : <Copy />}
       </Action>
+
+      {!speechUnstaffed && (
+        <Action
+          data-testid="message-read-aloud"
+          // Spinner state is inert; the busy job either finishes or is cancelled
+          // by clicking again once it is playing.
+          disabled={!tts.isAvailable || tts.state === "synthesizing"}
+          onClick={handleReadAloud}
+          tooltip={
+            tts.isAvailable
+              ? tts.state === "playing"
+                ? "Stop"
+                : "Read aloud (submits a paid job)"
+              : "Connect a wallet to read messages aloud"
+          }
+        >
+          {tts.state === "synthesizing" ? (
+            <Loader className="animate-spin" />
+          ) : tts.state === "playing" ? (
+            <Square />
+          ) : (
+            <Volume2 />
+          )}
+        </Action>
+      )}
 
       {regenerate && (
         // Every regeneration is a new on-chain job with its own fee, so this

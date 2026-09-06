@@ -1,7 +1,6 @@
 "use client";
 
 import type { UseChatHelpers } from "@ai-sdk/react";
-import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
 import { Brain } from "lucide-react";
@@ -12,7 +11,6 @@ import {
   type Dispatch,
   memo,
   type SetStateAction,
-  startTransition,
   useCallback,
   useEffect,
   useRef,
@@ -20,36 +18,27 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
-import { saveChatModelAsCookie } from "@/app/(chat)/actions";
-import { SelectItem } from "@/components/ui/select";
-import { useModels } from "@/hooks/use-models";
-import { type Availability, availabilityOf } from "@/lib/ai/availability";
+import { NoWorkersNotice } from "@/components/no-workers-notice";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
+import { CompareModelMultiSelect } from "./compare-model-picker";
 import {
   PromptInput,
-  PromptInputModelSelect,
-  PromptInputModelSelectContent,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
 } from "./elements/prompt-input";
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  CpuIcon,
-  PaperclipIcon,
-  StopIcon,
-} from "./icons";
+import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
 
 function PureMultimodalInput({
@@ -65,8 +54,8 @@ function PureMultimodalInput({
   sendMessage,
   className,
   selectedVisibilityType,
-  selectedModelId,
-  onModelChange,
+  selectedModelIds,
+  onModelsChange,
   usage,
   enableWebSearch,
   onWebSearchToggle,
@@ -89,8 +78,9 @@ function PureMultimodalInput({
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
   className?: string;
   selectedVisibilityType: VisibilityType;
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
+  /** 1–4 selected models. One → single-model chat; 2+ → multi-model fan-out. */
+  selectedModelIds: string[];
+  onModelsChange?: (modelIds: string[]) => void;
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
@@ -133,6 +123,14 @@ function PureMultimodalInput({
   );
 
   const canUseChat = session.status === "authenticated";
+
+  // A full worker fails the draw rather than queueing, so a prompt sent now
+  // would be paid for and then time out. Block the composer and say why.
+  // Busy only when every selected model is full — one busy column should not
+  // stop a fan-out the others can serve. `unknown` never blocks.
+  const { isBusy: noWorkersAvailable, hasEligibleWorkers } =
+    useWorkerAvailability(selectedModelIds);
+  const inputBlocked = disabled || noWorkersAvailable;
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -299,6 +297,9 @@ function PureMultimodalInput({
           }
         }}
       >
+        {noWorkersAvailable && (
+          <NoWorkersNotice hasEligibleWorkers={hasEligibleWorkers} />
+        )}
         {(attachments.length > 0 || uploadQueue.length > 0) && (
           <div
             className="flex flex-row items-end gap-2 overflow-x-scroll"
@@ -346,7 +347,7 @@ function PureMultimodalInput({
             className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
-            disabled={disabled || !canUseChat}
+            disabled={inputBlocked || !canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
@@ -386,9 +387,10 @@ function PureMultimodalInput({
                 </span>
               </Button>
             )}
-            <ModelSelectorCompact
-              onModelChange={onModelChange}
-              selectedModelId={selectedModelId}
+            <CompareModelMultiSelect
+              min={1}
+              onChange={(ids) => onModelsChange?.(ids)}
+              selectedIds={selectedModelIds}
             />
           </PromptInputTools>
 
@@ -397,7 +399,7 @@ function PureMultimodalInput({
           ) : (
             <PromptInputSubmit
               className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
-              disabled={disabled || !input.trim() || uploadQueue.length > 0}
+              disabled={inputBlocked || !input.trim() || uploadQueue.length > 0}
               status={status}
             >
               <ArrowUpIcon size={14} />
@@ -410,7 +412,7 @@ function PureMultimodalInput({
         attachments.length === 0 &&
         uploadQueue.length === 0 &&
         canUseChat &&
-        !disabled && (
+        !inputBlocked && (
           <SuggestedActions
             chatId={chatId}
             onBeforeSubmit={onBeforeSubmit}
@@ -437,7 +439,7 @@ export const MultimodalInput = memo(
     if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
       return false;
     }
-    if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+    if (!equal(prevProps.selectedModelIds, nextProps.selectedModelIds)) {
       return false;
     }
     if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
@@ -526,69 +528,6 @@ function PureAttachmentsButton({
 // biome-ignore lint/correctness/noUnusedVariables: This is used in the future
 const AttachmentsButton = memo(PureAttachmentsButton);
 
-function PureModelSelectorCompact({
-  selectedModelId,
-  onModelChange,
-}: {
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
-}) {
-  const { models } = useModels();
-  const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
-
-  useEffect(() => {
-    setOptimisticModelId(selectedModelId);
-  }, [selectedModelId]);
-
-  const selectedModel = models.find(
-    (model) => model.id === optimisticModelId
-  );
-
-  return (
-    <PromptInputModelSelect
-      onValueChange={(modelId) => {
-        setOptimisticModelId(modelId);
-        onModelChange?.(modelId);
-        startTransition(() => {
-          saveChatModelAsCookie(modelId);
-        });
-      }}
-      value={selectedModel?.id}
-    >
-      <Trigger
-        className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
-        type="button"
-      >
-        <CpuIcon size={16} />
-        <span className="hidden font-medium text-xs sm:block">
-          {selectedModel?.name ?? "Select model"}
-        </span>
-        <ChevronDownIcon size={16} />
-      </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
-        <div className="flex flex-col gap-px">
-          {models.map((model) => (
-            <SelectItem
-              className="rounded-lg"
-              key={model.id}
-              value={model.id}
-            >
-              <span className="flex min-w-0 items-center gap-1.5">
-                <AvailabilityDot modelId={model.id} />
-                <h6 className="mb-0.5 truncate font-medium text-xs">
-                  {model.name}
-                </h6>
-              </span>
-            </SelectItem>
-          ))}
-        </div>
-      </PromptInputModelSelectContent>
-    </PromptInputModelSelect>
-  );
-}
-
-const ModelSelectorCompact = memo(PureModelSelectorCompact);
-
 function PureStopButton({
   stop,
   setMessages,
@@ -612,41 +551,3 @@ function PureStopButton({
 }
 
 const StopButton = memo(PureStopButton);
-
-const AVAILABILITY_STYLES: Record<
-  Availability,
-  { className: string; title: string }
-> = {
-  good: {
-    className: "bg-emerald-500",
-    title:
-      "Recent jobs on this model completed — device-local signal from your last few jobs, not a fleet-wide measurement",
-  },
-  shaky: {
-    className: "bg-amber-500",
-    title:
-      "A recent job on this model failed or timed out — device-local signal from your last few jobs, not a fleet-wide measurement",
-  },
-  unknown: {
-    className: "bg-content-subtle/30",
-    title: "No recent jobs on this model from this device yet",
-  },
-};
-
-/** Small per-row availability dot (lib/ai/availability.ts — device-local). */
-function AvailabilityDot({ modelId }: { modelId: string }) {
-  const availability = availabilityOf(modelId);
-  const style = AVAILABILITY_STYLES[availability];
-  return (
-    <span
-      aria-label={`availability: ${availability}`}
-      className={cn(
-        "inline-block size-1.5 shrink-0 rounded-full",
-        style.className
-      )}
-      data-testid={`availability-dot-${availability}`}
-      role="img"
-      title={style.title}
-    />
-  );
-}
