@@ -51,7 +51,12 @@ import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import { NoWorkerAvailableError } from "@/lib/protocol/session";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import {
+  fetcher,
+  fetchWithErrorHandlers,
+  generateUUID,
+  votesFetcher,
+} from "@/lib/utils";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
@@ -832,7 +837,7 @@ export function Chat({
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher
+    votesFetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
