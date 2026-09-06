@@ -378,5 +378,38 @@ export function useMultiModelSession(args: {
     });
   }, []);
 
-  return { run, stop, isRunning, live };
+  /**
+   * Optimistically warm the on-chain session(s) for the given models before the
+   * user hits send, so the sortition handshake overlaps composing. Best-effort:
+   * per-transport {@link ProtocolTransport.prewarm} no-ops if already ready/in
+   * progress and swallows failures, so a warm that never lands is invisible —
+   * the send path behaves exactly as before. No wallet => nothing to warm yet.
+   */
+  const prewarm = useCallback(
+    (models: MultiModel[], opts?: { enableWebSearch?: boolean }) => {
+      if (!walletClient) {
+        return;
+      }
+      for (const model of models) {
+        let transport: ProtocolTransport;
+        try {
+          transport = getTransport(model);
+        } catch {
+          continue; // e.g. addresses not configured — leave it to the send path
+        }
+        transport
+          .prewarm(
+            opts?.enableWebSearch
+              ? { requiredCapabilities: ["search"] }
+              : undefined
+          )
+          .catch(() => {
+            // prewarm already swallows; this only satisfies no-floating-promise
+          });
+      }
+    },
+    [walletClient, getTransport]
+  );
+
+  return { run, stop, isRunning, live, prewarm };
 }
