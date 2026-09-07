@@ -50,6 +50,7 @@ import {
 } from "@/lib/memory";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import { NoWorkerAvailableError } from "@/lib/protocol/session";
+import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import {
@@ -657,6 +658,28 @@ export function Chat({
           />
         ));
         open();
+        return;
+      }
+
+      if (isConnectionFailure(error)) {
+        toast.custom((errorId) => (
+          <AlertError
+            description="Your message was not sent and nothing was charged — the fee is only taken once a worker picks the job up."
+            id={errorId}
+            title="Couldn't reach the network"
+          >
+            <button
+              className="mt-1.5 text-sm underline underline-offset-2 opacity-90 hover:opacity-100"
+              onClick={() => {
+                toast.dismiss(errorId);
+                regenerateRef.current?.();
+              }}
+              type="button"
+            >
+              Try again
+            </button>
+          </AlertError>
+        ));
         return;
       }
 
