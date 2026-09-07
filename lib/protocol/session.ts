@@ -110,6 +110,25 @@ export class NoWorkerAvailableError extends Error {
   }
 }
 
+/**
+ * The human-readable sentence consumer-api attached to a refusal, if it sent
+ * one. Only `message` is trusted: it is written for the person reading it,
+ * whereas `error`/`reason` are machine codes that would read as jargon.
+ *
+ * Returns undefined for anything unparseable so the caller keeps its own
+ * wording rather than surfacing a fragment of a JSON body.
+ */
+function serverMessage(err: GatewayClientError): string | undefined {
+  try {
+    const parsed = JSON.parse(err.body) as { message?: unknown };
+    return typeof parsed.message === "string" && parsed.message.trim()
+      ? parsed.message
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type ProtocolSession = {
   status: SessionStatus;
   sessionId: number | null;
@@ -314,16 +333,24 @@ export class SessionManager {
             // sits at ~the same ceiling). To the user both mean the same thing —
             // no worker claimed — so surface the clean retry message instead of a
             // raw "Gateway API error: 504".
+            // 503: consumer-api refused up front because nothing can serve
+            // this request — nobody registered for the model, nobody online,
+            // or nobody holding the capabilities asked for. Unlike the
+            // timeouts above it arrives immediately, costs no fee, and says
+            // which of those it was.
             if (
               err instanceof GatewayClientError &&
-              (err.status === 408 || err.status === 504)
+              (err.status === 408 || err.status === 504 || err.status === 503)
             ) {
-              // Hard fail: when capabilities were required, say which
-              // lever the user has instead of a generic retry message.
+              // The API knows which model, which capability, and whether
+              // anyone is registered at all, so prefer its sentence over a
+              // guess made here — this used to name web search even when
+              // search had nothing to do with the failure.
               throw new NoWorkerAvailableError(
-                this.requestedCapabilities.length > 0
-                  ? "No search-capable worker available — try again or turn off web search."
-                  : undefined
+                serverMessage(err) ??
+                  (this.requestedCapabilities.length > 0
+                    ? "No worker online right now supports the options selected — try again, or turn them off."
+                    : undefined)
               );
             }
             throw err;

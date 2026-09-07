@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
 import { ttsModelId } from "@/config";
+import { readAloudProgressLabel, readAloudTooltip } from "@/lib/read-aloud";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
@@ -146,29 +147,45 @@ export function PureMessageActions({
         {copied ? <CopyCheck /> : <Copy />}
       </Action>
 
-      {!speechUnstaffed && (
-        <Action
-          data-testid="message-read-aloud"
-          // Spinner state is inert; the busy job either finishes or is cancelled
-          // by clicking again once it is playing.
-          disabled={!tts.isAvailable || tts.state === "synthesizing"}
-          onClick={handleReadAloud}
-          tooltip={
-            tts.isAvailable
-              ? tts.state === "playing"
-                ? "Stop"
-                : "Read aloud (submits a paid job)"
-              : "Connect a wallet to read messages aloud"
-          }
+      <Action
+        data-testid="message-read-aloud"
+        // Spinner state is inert; the busy job either finishes or is cancelled
+        // by clicking again once it is playing.
+        disabled={
+          speechUnstaffed || !tts.isAvailable || tts.state === "synthesizing"
+        }
+        onClick={handleReadAloud}
+        // Disabled rather than hidden when nobody serves speech. A control
+        // that vanishes reads as a bug and leaves people clicking where it
+        // used to be; saying why is the entire point of checking first.
+        tooltip={readAloudTooltip({
+          unstaffed: speechUnstaffed,
+          walletReady: tts.isAvailable,
+          state: tts.state,
+          progress: tts.progress,
+        })}
+      >
+        {tts.state === "synthesizing" ? (
+          <Loader className="animate-spin" />
+        ) : tts.state === "playing" ? (
+          <Square />
+        ) : (
+          <Volume2 />
+        )}
+      </Action>
+
+      {/* Reading a message aloud takes ~30s across claim, submit and
+          synthesis. A spinner alone for that long reads as a hang, and the
+          phase is only in a tooltip nobody thinks to hover, so it is stated
+          in the open beside the button. */}
+      {tts.state === "synthesizing" && (
+        <span
+          aria-live="polite"
+          className="ml-1 select-none self-center text-content-medium text-xs"
+          data-testid="read-aloud-progress"
         >
-          {tts.state === "synthesizing" ? (
-            <Loader className="animate-spin" />
-          ) : tts.state === "playing" ? (
-            <Square />
-          ) : (
-            <Volume2 />
-          )}
-        </Action>
+          {readAloudProgressLabel(tts.progress)}
+        </span>
       )}
 
       {regenerate && (

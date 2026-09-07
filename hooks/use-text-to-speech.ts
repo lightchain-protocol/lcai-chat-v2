@@ -7,6 +7,7 @@ import useWeb3Clients from "@/hooks/use-web3-clients";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
 import { ProtocolTransport } from "@/lib/protocol/transport";
+import type { ProtocolLoadingStatus } from "@/lib/types";
 
 /**
  * idle          → nothing playing; the button offers "Read aloud".
@@ -45,6 +46,10 @@ export function useTextToSpeech() {
   const { address } = useAccount();
 
   const [state, setState] = useState<SpeechState>("idle");
+  // Which protocol phase the in-flight job is in. Read-aloud takes ~30s
+  // (claim, submit, synthesize), so the button reports where it has got to
+  // rather than spinning silently.
+  const [progress, setProgress] = useState<ProtocolLoadingStatus>("idle");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
@@ -87,6 +92,7 @@ export function useTextToSpeech() {
     abortRef.current = null;
     releaseAudio();
     setState("idle");
+    setProgress("idle");
     releaseSpeaker();
   }, [releaseAudio, releaseSpeaker]);
   stopRef.current = stop;
@@ -192,6 +198,10 @@ export function useTextToSpeech() {
 
       try {
         const transport = getTransport();
+        // One transport is shared by every message, but activeSpeakerStop
+        // guarantees a single read-aloud at a time, so owning the callback
+        // for this job's duration cannot cross wires with another button.
+        transport.setOnProgressStatus(setProgress);
         const bytes = await transport.synthesizeSpeech(clean, {
           signal: controller.signal,
         });
@@ -247,5 +257,5 @@ export function useTextToSpeech() {
     [state, stop, getTransport, releaseAudio, releaseSpeaker]
   );
 
-  return { state, isAvailable, speak, stop };
+  return { state, progress, isAvailable, speak, stop };
 }
