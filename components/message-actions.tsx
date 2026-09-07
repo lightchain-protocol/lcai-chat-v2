@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
 import { ttsModelId } from "@/config";
+import { readAloudTooltip } from "@/lib/read-aloud";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
@@ -146,30 +147,31 @@ export function PureMessageActions({
         {copied ? <CopyCheck /> : <Copy />}
       </Action>
 
-      {!speechUnstaffed && (
-        <Action
-          data-testid="message-read-aloud"
-          // Spinner state is inert; the busy job either finishes or is cancelled
-          // by clicking again once it is playing.
-          disabled={!tts.isAvailable || tts.state === "synthesizing"}
-          onClick={handleReadAloud}
-          tooltip={
-            tts.isAvailable
-              ? tts.state === "playing"
-                ? "Stop"
-                : "Read aloud (submits a paid job)"
-              : "Connect a wallet to read messages aloud"
-          }
-        >
-          {tts.state === "synthesizing" ? (
-            <Loader className="animate-spin" />
-          ) : tts.state === "playing" ? (
-            <Square />
-          ) : (
-            <Volume2 />
-          )}
-        </Action>
-      )}
+      <Action
+        data-testid="message-read-aloud"
+        // Spinner state is inert; the busy job either finishes or is cancelled
+        // by clicking again once it is playing.
+        disabled={
+          speechUnstaffed || !tts.isAvailable || tts.state === "synthesizing"
+        }
+        onClick={handleReadAloud}
+        // Disabled rather than hidden when nobody serves speech. A control
+        // that vanishes reads as a bug and leaves people clicking where it
+        // used to be; saying why is the entire point of checking first.
+        tooltip={readAloudTooltip({
+          unstaffed: speechUnstaffed,
+          walletReady: tts.isAvailable,
+          state: tts.state,
+        })}
+      >
+        {tts.state === "synthesizing" ? (
+          <Loader className="animate-spin" />
+        ) : tts.state === "playing" ? (
+          <Square />
+        ) : (
+          <Volume2 />
+        )}
+      </Action>
 
       {regenerate && (
         // Every regeneration is a new on-chain job with its own fee, so this
