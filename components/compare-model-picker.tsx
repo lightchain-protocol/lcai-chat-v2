@@ -80,13 +80,14 @@ export function AvailabilityDot({ liveness }: { liveness?: ModelLiveness }) {
  * one selected model shows its logo + name (reading like the old single-model
  * picker), several read as "N models"; opening it reveals the checkable list.
  *
- * Only models a worker is currently serving are selectable — the count comes
- * from the liveness-aware availability endpoint (on-chain eligibility
- * intersected with the gateway heartbeat store), so a model whose only workers
- * are dead boxes shows "Offline" and is disabled rather than luring a session
- * into a timeout. Once the cap is reached, unselected rows are
- * disabled so the selection can never exceed the max. Selecting a row keeps the
- * menu open (preventDefault) so several models can be toggled in one pass.
+ * Every model stays selectable. The live count from the availability endpoint
+ * only labels a row ("Offline" / "Busy" / "N online"); it never disables one.
+ * Liveness is derived from on-chain claim activity, so refusing the request
+ * that would let a worker claim and prove itself alive starves the signal and
+ * leaves the model "offline" for good. Once the cap is reached, unselected
+ * rows are disabled so the selection can never exceed the max. Selecting a row
+ * keeps the menu open (preventDefault) so several models can be toggled in one
+ * pass.
  */
 export function CompareModelMultiSelect({
   selectedIds,
@@ -173,14 +174,12 @@ export function CompareModelMultiSelect({
           </p>
         )}
         {models.map((model) => {
-          // Liveness-aware count from the availability endpoint. Undefined =
-          // unknown read; treat as available rather than false-disabling
-          // (fail-open, matching the old behaviour).
+          // Liveness-aware count from the availability endpoint: a label, never
+          // a gate (see the component comment). Undefined = unknown read.
           const liveness = byModel[model.id.toLowerCase()];
           const workerCount = liveness?.count;
-          const hasWorker = workerCount === undefined || workerCount > 0;
           const selected = selectedIds.includes(model.id);
-          const isDisabled = disabled || !hasWorker || (!selected && atCap);
+          const isDisabled = disabled || (!selected && atCap);
           const allBusy =
             typeof workerCount === "number" &&
             workerCount > 0 &&

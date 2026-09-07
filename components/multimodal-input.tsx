@@ -157,13 +157,16 @@ function PureMultimodalInput({
 
   const canUseChat = session.status === "authenticated";
 
-  // A full worker fails the draw rather than queueing, so a prompt sent now
-  // would be paid for and then time out. Block the composer and say why.
-  // Busy only when every selected model is full — one busy column should not
-  // stop a fan-out the others can serve. `unknown` never blocks.
+  // Block the composer only when live workers exist and every one is full:
+  // a full worker fails the draw rather than queueing, and that clears on its
+  // own as jobs finish. "Nobody live" is a liveness reading derived from
+  // on-chain claims, and refusing to send is exactly what keeps it at zero,
+  // so that case shows the notice but never blocks. Busy only when every
+  // selected model is full: one busy column should not stop a fan-out the
+  // others can serve. `unknown` never blocks.
   const { isBusy: noWorkersAvailable, hasEligibleWorkers } =
     useWorkerAvailability(selectedModelIds);
-  const inputBlocked = disabled || noWorkersAvailable;
+  const inputBlocked = disabled || (noWorkersAvailable && hasEligibleWorkers);
 
   useEffect(() => {
     if (textareaRef.current) {
