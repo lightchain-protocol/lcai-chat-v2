@@ -106,4 +106,41 @@ describe("buildSteps", () => {
       expect(stateOf(steps, key)).toBe("done");
     }
   });
+
+  it("never prints the same transaction hash on two steps", () => {
+    // "Response committed" and "Completed" both linked completionTx, so the
+    // same hash appeared twice one row apart and read as a rendering bug.
+    // The blob tx is not surfaced separately, so the hash belongs to
+    // Completed alone.
+    const ev: Evidence = {
+      responseCommitted: true,
+      completed: { txHash: "0xabc" },
+    };
+    const { steps } = buildSteps(job(), ev, true, false, false);
+
+    const hashes = steps.map((s) => s.txHash).filter(Boolean);
+    expect(new Set(hashes).size).toBe(hashes.length);
+    expect(steps.find((s) => s.key === "committed")?.txHash).toBeUndefined();
+    expect(steps.find((s) => s.key === "completed")?.txHash).toBe("0xabc");
+  });
+
+  it("gives no step a note that only restates its own label", () => {
+    // Dim 10px monospace saying "prompt request sent" under a step called
+    // "Requested" is noise: it lengthens the row, breaks the connector
+    // rhythm, and tells the reader nothing.
+    const { steps } = buildSteps(
+      job(),
+      { responseCommitted: true, completed: { txHash: "0xabc" } },
+      true,
+      false,
+      false
+    );
+    for (const step of steps) {
+      if (!step.note) continue;
+      const label = step.label.toLowerCase().replace(/[^a-z]/g, "");
+      const note = step.note.toLowerCase().replace(/[^a-z]/g, "");
+      expect(note).not.toBe(label);
+      expect(note.startsWith(label)).toBe(false);
+    }
+  });
 });

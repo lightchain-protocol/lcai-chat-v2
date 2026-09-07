@@ -250,6 +250,89 @@ function Ellipsis() {
   );
 }
 
+/**
+ * The one-line pipeline handle, shared by the in-flight and settled states.
+ *
+ * Both states used to look like different components — a full nine-row card
+ * while waiting, a slim line afterwards — so the UI appeared to swap itself
+ * out mid-turn, and for a short answer the card was the only thing on screen.
+ * One handle in both places keeps the answer the largest element and makes
+ * the on-chain trail something you open, not something you dismiss.
+ *
+ * The meter earns its place on a ~30s wait: the step name alone does not say
+ * whether "Acknowledged" is near the start or the end of nine stages.
+ */
+function PipelineHandle({
+  step,
+  progress,
+  expanded,
+  onToggle,
+  tone,
+}: {
+  step?: PipelineStep;
+  progress: { done: number; total: number };
+  expanded: boolean;
+  onToggle: () => void;
+  tone: "active" | "done" | "failed";
+}) {
+  const pct =
+    progress.total > 0
+      ? Math.round((progress.done / progress.total) * 100)
+      : 0;
+
+  return (
+    <button
+      aria-expanded={expanded}
+      aria-label={`On-chain pipeline: ${step?.label ?? "in progress"}, step ${progress.done} of ${progress.total}`}
+      className={cn(
+        "flex w-full max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs transition-colors hover:bg-surface-base-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        tone === "done" && "text-emerald-600 dark:text-emerald-400",
+        tone === "failed" && "text-red-600 dark:text-red-400",
+        tone === "active" && "text-content-secondary"
+      )}
+      onClick={onToggle}
+      type="button"
+    >
+      <motion.span
+        animate={{ opacity: [1, 0.4, 1] }}
+        className="size-2 shrink-0 rounded-full border-[1.5px] border-primary/60"
+        transition={{
+          duration: 1.5,
+          repeat: Number.POSITIVE_INFINITY,
+          ease: "easeInOut",
+        }}
+      />
+      <span className="truncate font-medium">{step?.label ?? "Working"}</span>
+      {step?.note && (
+        <span className="hidden truncate font-mono text-[11px] text-content-subtle sm:inline">
+          · {step.note}
+        </span>
+      )}
+      <span className="ml-auto flex shrink-0 items-center gap-2">
+        <span
+          aria-hidden
+          className="hidden h-[3px] w-16 overflow-hidden rounded-full bg-border sm:block"
+        >
+          <span
+            className="block h-full rounded-full bg-primary/70 transition-[width] duration-500 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+        <span className="font-mono text-[10px] text-content-subtle tabular-nums">
+          {progress.done}/{progress.total}
+        </span>
+        <ChevronDown
+          className={cn(
+            "shrink-0 text-content-subtle transition-transform",
+            expanded && "rotate-180"
+          )}
+          size={13}
+        />
+      </span>
+    </button>
+  );
+}
+
 function PurePipelineTimeline({
   progressStatus,
   activeJobs,
@@ -511,6 +594,12 @@ function PurePipelineTimeline({
   if (!(live || job || firstTokenSeen)) return null;
   if (progressStatus === "idle" && !job && !live) return null;
 
+  // Shared by both states so the handle reads identically before and after
+  // the answer arrives.
+  const activeStep = steps.find((s) => s.state === "active");
+  const doneCount = steps.filter((s) => s.state === "done").length;
+  const stepCount = steps.length;
+
   // ── Thinking state ────────────────────────────────────────────────────────
   // Before a single token is on screen the timeline stands in for the plain
   // "thinking" bubble: attached to the assistant message, a compact panel.
@@ -528,17 +617,30 @@ function PurePipelineTimeline({
             <LCAIIcon size={14} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="rounded-xl border border-border bg-surface-base-faint/50 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-              <div className="mb-2.5 flex items-baseline justify-between gap-2">
-                <span className="font-medium text-[11px] text-content-strong uppercase tracking-[0.08em]">
-                  On-chain pipeline
-                </span>
-                <span className="truncate text-[10px] text-content-subtle">
-                  verifiable on the explorer
-                </span>
-              </div>
-              <StepList explorerBaseUrl={explorerBaseUrl} steps={steps} />
-            </div>
+            {/* The pipeline is proof, not content. Nine full-size rows while
+                someone waits buries the answer they came for, so this stays a
+                single live line and opens to the full trail on demand — the
+                same handle the completed state uses, so it does not appear to
+                change component halfway through the turn. */}
+            <PipelineHandle
+              expanded={expanded}
+              onToggle={() => setExpanded((v) => !v)}
+              progress={{ done: doneCount, total: stepCount }}
+              step={activeStep}
+              tone="active"
+            />
+            {expanded && (
+              <motion.div
+                animate={{ height: "auto", opacity: 1 }}
+                className="overflow-hidden"
+                initial={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                <div className="mt-1.5 rounded-lg border border-border bg-surface-base-faint/40 px-3 py-2.5">
+                  <StepList explorerBaseUrl={explorerBaseUrl} steps={steps} />
+                </div>
+              </motion.div>
+            )}
           </div>
         </div>
       </motion.div>
@@ -549,7 +651,6 @@ function PurePipelineTimeline({
   // The answer is on screen; shrink to a slim inline line on the message. It
   // reads as completion progress, never as "the answer is still loading".
   const failed = isError;
-  const activeStep = steps.find((s) => s.state === "active");
 
   let label: React.ReactNode;
   if (failed) {

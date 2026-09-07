@@ -235,7 +235,14 @@ function PureMessages({
         key={message.id}
         message={message}
         regenerate={regenerate}
-        requiresScrollPadding={hasSentMessage && index === messages.length - 1}
+        // Only while the turn is in flight. The padding reserves 384px so a
+        // streaming answer can stick to the top of the viewport, but it used
+        // to persist after the turn finished — leaving a screen of emptiness
+        // under the answer and stranding the on-chain timeline far below the
+        // message it belongs to.
+        requiresScrollPadding={
+          live && hasSentMessage && index === messages.length - 1
+        }
         setMessages={setMessages}
         trackedJob={trackedJob}
         vote={

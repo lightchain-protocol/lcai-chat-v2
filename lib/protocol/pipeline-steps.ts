@@ -91,7 +91,7 @@ export function buildSteps(
   const settled = ev.jobState !== undefined && isSettledJobState(ev.jobState);
 
   const defs: Omit<PipelineStep, "state">[] = [
-    { key: "requested", label: "Requested", note: "prompt request sent" },
+    { key: "requested", label: "Requested" },
     {
       key: "worker",
       label: "Worker selected",
@@ -123,8 +123,7 @@ export function buildSteps(
     {
       key: "committed",
       label: "Response committed",
-      txHash: completionTx,
-      note: committed ? "blob hash on chain" : undefined,
+      note: committed ? "blob hash written on chain" : undefined,
     },
     {
       key: "completed",
