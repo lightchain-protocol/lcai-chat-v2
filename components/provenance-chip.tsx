@@ -11,6 +11,14 @@ import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { Address } from "viem";
 import type { GenerationStats } from "@/lib/protocol/relay-client";
+import {
+  isAvoided,
+  isPinned,
+  readWorkerPreference,
+  toggleAvoided,
+  togglePinned,
+  type WorkerPreference,
+} from "@/lib/worker-preference";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
 import {
@@ -318,6 +326,11 @@ function PureProvenanceChip({
                       than the model catalogue. */}
                   <Field label="Paid" value={formatLcai(job.escrowedFee)} />
                   <Field label="Worker" mono value={job.worker} />
+                  {/* Acting on who answered you belongs next to who answered
+                      you. Held in this browser and sent per request, so no
+                      server keeps a record of which workers a person will
+                      accept. */}
+                  <WorkerPreferenceControls worker={job.worker} />
                   <Field label="Prompt blob" mono value={job.promptBlobHash} />
                   <Field
                     label="Response blob"
@@ -433,6 +446,63 @@ function CheckRow({ label, value }: { label: string; value: boolean | null }) {
         )}
       >
         {mark}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * Avoid / pin controls for the worker that answered.
+ *
+ * Sortition decides who may claim, so this can only decline what was drawn —
+ * the consumer-api re-draws a bounded number of times and then answers with
+ * whoever claimed. The copy says "prefer" and "avoid" rather than "block" and
+ * "choose" so nobody reads it as a guarantee it cannot make.
+ */
+function WorkerPreferenceControls({ worker }: { worker: string }) {
+  // Re-read after each toggle rather than holding a copy: the same worker can
+  // appear on several messages at once, and stale buttons would disagree.
+  const [preference, setPreference] = useState<WorkerPreference>(() => ({
+    avoid: [],
+  }));
+
+  useEffect(() => {
+    setPreference(readWorkerPreference());
+  }, []);
+
+  const avoided = isAvoided(worker, preference);
+  const pinned = isPinned(worker, preference);
+
+  return (
+    <div className="flex items-baseline justify-between gap-3 pt-0.5">
+      <dt className="shrink-0 text-content-subtle">Preference</dt>
+      <dd className="flex min-w-0 gap-1.5">
+        <button
+          aria-pressed={pinned}
+          className={cn(
+            "rounded-sm px-1.5 py-0.5 text-[11px] transition-colors",
+            pinned
+              ? "bg-primary/10 text-primary"
+              : "text-content-subtle hover:text-content-strong"
+          )}
+          onClick={() => setPreference(togglePinned(worker))}
+          type="button"
+        >
+          {pinned ? "Preferred" : "Prefer"}
+        </button>
+        <button
+          aria-pressed={avoided}
+          className={cn(
+            "rounded-sm px-1.5 py-0.5 text-[11px] transition-colors",
+            avoided
+              ? "bg-red-500/10 text-red-600 dark:text-red-400"
+              : "text-content-subtle hover:text-content-strong"
+          )}
+          onClick={() => setPreference(toggleAvoided(worker))}
+          type="button"
+        >
+          {avoided ? "Avoided" : "Avoid"}
+        </button>
       </dd>
     </div>
   );

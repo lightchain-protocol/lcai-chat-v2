@@ -55,6 +55,7 @@ import {
   GatewayClientError,
   InsufficientPrepaidBalanceError,
 } from "./gateway-client";
+import { preferenceRequestFields } from "../worker-preference";
 
 /**
  * How a job is submitted on-chain:
@@ -325,6 +326,9 @@ export class SessionManager {
             // every required capability can claim.
             req = await this.gateway.requestSortitionSession(this.modelId, {
               requiredCapabilities: this.requestedCapabilities,
+              // Read fresh each attempt: someone can avoid a worker from the
+              // message it just answered, and the next send should honour it.
+              ...preferenceRequestFields(),
             });
           } catch (err) {
             // 408: consumer-api's own "no worker claimed within CLAIM_TIMEOUT_MS".

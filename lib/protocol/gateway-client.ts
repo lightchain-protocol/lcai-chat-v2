@@ -112,6 +112,10 @@ export type SortitionRequestResponse = {
   /** 0x-prefixed hex public key, or "0x" when no disputer */
   disputerEncryptionKey: string;
   capabilities: string[];
+  /** False when a worker preference could not be met within the retry budget. */
+  preferenceHonored?: boolean;
+  /** Why it could not be met, ready to show. Absent when it was. */
+  preferenceNote?: string;
 };
 
 export type SortitionKeysResponse = {
@@ -203,7 +207,12 @@ export class GatewayClient {
    */
   async requestSortitionSession(
     modelId: string,
-    opts?: { expirySecs?: number; requiredCapabilities?: string[] }
+    opts?: {
+      expirySecs?: number;
+      requiredCapabilities?: string[];
+      avoidWorkers?: string[];
+      preferWorker?: string;
+    }
   ): Promise<SortitionRequestResponse> {
     const body: Record<string, unknown> = { modelId };
     if (opts?.expirySecs !== undefined) {
@@ -212,6 +221,15 @@ export class GatewayClient {
     // Capability names the claiming worker must have declared on-chain.
     if (opts?.requiredCapabilities && opts.requiredCapabilities.length > 0) {
       body.requiredCapabilities = opts.requiredCapabilities;
+    }
+    // This consumer's own preference about who serves it. Sent per request
+    // and stored on no server, so nobody but the person holding the browser
+    // decides which workers they will accept.
+    if (opts?.avoidWorkers && opts.avoidWorkers.length > 0) {
+      body.avoidWorkers = opts.avoidWorkers;
+    }
+    if (opts?.preferWorker) {
+      body.preferWorker = opts.preferWorker;
     }
     return await this.post<SortitionRequestResponse>(
       "/api/sessions/sortition/request",
