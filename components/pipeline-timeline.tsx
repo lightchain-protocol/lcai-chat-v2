@@ -280,6 +280,19 @@ function PipelineHandle({
       ? Math.round((progress.done / progress.total) * 100)
       : 0;
 
+  // Step labels are written for the vertical list, where they sit above a
+  // dimmed progressive note and a spinner carries the state — "Worker
+  // selected" over "finding a worker" reads correctly there. On one line they
+  // become a contradiction: the label claims the step is done while the note
+  // says it is still happening. For a step in progress the progressive phrase
+  // IS the label, so it is promoted and the past-tense name dropped.
+  const active = step?.state === "active";
+  const primary =
+    active && step?.note
+      ? step.note.charAt(0).toUpperCase() + step.note.slice(1)
+      : (step?.label ?? "Working");
+  const secondary = active ? undefined : step?.note;
+
   return (
     <button
       aria-expanded={expanded}
@@ -302,10 +315,10 @@ function PipelineHandle({
           ease: "easeInOut",
         }}
       />
-      <span className="truncate font-medium">{step?.label ?? "Working"}</span>
-      {step?.note && (
+      <span className="truncate font-medium">{primary}</span>
+      {secondary && (
         <span className="hidden truncate font-mono text-[11px] text-content-subtle sm:inline">
-          · {step.note}
+          · {secondary}
         </span>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-2">

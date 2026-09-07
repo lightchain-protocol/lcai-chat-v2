@@ -506,7 +506,17 @@ const PurePreviewMessage = ({
             )}
 
           {!isReadonly && !disableActions && (
-            <div className="flex items-center gap-1">
+            // A flex parent makes MessageActions a flex ITEM, so it shrinks to
+            // its content and the `justify-end` it sets on itself has nothing
+            // to push against — a user message's controls sat at the left of
+            // the column instead of under the bubble they belong to. The row
+            // has to do the aligning, matching the same conditional the
+            // message body above uses.
+            <div
+              className={cn("flex w-full items-center gap-1", {
+                "justify-end": message.role === "user",
+              })}
+            >
               <MessageActions
                 chatId={chatId}
                 isLoading={isLoading}
