@@ -26,7 +26,7 @@ import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
-import { CompareModelMultiSelect } from "./compare-model-picker";
+import { ModelSelect } from "./model-picker";
 import {
   PromptInput,
   PromptInputSubmit,
@@ -423,10 +423,9 @@ function PureMultimodalInput({
                 </span>
               </Button>
             )}
-            <CompareModelMultiSelect
-              min={1}
-              onChange={(ids) => onModelsChange?.(ids)}
-              selectedIds={selectedModelIds}
+            <ModelSelect
+              onChange={(id) => onModelsChange?.([id])}
+              selectedId={selectedModelIds[0] ?? ""}
             />
             <JobFeeIndicator modelIds={selectedModelIds} />
           </PromptInputTools>
@@ -450,8 +449,8 @@ function PureMultimodalInput({
           once, up front, so a long wait on "hello" reads as setup, not a hang. */}
       {messages.length === 0 && canUseChat && !inputBlocked && (
         <p className="mt-2 text-center text-content-subtle text-xs">
-          Your first message opens a session on chain, so it takes a few
-          seconds longer than the rest.
+          Your first message opens a session on chain, so it takes a few seconds
+          longer than the rest.
         </p>
       )}
 
