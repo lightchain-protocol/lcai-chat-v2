@@ -20,6 +20,8 @@ import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { NoWorkersNotice } from "@/components/no-workers-notice";
 import useWorkerAvailability from "@/hooks/use-worker-availability";
+import { useJobFee } from "@/hooks/use-job-fee";
+import { formatLcai } from "@/lib/lcai";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
@@ -40,6 +42,37 @@ import { Switch } from "./ui/switch";
 import AlertError from "./ui/toast/AlertError";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
+
+/**
+ * What this message will cost, shown before it is sent.
+ *
+ * Every send escrows a real fee on chain, and that number only ever appeared
+ * afterwards in the provenance panel — so the first time anyone saw the price
+ * was after paying it. Selecting several models bills one job each, which is
+ * why the figure is a total and says how many.
+ *
+ * Renders nothing while unknown rather than guessing: an absent price beats a
+ * wrong one, and this must never be a reason the composer cannot be used.
+ */
+function JobFeeIndicator({ modelIds }: { modelIds: string[] }) {
+  const { totalWei, perModel } = useJobFee(modelIds);
+  if (totalWei === null) return null;
+
+  return (
+    <span
+      className="ml-1 shrink-0 select-none self-center font-mono text-[10px] text-content-subtle"
+      data-testid="job-fee-indicator"
+      title={
+        perModel > 1
+          ? `Each message costs ${formatLcai(totalWei)} in total — one job per selected model, escrowed on chain.`
+          : `Each message escrows ${formatLcai(totalWei)} on chain as the worker's fee.`
+      }
+    >
+      {formatLcai(totalWei)}
+      {perModel > 1 ? ` · ${perModel} jobs` : ""}
+    </span>
+  );
+}
 
 function PureMultimodalInput({
   chatId,
@@ -392,6 +425,7 @@ function PureMultimodalInput({
               onChange={(ids) => onModelsChange?.(ids)}
               selectedIds={selectedModelIds}
             />
+            <JobFeeIndicator modelIds={selectedModelIds} />
           </PromptInputTools>
 
           {status === "submitted" || status === "streaming" ? (
@@ -407,6 +441,16 @@ function PureMultimodalInput({
           )}
         </PromptInputToolbar>
       </PromptInput>
+
+      {/* The first message opens an on-chain session before the model is even
+          reached, so it lands noticeably slower than the ones after it. Said
+          once, up front, so a long wait on "hello" reads as setup, not a hang. */}
+      {messages.length === 0 && canUseChat && !inputBlocked && (
+        <p className="mt-2 text-center text-content-subtle text-xs">
+          Your first message opens a session on chain, so it takes a few
+          seconds longer than the rest.
+        </p>
+      )}
 
       {messages.length === 0 &&
         attachments.length === 0 &&

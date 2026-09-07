@@ -104,6 +104,17 @@ function isNoWorkerAvailableError(error: unknown): boolean {
   return candidate.cause instanceof NoWorkerAvailableError;
 }
 
+// Whether this failure is worth offering a retry for. A claim timeout spent
+// no fee and the next draw may land; a preflight refusal means nothing can
+// serve the request, and inviting a retry there just fails someone twice.
+function isRetryable(error: unknown): boolean {
+  if (error instanceof NoWorkerAvailableError) return error.retryable;
+  if (error instanceof Error && error.cause instanceof NoWorkerAvailableError) {
+    return error.cause.retryable;
+  }
+  return false;
+}
+
 // Surface the thrown message itself: a capability-constrained timeout carries
 // actionable copy ("… turn off web search") that a generic retry line hides.
 function noWorkerAvailableMessage(error: unknown): string | undefined {
@@ -283,6 +294,9 @@ export function Chat({
   const systemPromptRef = useRef(systemPrompt);
 
   const [enableWebSearch, setEnableWebSearch] = useState(false);
+  // regenerate comes from the useChat call below, so onError cannot close over
+  // it directly. Same read-at-call-time pattern as enableWebSearchRef.
+  const regenerateRef = useRef<(() => void) | null>(null);
   const enableWebSearchRef = useRef(enableWebSearch);
 
   const { walletClient, publicClient } = useWeb3Clients();
@@ -650,7 +664,25 @@ export function Chat({
         const message =
           noWorkerAvailableMessage(error) ??
           "No worker available right now — please try again.";
-        toast.custom((errorId) => <AlertError id={errorId} title={message} />);
+        const retryable = isRetryable(error);
+        toast.custom((errorId) => (
+          <AlertError id={errorId} title={message}>
+            {retryable && (
+              // A claim timeout never submitted the job, so nothing was
+              // charged — re-sending costs no more than the first attempt.
+              <button
+                className="mt-1.5 text-sm underline underline-offset-2 opacity-90 hover:opacity-100"
+                onClick={() => {
+                  toast.dismiss(errorId);
+                  regenerateRef.current?.();
+                }}
+                type="button"
+              >
+                Try again
+              </button>
+            )}
+          </AlertError>
+        ));
         return;
       }
 
@@ -660,6 +692,12 @@ export function Chat({
       ));
     },
   });
+
+  useEffect(() => {
+    regenerateRef.current = () => {
+      regenerate();
+    };
+  }, [regenerate]);
 
   // Multi-model fan-out (protocol mode). Drives its own N transports and
   // streams each answer into the SAME `messages` list as a sibling assistant

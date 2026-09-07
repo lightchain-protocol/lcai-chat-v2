@@ -21,6 +21,7 @@ import {
 } from "@/hooks/use-transaction-history";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { cn, formatNumber } from "@/lib/utils";
+import { formatLcai } from "@/lib/lcai";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
@@ -38,9 +39,6 @@ const STATUS_META: Record<
 };
 
 /** Amounts everywhere in the app read as `formatNumber(formatEther(wei))`. */
-function formatLcai(wei: bigint): string {
-  return formatNumber(formatEther(wei));
-}
 
 function truncate(hex: string): string {
   return hex.length > 12 ? `${hex.slice(0, 6)}…${hex.slice(-4)}` : hex;

@@ -105,9 +105,20 @@ export class MissingDisputerKeyError extends Error {
  * a "no worker available, retry" message rather than a generic error.
  */
 export class NoWorkerAvailableError extends Error {
-  constructor(message?: string) {
+  /**
+   * Whether sending the same thing again could plausibly succeed.
+   *
+   * True for a claim timeout: the draw found nobody in time, no fee was
+   * spent, and the next draw may land. False when consumer-api refused up
+   * front because nothing can serve the request — offering "try again" there
+   * only invites someone to fail twice.
+   */
+  readonly retryable: boolean;
+
+  constructor(message?: string, retryable = false) {
     super(message ?? "No worker available — retry session initialization");
     this.name = "NoWorkerAvailableError";
+    this.retryable = retryable;
   }
 }
 
@@ -119,6 +130,18 @@ export class NoWorkerAvailableError extends Error {
  * Returns undefined for anything unparseable so the caller keeps its own
  * wording rather than surfacing a fragment of a JSON body.
  */
+/**
+ * Whether consumer-api marked this refusal as worth retrying. Only the claim
+ * timeout is; the preflight refusals mean nothing can serve the request.
+ */
+function serverRetryable(err: GatewayClientError): boolean {
+  try {
+    return (JSON.parse(err.body) as { retryable?: unknown }).retryable === true;
+  } catch {
+    return false;
+  }
+}
+
 function serverMessage(err: GatewayClientError): string | undefined {
   try {
     const parsed = JSON.parse(err.body) as { message?: unknown };
@@ -354,7 +377,10 @@ export class SessionManager {
                 serverMessage(err) ??
                   (this.requestedCapabilities.length > 0
                     ? "No worker online right now supports the options selected — try again, or turn them off."
-                    : undefined)
+                    : undefined),
+                // A proxy 504 cut off the same long-poll a 408 reports, so it
+                // means the same thing to the reader: nobody claimed in time.
+                serverRetryable(err) || err.status === 504
               );
             }
             throw err;

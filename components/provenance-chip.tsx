@@ -32,6 +32,7 @@ import {
   type VerificationStatus,
 } from "@/lib/protocol/verify-response";
 import { cn } from "@/lib/utils";
+import { formatLcai } from "@/lib/lcai";
 import { SettlementTimeline } from "./settlement-timeline";
 
 /**
@@ -417,7 +418,6 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-const TRAILING_ZEROS = /0+$/;
 
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -425,13 +425,6 @@ const ZERO_HASH =
 const MAX_JOB_REREADS = 24;
 const JOB_REREAD_INTERVAL_MS = 5000;
 
-function formatLcai(wei: bigint): string {
-  const whole = wei / 10n ** 18n;
-  const frac = wei % 10n ** 18n;
-  if (frac === 0n) return `${whole} LCAI`;
-  const padded = frac.toString().padStart(18, "0").replace(TRAILING_ZEROS, "");
-  return `${whole}.${padded.slice(0, 6)} LCAI`;
-}
 
 function CheckRow({ label, value }: { label: string; value: boolean | null }) {
   const mark = value === true ? "yes" : value === false ? "no" : "n/a";

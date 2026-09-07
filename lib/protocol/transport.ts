@@ -16,6 +16,7 @@
 
 import { withMemoryPrefix } from "../memory";
 import type { ProtocolLoadingStatus } from "../types";
+import { recordThroughput } from "../model-throughput";
 import { parseArtifactDescriptor } from "./artifact";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import type { GatewayClient } from "./gateway-client";
@@ -1723,6 +1724,13 @@ export class ProtocolTransport {
             // nothing else, so it is dropped rather than breaking the answer.
             const stats = parseGenerationStats(decrypted);
             if (stats) {
+              // Remember what this model actually delivered, so the picker can
+              // set an expectation before someone pays for a slow one. Local
+              // only, and never throws — a hint must not cost the answer.
+              recordThroughput(
+                this.sessionMgr.resolvedModelId,
+                stats.tokensPerSecond
+              );
               relayClient?.setAssistantStats(jobId, stats);
               emit({
                 type: "data-generationStats",

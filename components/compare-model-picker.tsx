@@ -14,6 +14,10 @@ import {
 } from "@/hooks/use-live-worker-counts";
 import { useModels } from "@/hooks/use-models";
 import { cn } from "@/lib/utils";
+import {
+  formatThroughput,
+  typicalThroughput,
+} from "@/lib/model-throughput";
 import { ModelLogo } from "./model-logo";
 
 export const MIN_COMPARE_MODELS = 2;
@@ -38,6 +42,21 @@ function dotClass(liveness?: ModelLiveness): string {
     return "bg-amber-500";
   }
   return "bg-emerald-500";
+}
+
+/**
+ * Appends the speed this model has actually delivered on this device, once
+ * enough answers have been seen to say.
+ *
+ * Measured rather than published: the same model runs an order of magnitude
+ * apart on different workers, so a catalogue figure would be wrong for
+ * whoever draws the other one. Silent until there is evidence — a guess about
+ * speed is worse than none, because it is what someone decides against before
+ * paying a fee.
+ */
+function speedHint(modelId: string): string {
+  const typical = typicalThroughput(modelId);
+  return typical === null ? "" : ` · ${formatThroughput(typical)}`;
 }
 
 export function AvailabilityDot({ liveness }: { liveness?: ModelLiveness }) {
@@ -202,7 +221,7 @@ export function CompareModelMultiSelect({
                       ? "Offline"
                       : allBusy
                         ? "Busy"
-                        : `${workerCount} online`}
+                        : `${workerCount} online${speedHint(model.id)}`}
                   </span>
                 )}
               </span>
