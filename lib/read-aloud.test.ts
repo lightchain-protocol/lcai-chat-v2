@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readAloudTooltip } from "./read-aloud";
+import { readAloudProgressLabel, readAloudTooltip } from "./read-aloud";
 
 const idle = { unstaffed: false, walletReady: true, state: "idle" };
 
@@ -49,10 +49,16 @@ describe("readAloudTooltip", () => {
     expect(readAloudTooltip({ ...idle, state: "playing" })).toBe("Stop");
   });
 
-  it("says work is happening while synthesizing", () => {
-    expect(readAloudTooltip({ ...idle, state: "synthesizing" })).toMatch(
-      /generating/i
+  it("reports the current phase while synthesizing", () => {
+    // Before the first phase arrives there is nothing specific to report,
+    // so it still says work is under way rather than showing the idle
+    // explainer as though the click had not registered.
+    expect(readAloudTooltip({ ...idle, state: "synthesizing" })).toBe(
+      readAloudProgressLabel(undefined)
     );
+    expect(
+      readAloudTooltip({ ...idle, state: "synthesizing", progress: "thinking" })
+    ).toMatch(/generating/i);
   });
 
   it("never apologises", () => {
@@ -65,5 +71,50 @@ describe("readAloudTooltip", () => {
         }
       }
     }
+  });
+});
+
+describe("readAloudProgressLabel", () => {
+  it("names who the wait is on, not what the code is doing", () => {
+    expect(readAloudProgressLabel("finding_worker")).toMatch(/worker/i);
+    expect(readAloudProgressLabel("waiting_for_relay")).toMatch(/worker/i);
+    expect(readAloudProgressLabel("submitting_job")).toMatch(/on chain/i);
+  });
+
+  it("never leaks a raw status token for a phase it does not know", () => {
+    // A new protocol status must not surface as "waiting_for_relay" on a
+    // user's screen.
+    const label = readAloudProgressLabel(
+      "some_future_status" as Parameters<typeof readAloudProgressLabel>[0]
+    );
+    expect(label).not.toMatch(/_/);
+    expect(label).toMatch(/preparing audio/i);
+  });
+
+  it("handles an absent status", () => {
+    expect(readAloudProgressLabel(undefined)).toMatch(/preparing audio/i);
+  });
+
+  it("is always short enough to sit beside a button", () => {
+    const statuses = [
+      "idle", "finding_worker", "preparing_chat", "writing_on_chain",
+      "submitting_job", "waiting_for_relay", "decoding_prompt", "thinking",
+      "reasoning", "streaming", "completed", "error",
+    ] as const;
+    for (const status of statuses) {
+      expect(readAloudProgressLabel(status).length).toBeLessThanOrEqual(34);
+    }
+  });
+});
+
+describe("readAloudTooltip while a job is in flight", () => {
+  it("repeats the same phase the badge shows, not a vaguer one", () => {
+    const tip = readAloudTooltip({
+      unstaffed: false,
+      walletReady: true,
+      state: "synthesizing",
+      progress: "waiting_for_relay",
+    });
+    expect(tip).toBe(readAloudProgressLabel("waiting_for_relay"));
   });
 });

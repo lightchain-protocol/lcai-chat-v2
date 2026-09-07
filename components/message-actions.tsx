@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
 import { ttsModelId } from "@/config";
-import { readAloudTooltip } from "@/lib/read-aloud";
+import { readAloudProgressLabel, readAloudTooltip } from "@/lib/read-aloud";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
@@ -162,6 +162,7 @@ export function PureMessageActions({
           unstaffed: speechUnstaffed,
           walletReady: tts.isAvailable,
           state: tts.state,
+          progress: tts.progress,
         })}
       >
         {tts.state === "synthesizing" ? (
@@ -172,6 +173,20 @@ export function PureMessageActions({
           <Volume2 />
         )}
       </Action>
+
+      {/* Reading a message aloud takes ~30s across claim, submit and
+          synthesis. A spinner alone for that long reads as a hang, and the
+          phase is only in a tooltip nobody thinks to hover, so it is stated
+          in the open beside the button. */}
+      {tts.state === "synthesizing" && (
+        <span
+          aria-live="polite"
+          className="ml-1 select-none self-center text-content-medium text-xs"
+          data-testid="read-aloud-progress"
+        >
+          {readAloudProgressLabel(tts.progress)}
+        </span>
+      )}
 
       {regenerate && (
         // Every regeneration is a new on-chain job with its own fee, so this
