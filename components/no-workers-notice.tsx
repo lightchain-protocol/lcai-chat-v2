@@ -46,7 +46,7 @@ export function NoWorkersNotice({
         <p className="mt-0.5 text-content-medium text-xs">
           {hasEligibleWorkers
             ? "Your prompt would not be picked up yet. This clears as jobs finish."
-            : "Nothing is available to answer the selected models right now."}
+            : "None is answering right now. You can still send; a worker picks it up when one comes online."}
         </p>
       </div>
     </div>
