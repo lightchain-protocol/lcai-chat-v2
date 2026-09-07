@@ -621,3 +621,55 @@ export const ThinkingMessage = ({
     </motion.div>
   );
 };
+
+/**
+ * A turn that failed, shown in the thread where the answer would have been.
+ *
+ * A toast is the wrong surface for this: it is transient, and someone who
+ * switches tabs during a ~30s wait comes back to a conversation that simply
+ * stops, with no way to tell whether it failed or is still going. The place a
+ * reader looks for the answer is the place that has to say there isn't one.
+ *
+ * Deliberately not a real message: it is never persisted, never sent as
+ * history, and disappears on retry — so a failure cannot end up quoted back
+ * to a model as though the assistant had said it.
+ */
+export const TurnFailedMessage = ({
+  title,
+  detail,
+  onRetry,
+}: {
+  title: string;
+  detail?: string;
+  /** Omitted when retrying cannot help, so no button promises a fix. */
+  onRetry?: () => void;
+}) => (
+  <motion.div
+    animate={{ opacity: 1 }}
+    className="group/message w-full"
+    data-role="assistant"
+    data-testid="message-turn-failed"
+    initial={{ opacity: 0 }}
+    transition={{ duration: 0.2 }}
+  >
+    <div className="flex items-start justify-start gap-3">
+      <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
+        <LCAIIcon size={14} />
+      </div>
+
+      <div className="flex w-full min-w-0 flex-col gap-1">
+        <p className="text-content-strong text-sm">{title}</p>
+        {detail && <p className="text-content-medium text-xs">{detail}</p>}
+        {onRetry && (
+          <button
+            className="w-fit text-content-secondary text-xs underline underline-offset-2 hover:text-content-strong"
+            onClick={onRetry}
+            type="button"
+          >
+            Try again
+          </button>
+        )}
+      </div>
+    </div>
+  </motion.div>
+);

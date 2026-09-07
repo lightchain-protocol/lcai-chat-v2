@@ -298,6 +298,13 @@ export function Chat({
   // regenerate comes from the useChat call below, so onError cannot close over
   // it directly. Same read-at-call-time pattern as enableWebSearchRef.
   const regenerateRef = useRef<(() => void) | null>(null);
+  // A failed turn is shown in the thread, not as a toast: the wait is ~30s and
+  // someone who switches tabs would never see a toast that came and went.
+  const [turnError, setTurnError] = useState<{
+    title: string;
+    detail?: string;
+    retryable: boolean;
+  } | null>(null);
   const enableWebSearchRef = useRef(enableWebSearch);
 
   const { walletClient, publicClient } = useWeb3Clients();
@@ -662,24 +669,12 @@ export function Chat({
       }
 
       if (isConnectionFailure(error)) {
-        toast.custom((errorId) => (
-          <AlertError
-            description="Your message was not sent and nothing was charged — the fee is only taken once a worker picks the job up."
-            id={errorId}
-            title="Couldn't reach the network"
-          >
-            <button
-              className="mt-1.5 text-sm underline underline-offset-2 opacity-90 hover:opacity-100"
-              onClick={() => {
-                toast.dismiss(errorId);
-                regenerateRef.current?.();
-              }}
-              type="button"
-            >
-              Try again
-            </button>
-          </AlertError>
-        ));
+        setTurnError({
+          title: "Couldn't reach the network",
+          detail:
+            "Your message wasn't sent and nothing was charged — the fee is only taken once a worker picks the job up.",
+          retryable: true,
+        });
         return;
       }
 
@@ -687,25 +682,13 @@ export function Chat({
         const message =
           noWorkerAvailableMessage(error) ??
           "No worker available right now — please try again.";
-        const retryable = isRetryable(error);
-        toast.custom((errorId) => (
-          <AlertError id={errorId} title={message}>
-            {retryable && (
-              // A claim timeout never submitted the job, so nothing was
-              // charged — re-sending costs no more than the first attempt.
-              <button
-                className="mt-1.5 text-sm underline underline-offset-2 opacity-90 hover:opacity-100"
-                onClick={() => {
-                  toast.dismiss(errorId);
-                  regenerateRef.current?.();
-                }}
-                type="button"
-              >
-                Try again
-              </button>
-            )}
-          </AlertError>
-        ));
+        setTurnError({
+          title: message,
+          // No job was submitted, so no fee moved. Saying so pre-empts the
+          // question anyone paying per message will have.
+          detail: "Nothing was charged for this message.",
+          retryable: isRetryable(error),
+        });
         return;
       }
 
@@ -721,6 +704,12 @@ export function Chat({
       regenerate();
     };
   }, [regenerate]);
+
+  // Clear a previous failure the moment a new turn starts, so the row cannot
+  // linger beneath a question that is currently being answered.
+  useEffect(() => {
+    if (status === "submitted" || status === "streaming") setTurnError(null);
+  }, [status]);
 
   // Multi-model fan-out (protocol mode). Drives its own N transports and
   // streams each answer into the SAME `messages` list as a sibling assistant
@@ -1000,11 +989,16 @@ export function Chat({
           onAddBranch={isReadonly ? undefined : handleAddBranch}
           onFork={isReadonly ? undefined : handleFork}
           onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
+          onRetryTurn={() => {
+            setTurnError(null);
+            regenerateRef.current?.();
+          }}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={currentModelId}
           setMessages={setMessages}
           status={status}
+          turnError={turnError}
           votes={votes}
         />
 

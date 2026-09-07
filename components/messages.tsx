@@ -19,7 +19,11 @@ import { cn } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { Greeting } from "./greeting";
-import { PreviewMessage, ThinkingMessage } from "./message";
+import {
+  PreviewMessage,
+  ThinkingMessage,
+  TurnFailedMessage,
+} from "./message";
 import { MultiModelAnswer } from "./multi-model-answer";
 import { PipelineTimeline } from "./pipeline-timeline";
 
@@ -66,6 +70,12 @@ function toRenderItems(messages: ChatMessage[]): RenderItem[] {
 type MessagesProps = {
   chatId: string;
   status: UseChatHelpers<ChatMessage>["status"];
+  /**
+   * A turn that failed, rendered in the thread instead of a toast. Someone who
+   * switches tabs during a ~30s wait must still find out what happened.
+   */
+  turnError?: { title: string; detail?: string; retryable: boolean } | null;
+  onRetryTurn?: () => void;
   votes: Vote[] | undefined;
   messages: ChatMessage[];
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
@@ -96,6 +106,8 @@ type MessagesProps = {
 function PureMessages({
   chatId,
   status,
+  turnError,
+  onRetryTurn,
   votes,
   messages,
   setMessages,
@@ -307,6 +319,14 @@ function PureMessages({
                 progressStatus={protocolProgressStatus as ProtocolLoadingStatus}
               />
             </div>
+          )}
+
+          {turnError && (
+            <TurnFailedMessage
+              detail={turnError.detail}
+              onRetry={turnError.retryable ? onRetryTurn : undefined}
+              title={turnError.title}
+            />
           )}
 
           <AnimatePresence mode="wait">
