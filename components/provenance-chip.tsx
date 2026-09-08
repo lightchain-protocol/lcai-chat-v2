@@ -175,6 +175,16 @@ function PureProvenanceChip({
   const settled = settlement?.stage === "settled";
   const failed = settlement?.stage === "failed";
 
+  // The worker's own count when the stats frame has landed, otherwise the
+  // live estimate, marked "~" as it is in the summary row. Derived once so the
+  // row and the expanded field can never disagree.
+  const throughputLabel =
+    stats && stats.evalTokens > 0
+      ? `${stats.evalTokens.toLocaleString()} tok · ${stats.tokensPerSecond.toFixed(1)} tok/s`
+      : metrics?.tokensPerSecondEstimate != null
+        ? `~${metrics.tokensPerSecondEstimate.toFixed(1)} tok/s`
+        : null;
+
   const handleMismatchDispute = async () => {
     if (!(disputeResponseMismatch && proof)) return;
     setDisputePending(true);
@@ -226,29 +236,27 @@ function PureProvenanceChip({
           status={status}
         />
         <span>{statusLabel(status, live, settled, failed)}</span>
+        {/* Who served it and how fast are diagnostics, not the verdict. On a
+            phone they wrap the chip onto a second line immediately under the
+            answer — the place the eye goes next — so below `sm` they stay
+            behind the expander, where each one is repeated as a field. */}
         {worker && (
-          <span className="font-mono text-[11px]" title={worker}>
+          <span
+            className="hidden font-mono text-[11px] sm:inline"
+            title={worker}
+          >
             {truncateAddress(worker)}
           </span>
         )}
         {metrics?.ttftMs != null && (
-          <span className="font-mono text-[11px]">
+          <span className="hidden font-mono text-[11px] sm:inline">
             TTFT {formatLatencyMs(metrics.ttftMs)}
           </span>
         )}
-        {stats && stats.evalTokens > 0 ? (
-          <span className="font-mono text-[11px]">
-            {stats.evalTokens.toLocaleString()} tok ·{" "}
-            {stats.tokensPerSecond.toFixed(1)} tok/s
+        {throughputLabel && (
+          <span className="hidden font-mono text-[11px] sm:inline">
+            {throughputLabel}
           </span>
-        ) : (
-          metrics?.tokensPerSecondEstimate != null && (
-            // Live estimate from rendered characters; the worker's own number
-            // replaces it when the stats frame lands.
-            <span className="font-mono text-[11px]">
-              ~{metrics.tokensPerSecondEstimate.toFixed(1)} tok/s
-            </span>
-          )
         )}
         <ChevronDown
           className={cn("transition-transform", expanded && "rotate-180")}
@@ -316,6 +324,25 @@ function PureProvenanceChip({
                 window has elapsed after job completion.
               </p>
             ))}
+
+          {/* The summary row drops these below `sm`, so they are restated here
+              as fields. Stands on its own rather than joining the dl below,
+              because timings exist for a streamed answer whether or not the
+              proof and the on-chain job have been read back yet. */}
+          {(worker || metrics?.ttftMs != null || throughputLabel) && (
+            <dl className="space-y-1">
+              {worker && <Field label="Served by" mono value={worker} />}
+              {metrics?.ttftMs != null && (
+                <Field
+                  label="Time to first token"
+                  value={formatLatencyMs(metrics.ttftMs)}
+                />
+              )}
+              {throughputLabel && (
+                <Field label="Throughput" value={throughputLabel} />
+              )}
+            </dl>
+          )}
 
           {(proof || job) && (
             <dl className="space-y-1">
