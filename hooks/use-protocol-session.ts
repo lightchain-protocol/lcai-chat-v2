@@ -10,6 +10,7 @@ import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
+import { resolveModelSelection } from "@/lib/protocol/resolve-model";
 import type { SessionStatus, SubmitMode } from "@/lib/protocol/session";
 import type { FailoverStatus, TrackedJob } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
@@ -96,12 +97,16 @@ export function useProtocolSession(
     return gatewayRef.current;
   }, []);
 
-  // Confirm modelId is one of the currently-available (worker-online) models
-  // from the gateway. modelId is already a real hex id — sourced from the
-  // picker, which reads /api/models directly — so no name resolution is
-  // needed here anymore. Throws (rather than silently falling back to
-  // models[0]) if the model isn't currently available, so a stale selection
-  // surfaces as a visible error instead of quietly talking to the wrong model.
+  // Resolve the composer's selection to an on-chain model id.
+  //
+  // The selection is USUALLY a hex id from the picker, but not always: with no
+  // `chat-model` cookie the page renders holding DEFAULT_CHAT_MODEL, which is
+  // the legacy name, and chat.tsx only swaps it for the id once /api/models
+  // resolves. The composer is live in that window, so a fast sender arrives
+  // here with "llama3-8b" — which used to throw, blaming absent workers, while
+  // the model had five. Names now resolve; only a genuinely unknown selection
+  // throws, and it no longer claims to know anything about workers, because
+  // /api/models is the registry and carries no liveness.
   const resolveModelId = useCallback(async (): Promise<string> => {
     const gateway = getGateway();
     const { models } = await gateway.getModels();
@@ -110,14 +115,14 @@ export function useProtocolSession(
       throw new Error("No models available from gateway");
     }
 
-    const found = models.some((m) => m.id === modelId);
-    if (!found) {
+    const resolved = resolveModelSelection(modelId, models);
+    if (!resolved) {
       throw new Error(
-        `Model ${modelId} is not currently available — it may have no active workers.`
+        `Model ${modelId} is not one this network serves — pick another from the model menu.`
       );
     }
 
-    return modelId;
+    return resolved.id;
   }, [modelId, getGateway]);
 
   // Lazily create the transport — returns a promise since model resolution is async

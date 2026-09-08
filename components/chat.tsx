@@ -49,6 +49,7 @@ import {
   saveMemoryStore,
 } from "@/lib/memory";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import { resolveModelSelection } from "@/lib/protocol/resolve-model";
 import { NoWorkerAvailableError } from "@/lib/protocol/session";
 import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
@@ -768,7 +769,11 @@ export function Chat({
     if (prewarmedForRef.current === modelId) {
       return;
     }
-    const model = availableModels.find((m) => m.id === modelId);
+    // Resolve rather than match on id: during the window before /api/models
+    // lands, the selection is still the legacy name, and an id-only match
+    // skipped the warm for exactly the sender who most needed it — the one
+    // typing into a session that had not been opened yet.
+    const model = resolveModelSelection(modelId, availableModels);
     if (!model) {
       return;
     }
