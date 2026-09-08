@@ -261,10 +261,13 @@ const PurePreviewMessage = ({
               (p) => p.type === "text" && p.text?.trim()
             ),
             "min-h-96": message.role === "assistant" && requiresScrollPadding,
-            "w-full":
-              (message.role === "assistant" &&
-                parts.some((p) => p.type === "text" && p.text?.trim())) ||
-              mode === "edit",
+            // Only the user's bubble shrink-wraps; assistant content is
+            // left-aligned flow at any width. Keying this on "has text" meant a
+            // turn that produced none — the failure case — collapsed to its
+            // widest child, so the provenance panel opened into a third of the
+            // column and the settlement labels broke mid-word. The failure is
+            // exactly when that trail needs reading.
+            "w-full": message.role === "assistant" || mode === "edit",
             "max-w-[calc(100%-2.5rem)] sm:max-w-[min(fit-content,80%)]":
               message.role === "user" && mode !== "edit",
           })}
