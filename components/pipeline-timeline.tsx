@@ -287,11 +287,20 @@ function PipelineHandle({
   // says it is still happening. For a step in progress the progressive phrase
   // IS the label, so it is promoted and the past-tense name dropped.
   const active = step?.state === "active";
-  const primary =
-    active && step?.note
+  // Settlement is the one wait not measured in seconds: it clears when the
+  // keeper releases the job, which has been running about a day behind
+  // completion. Promoting its note the way the others are promoted leaves a
+  // delivered answer headlined "Awaiting the dispute window" for the rest of
+  // the session, reading as though the turn never finished. So the milestone
+  // the reader came for stays the headline and settlement rides along as the
+  // dimmed note it is.
+  const settling = active && step?.key === "settled";
+  const primary = settling
+    ? "Completed"
+    : active && step?.note
       ? step.note.charAt(0).toUpperCase() + step.note.slice(1)
       : (step?.label ?? "Working");
-  const secondary = active ? undefined : step?.note;
+  const secondary = active && !settling ? undefined : step?.note;
 
   return (
     <button
@@ -306,14 +315,21 @@ function PipelineHandle({
       onClick={onToggle}
       type="button"
     >
+      {/* The pulse means "still working". Settlement is hours away and needs
+          nothing from the reader, so it rests rather than animating for the
+          remainder of the session. */}
       <motion.span
-        animate={{ opacity: [1, 0.4, 1] }}
+        animate={settling ? { opacity: 1 } : { opacity: [1, 0.4, 1] }}
         className="size-2 shrink-0 rounded-full border-[1.5px] border-primary/60"
-        transition={{
-          duration: 1.5,
-          repeat: Number.POSITIVE_INFINITY,
-          ease: "easeInOut",
-        }}
+        transition={
+          settling
+            ? { duration: 0.3 }
+            : {
+                duration: 1.5,
+                repeat: Number.POSITIVE_INFINITY,
+                ease: "easeInOut",
+              }
+        }
       />
       <span className="truncate font-medium">{primary}</span>
       {secondary && (
