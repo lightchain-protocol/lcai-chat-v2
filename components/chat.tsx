@@ -754,10 +754,6 @@ export function Chat({
   //   - best-effort in the transport (no-ops if ready/in-progress, swallows
   //     errors), so a warm that never lands leaves the send path unchanged.
   const prewarmedForRef = useRef<string | null>(null);
-  const prewarmRef = useRef(multiModel.prewarm);
-  useEffect(() => {
-    prewarmRef.current = multiModel.prewarm;
-  }, [multiModel.prewarm]);
   useEffect(() => {
     if (!(isProtocolMode && isSortitionEnabled)) {
       return;
@@ -778,10 +774,21 @@ export function Chat({
       return;
     }
     prewarmedForRef.current = modelId;
-    prewarmRef.current?.([model], {
-      enableWebSearch: enableWebSearchRef.current,
-    });
-  }, [input, selectedModelIds, availableModels]);
+    // Warm the SAME transport the single-model send uses. Warming through the
+    // multi-model map built a second SessionManager under another storage key,
+    // so every chat opened two on-chain sessions and orphaned one.
+    getProtocolTransport()
+      .then((transport) =>
+        transport.prewarm(
+          enableWebSearchRef.current
+            ? { requiredCapabilities: ["search"] }
+            : undefined
+        )
+      )
+      .catch(() => {
+        // best-effort: the send re-runs initialize and reports any failure
+      });
+  }, [input, selectedModelIds, availableModels, getProtocolTransport]);
 
   const runMultiModel = multiModel.run;
 

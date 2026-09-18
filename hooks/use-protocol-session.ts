@@ -126,7 +126,7 @@ export function useProtocolSession(
   }, [modelId, getGateway]);
 
   // Lazily create the transport — returns a promise since model resolution is async
-  const getTransport = useCallback(async () => {
+  const createTransport = useCallback(async () => {
     if (transportRef.current) return transportRef.current;
 
     const client = walletClientRef.current;
@@ -280,6 +280,20 @@ export function useProtocolSession(
     publicClient,
     getMemoryPrefix,
   ]);
+
+  // One transport per chat even when two callers race inside the async
+  // model-resolution window (pre-warm on the first keystroke, send on Enter):
+  // the in-flight promise is shared until it settles.
+  const transportPromiseRef = useRef<Promise<ProtocolTransport> | null>(null);
+  const getTransport = useCallback(async () => {
+    if (transportRef.current) return transportRef.current;
+    if (!transportPromiseRef.current) {
+      transportPromiseRef.current = createTransport().finally(() => {
+        transportPromiseRef.current = null;
+      });
+    }
+    return transportPromiseRef.current;
+  }, [createTransport]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */
   const releaseTransport = useCallback(() => {
