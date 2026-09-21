@@ -226,6 +226,18 @@ export function useProtocolSession(
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);
+      // Refresh capability snapshot — the transport only knows the bound
+      // worker's capabilities after the session reaches "ready". Reading on
+      // every status change keeps the chat input's Switch in sync.
+      setWorkerCapabilities(transport.workerCapabilities);
+
+      // A background pre-warm (first keystroke) opens the session before
+      // anything is sent. Its statuses are not a turn: surfacing them made the
+      // on-chain timeline appear, fully ticked, over an empty chat, and a warm
+      // that failed would have shown a turn error for a message never sent.
+      if (transport.isWarmingOnly) {
+        return;
+      }
 
       if (s === "preparing") {
         // In the sortition path the dispatcher blocks here for ~10-25 s while
@@ -248,10 +260,6 @@ export function useProtocolSession(
       } else {
         setError(null);
       }
-      // Refresh capability snapshot — the transport only knows the bound
-      // worker's capabilities after the session reaches "ready". Reading on
-      // every status change keeps the chat input's Switch in sync.
-      setWorkerCapabilities(transport.workerCapabilities);
     });
     transport.setOnFailoverStatus(setFailoverStatus);
     transport.setOnProgressStatus(setProgressStatus);
