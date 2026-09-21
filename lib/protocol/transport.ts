@@ -208,6 +208,8 @@ export class ProtocolTransport {
   private onFailoverStatusChange?: (status: FailoverStatus) => void;
   private onProgressStatusChange?: (status: ProtocolLoadingStatus) => void;
   private failoverPromise: Promise<void> | null = null;
+  /** A pre-warm is initializing the session and no send has joined it yet. */
+  private warmingOnly = false;
   // ── Per-job timeout tracking ─────────────────────────────────────────────
   private readonly jobRegistryAddress: `0x${string}`;
   private readonly chainId: number;
@@ -437,11 +439,24 @@ export class ProtocolTransport {
     ) {
       return;
     }
+    this.warmingOnly = true;
     try {
       await this.sessionMgr.initialize(opts);
     } catch {
       // Swallow — the real send retries initialize and reports any failure.
+    } finally {
+      this.warmingOnly = false;
     }
+  }
+
+  /**
+   * True while session status changes come from a pre-warm alone. The UI must
+   * not narrate them: nothing has been sent, so there is no turn to show
+   * progress for. A send that joins the warm clears this, and from then on
+   * the same statuses describe the send.
+   */
+  get isWarmingOnly(): boolean {
+    return this.warmingOnly;
   }
 
   async sendMessages(options: {
@@ -457,6 +472,7 @@ export class ProtocolTransport {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
+    this.warmingOnly = false;
     this.setProgressStatus("preparing_chat");
     // Initialize session on first message. enableWebSearch in the body
     // doubles as the signal to request a search-capable worker at
