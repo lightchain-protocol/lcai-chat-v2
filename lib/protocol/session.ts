@@ -51,6 +51,7 @@ import type {
   TokenResponse,
 } from "./gateway-client";
 import {
+  DelegatedSubmitUnavailableError,
   DelegateNotAuthorizedError,
   GatewayClientError,
   InsufficientPrepaidBalanceError,
@@ -63,8 +64,9 @@ import { preferenceRequestFields } from "../worker-preference";
  *  - "delegated": consumer-api calls submitJobOnBehalf, debiting the user's
  *                 prepaid balance. No wallet popup. Throws if the delegate
  *                 isn't authorized or the balance is empty.
- *  - "auto":      try "delegated"; on DelegateNotAuthorized / InsufficientBalance
- *                 fall back to "wallet" with the already-uploaded blob.
+ *  - "auto":      try "delegated"; on any refusal made before the broadcast
+ *                 (not 401/500 or a network error) fall back to "wallet"
+ *                 with the already-uploaded blob.
  */
 export type SubmitMode = "wallet" | "delegated" | "auto";
 
@@ -577,8 +579,8 @@ export class SessionManager {
    * Then, based on `getSubmitMode()`:
    *  - "delegated"/"auto": call the consumer-api `POST /api/sessions/:id/messages`
    *    which runs `submitJobOnBehalf`, debiting the user's prepaid balance — no
-   *    wallet popup. "auto" falls back to the wallet path on
-   *    DelegateNotAuthorized / InsufficientPrepaidBalance (reusing the blob).
+   *    wallet popup. "auto" falls back to the wallet path whenever the
+   *    consumer-api refused before broadcasting (reusing the blob).
    *  - "wallet": user signs a `submitJob` type-2 TX per prompt (legacy).
    *
    * The blob-then-submit split exists because browser wallets (MetaMask)
@@ -639,7 +641,8 @@ export class SessionManager {
       } catch (err) {
         const recoverable =
           err instanceof DelegateNotAuthorizedError ||
-          err instanceof InsufficientPrepaidBalanceError;
+          err instanceof InsufficientPrepaidBalanceError ||
+          err instanceof DelegatedSubmitUnavailableError;
         if (mode === "delegated" || !recoverable) {
           throw err;
         }
