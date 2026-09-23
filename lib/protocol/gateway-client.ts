@@ -90,6 +90,19 @@ export class DelegateNotAuthorizedError extends Error {
   }
 }
 
+/**
+ * The consumer-api refused a delegated submit before anything reached the
+ * chain, so the wallet path can send the same prompt without paying twice.
+ */
+export class DelegatedSubmitUnavailableError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`Delegated submit unavailable (HTTP ${status})`);
+    this.name = "DelegatedSubmitUnavailableError";
+    this.status = status;
+  }
+}
+
 export type TokenResponse = {
   token: string;
   expiresAt: string;
@@ -345,6 +358,12 @@ export class GatewayClient {
     }
     if (res.status === 402) {
       throw new InsufficientPrepaidBalanceError();
+    }
+    // Every refusal except 500 is sent before the broadcast (validation,
+    // pre-flight chain reads, busy submitter, a deployment without the route).
+    // A 500 can follow a broadcast, so it stays a hard error.
+    if (!res.ok && res.status !== 500) {
+      throw new DelegatedSubmitUnavailableError(res.status);
     }
 
     return this.handleResponse<SubmitMessageResponse>(res);
