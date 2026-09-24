@@ -14,26 +14,32 @@ import { jwtExpirySecs } from "@/lib/jwt";
 /** A token with less than this left is exchanged before it is used. */
 export const REFRESH_BEFORE_SECS = 15 * 60;
 
+/** The exchange runs inside the session route; it must not hold it long. */
+const REFRESH_TIMEOUT_MS = 5000;
+
+/** Whether `token` is within REFRESH_BEFORE_SECS of its exp, or past it. */
+export function isRefreshDue(token: string): boolean {
+  const exp = jwtExpirySecs(token);
+  return exp !== null && exp - Date.now() / 1000 <= REFRESH_BEFORE_SECS;
+}
+
 /**
- * Returns a fresh token when `token` is within REFRESH_BEFORE_SECS of its
- * exp (or past it), null when it still has time or the exchange failed. A
- * failure is not an error to the caller: it keeps the token it has and the
- * sign-in prompt covers whatever happens next.
+ * Returns a fresh token when `token` is due, null when it still has time or
+ * the exchange failed. A failure is not an error to the caller: it keeps the
+ * token it has and the sign-in prompt covers whatever happens next.
  */
 export async function refreshConsumerToken(
   token: string,
-  baseUrl: string,
-  opts: { fetch?: typeof fetch; nowSecs?: number } = {}
+  baseUrl: string
 ): Promise<string | null> {
-  const exp = jwtExpirySecs(token);
-  const now = opts.nowSecs ?? Date.now() / 1000;
-  if (exp === null || exp - now > REFRESH_BEFORE_SECS) {
+  if (!isRefreshDue(token)) {
     return null;
   }
   try {
-    const res = await (opts.fetch ?? fetch)(`${baseUrl}/api/auth/refresh`, {
+    const res = await fetch(`${baseUrl}/api/auth/refresh`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
     });
     if (!res.ok) {
       return null;

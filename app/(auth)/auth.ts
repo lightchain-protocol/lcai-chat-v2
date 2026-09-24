@@ -110,7 +110,7 @@ export const {
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id as string;
         token.walletAddress = user.walletAddress as `0x${string}`;
@@ -120,14 +120,18 @@ export const {
         return token;
       }
 
-      // This session outlives the consumer-api token inside it by weeks.
-      // Every read of the session is a chance to renew that token before it
-      // runs out; the client polls the session for exactly this reason. The
-      // renewed token is written back into the cookie by the session route
-      // (not by auth() inside a server component, which cannot set cookies).
-      // A refusal leaves the old token in place: the chat asks for a
-      // signature once it stops working.
-      if (typeof token.token === "string" && consumerApiBaseUrl) {
+      // This session outlives the consumer-api token inside it by weeks. The
+      // client asks for an update whenever that token is due (see
+      // SIWESessionSync), and that is the one path that writes the renewed
+      // token back into the cookie, so no other read of the session tries:
+      // auth() inside a server component cannot set cookies and would only
+      // spend a request per render. A refusal leaves the old token in place;
+      // the chat asks for a signature once it stops working.
+      if (
+        trigger === "update" &&
+        typeof token.token === "string" &&
+        consumerApiBaseUrl
+      ) {
         const fresh = await refreshConsumerToken(
           token.token,
           consumerApiBaseUrl
