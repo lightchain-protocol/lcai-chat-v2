@@ -309,12 +309,19 @@ function PureMessages({
             // resets mid-flight. Before the answer it stands in for the thinking
             // bubble; once the answer streams it collapses to a slim provenance
             // line, pulled up to sit directly under the assistant message.
+            //
+            // Keyed by the turn's user message so every send gets a fresh
+            // instance. Resetting state inside one instance raced the poll:
+            // its first tick still held the previous job and wrote that job's
+            // completion back into the cleared evidence, so a follow-up
+            // message opened with every step already green.
             <div className={cn(firstTokenSeen && "-mt-2 md:-mt-4")}>
               <PipelineTimeline
                 activeJobs={activeJobs}
                 chatId={chatId}
                 explorerBaseUrl={explorerBaseUrl}
                 firstTokenSeen={firstTokenSeen}
+                key={messages.findLast((m) => m.role === "user")?.id}
                 live={live}
                 progressStatus={protocolProgressStatus as ProtocolLoadingStatus}
               />
