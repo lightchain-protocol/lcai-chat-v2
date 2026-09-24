@@ -14,12 +14,13 @@
  * doesn't support custom headers.
  */
 
+import { hasUsableAuthToken } from "../http";
 import { withMemoryPrefix } from "../memory";
 import type { ProtocolLoadingStatus } from "../types";
 import { recordThroughput } from "../model-throughput";
 import { parseArtifactDescriptor } from "./artifact";
 import { base64ToBytes, bytesToBase64 } from "./base64";
-import type { GatewayClient } from "./gateway-client";
+import { type GatewayClient, ProtocolAuthExpiredError } from "./gateway-client";
 import { isCompletedJobState } from "./job-state";
 import type {
   LifecycleEvent,
@@ -472,6 +473,11 @@ export class ProtocolTransport {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }): Promise<{ response: Response }> {
+    // An expired sign-in would fail at the first consumer-api call, partway
+    // through the pipeline. Refuse up front so the UI asks for a signature.
+    if (!hasUsableAuthToken()) {
+      throw new ProtocolAuthExpiredError();
+    }
     this.warmingOnly = false;
     this.setProgressStatus("preparing_chat");
     // Initialize session on first message. enableWebSearch in the body

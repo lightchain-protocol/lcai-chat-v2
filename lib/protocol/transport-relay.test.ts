@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../http", () => ({ $http: {} }));
+let signedIn = true;
+
+vi.mock("../http", () => ({
+  $http: {},
+  hasUsableAuthToken: () => signedIn,
+}));
 
 const calls: string[] = [];
 
@@ -71,6 +76,7 @@ vi.mock("./session", () => ({
 }));
 
 const { ProtocolTransport } = await import("./transport");
+const { ProtocolAuthExpiredError } = await import("./gateway-client");
 
 describe("ProtocolTransport.sendMessages relay", () => {
   it("re-mints the token and waits for a live socket before submitting", async () => {
@@ -103,5 +109,25 @@ describe("ProtocolTransport.sendMessages relay", () => {
     expect(calls).not.toContain("relay:expired");
     expect(calls.indexOf("connected")).toBeLessThan(submitAt);
     expect(calls.indexOf("refresh")).toBeLessThan(submitAt);
+  });
+
+  it("refuses before anything is sent once the sign-in has expired", async () => {
+    signedIn = false;
+    calls.length = 0;
+    const t = new ProtocolTransport({
+      gateway: {},
+      publicClient: { chain: { id: 1 } },
+    } as never);
+
+    await expect(
+      t.sendMessages({
+        messages: [
+          { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
+        ],
+        body: { id: "chat-1" },
+      })
+    ).rejects.toBeInstanceOf(ProtocolAuthExpiredError);
+    expect(calls).toEqual([]);
+    signedIn = true;
   });
 });

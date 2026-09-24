@@ -66,6 +66,36 @@ export async function getAuthToken(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Whether the consumer-api token can still carry a request. It lives an hour
+ * while the NextAuth session holding it lives for weeks, so a tab left open
+ * keeps looking signed in after every call it makes has started to fail.
+ * Synchronous so a send can be gated on it; `skewSecs` keeps a token that is
+ * about to run out from expiring halfway through the send.
+ */
+export function hasUsableAuthToken(skewSecs = 30): boolean {
+  const token =
+    authTokenCache ??
+    (typeof window === "undefined"
+      ? null
+      : localStorage.getItem(AUTH_TOKEN_KEYS[0]));
+  if (!token) {
+    return false;
+  }
+  try {
+    const payload = JSON.parse(
+      atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))
+    ) as { exp?: unknown };
+    return (
+      typeof payload.exp !== "number" ||
+      payload.exp - skewSecs > Date.now() / 1000
+    );
+  } catch {
+    // ponytail: an unreadable token is left for the server to judge.
+    return true;
+  }
+}
+
 interface RequestOptions extends Omit<RequestInit, "headers"> {
   headers?: HeadersInit;
   auth?: boolean;
