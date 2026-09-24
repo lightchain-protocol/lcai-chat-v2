@@ -171,7 +171,14 @@ export function buildSteps(
       state = "pending";
     } else {
       frontierAssigned = true;
-      state = isError ? "failed" : activeAllowed ? "active" : "pending";
+      // Once the job completed on chain, an error can only be delivery to this
+      // browser; settlement carries on on chain regardless, so it is not the
+      // step that failed.
+      if (isError) {
+        state = completed ? "active" : "failed";
+      } else {
+        state = activeAllowed ? "active" : "pending";
+      }
     }
     // The active step always narrates what it is waiting for.
     const note = state === "active" && !d.note ? ACTIVE_NOTES[d.key] : d.note;

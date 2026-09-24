@@ -484,8 +484,20 @@ export class ProtocolTransport {
     );
     this.setProgressStatus("thinking");
 
-    // Ensure relay is connected
-    this.ensureRelayConnected();
+    // The relay must be live before the job is paid for. A socket that is not
+    // connected right now is rebuilt with a freshly minted token and awaited:
+    // the held token expires an hour after the session opened, so a chat left
+    // idle past that (or restored from sessionStorage) would reconnect with
+    // it, 401 silently, and the worker's answer would be published to a
+    // channel nobody is subscribed to.
+    if (this.relayClient?.getStatus() !== "connected") {
+      await this.connectRelayWithFreshToken();
+      if (this.relayClient) {
+        await this.waitForRelayConnected(this.relayClient, {
+          signal: options.signal,
+        });
+      }
+    }
 
     // Extract plaintext from the last user message
     const lastMessage = options.messages.at(-1);
@@ -1050,41 +1062,15 @@ export class ProtocolTransport {
     this.lastRegisteredApiSessionId = sessionId;
   }
 
-  private ensureRelayConnected() {
-    const relayUrl = this.sessionMgr.getRelayUrl();
-    const relayToken = this.sessionMgr.relayToken;
-    if (!relayUrl || !relayToken) {
-      throw new Error("Relay URL or token not available");
-    }
-
-    if (this.relayClient) {
-      const status = this.relayClient.getStatus();
-      if (status === "connected" || status === "connecting") {
-        return;
-      }
-      // WebSocket is dead — reconnect.
-      this.relayClient.disconnect();
-      this.relayClient = null;
-    }
-
-    this.relayClient = new RelayClient(relayUrl, relayToken);
-    this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
-    this.relayClient.onReconnect(() => this.handleReconnect());
-    this.relayClient.connect();
-  }
-
   /**
    * Tears down any existing relay socket and opens a new one authenticated with
    * a freshly-minted relay token for the active session.
    *
-   * `ensureRelayConnected` deliberately reuses a live socket and whatever token
-   * it already holds — correct for a long chat session that keeps the same
-   * connection warm. A one-off speech job is the opposite case: the session
-   * (and its token) may have been restored from a previous page load or reused
-   * for many minutes, so the held token can be expired. Reconnecting with a
-   * stale token silently 401s at the relay and the response is never routed, so
-   * this re-mints the token (the same acquisition `initialize` uses) and binds
-   * the new socket to it before anything is submitted.
+   * A session (and its token) may have been restored from a previous page load
+   * or reused for many minutes, so the held token can be expired. Reconnecting
+   * with a stale token silently 401s at the relay and the response is never
+   * routed, so this re-mints the token (the same acquisition `initialize`
+   * uses) and binds the new socket to it before anything is submitted.
    */
   private async connectRelayWithFreshToken(): Promise<void> {
     await this.sessionMgr.refreshRelayToken();
@@ -1128,7 +1114,12 @@ export class ProtocolTransport {
     return new Promise<void>((resolve, reject) => {
       const check = () => {
         if (opts?.signal?.aborted) {
-          reject(new DOMException("Speech synthesis cancelled", "AbortError"));
+          reject(
+            new DOMException(
+              "Cancelled while connecting to the relay",
+              "AbortError"
+            )
+          );
           return;
         }
         if (relayClient.getStatus() === "connected") {
