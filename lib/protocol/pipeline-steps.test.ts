@@ -65,6 +65,28 @@ describe("buildSteps", () => {
     );
   });
 
+  it("does not blame settlement when delivery failed after on-chain completion", () => {
+    // The answer never reached the browser, but the job completed on chain and
+    // settles there regardless — the failure belongs to delivery, not Settled.
+    const { steps } = buildSteps(job(), { jobState: 2 }, false, true, false);
+    expect(steps.some((s) => s.state === "failed")).toBe(false);
+    expect(stateOf(steps, "settled")).toBe("active");
+    expect(steps.find((s) => s.key === "settled")?.note).toBe(
+      "awaiting the dispute window"
+    );
+  });
+
+  it("still marks the frontier failed when the job never completed", () => {
+    const { steps } = buildSteps(
+      job(),
+      { acknowledged: true },
+      false,
+      true,
+      false
+    );
+    expect(stateOf(steps, "generating")).toBe("failed");
+  });
+
   it("marks Completed from the JobCompleted log and links its transaction", () => {
     const ev: Evidence = { completed: { txHash: "0xabc" } };
     const { steps } = buildSteps(job(), ev, true, false, false);

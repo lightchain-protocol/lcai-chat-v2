@@ -38,7 +38,7 @@ import {
   switchBranch,
 } from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
-import { $http } from "@/lib/http";
+import { $http, hasUsableAuthToken } from "@/lib/http";
 import {
   addMemoryEntry,
   EMPTY_MEMORY_STORE,
@@ -325,9 +325,35 @@ export function Chat({
   const prepaid = usePrepaidBalance();
   const submitMode = "auto"; // prepaid.ready ? "auto" : "wallet";
 
+  // The consumer-api token behind every call expires an hour after sign-in,
+  // long before the NextAuth session holding it, so a tab left open ends up
+  // looking signed in with a dead token. Ask for a fresh signature: a plain
+  // open() on a connected wallet only shows the account view. Connection is
+  // read through a ref because useChat keeps the onError it was created with.
+  const isConnectedRef = useRef(isConnected);
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
+  const promptSignIn = useCallback(() => {
+    toast.custom((errorId) => (
+      <AlertError
+        id={errorId}
+        title="Your session expired. Please sign in with your wallet again."
+      />
+    ));
+    // AppKit routes any view at runtime (its own SIWX flow opens this one);
+    // SIWXSignMessage is only missing from the public Views type.
+    open(
+      isConnectedRef.current
+        ? ({ view: "SIWXSignMessage" } as never)
+        : undefined
+    );
+  }, [open]);
+
   // Guard run before every user-initiated send. Returns false (and surfaces the
   // appropriate modal) when the prompt can't be answered:
   //   - no wallet connected      -> AppKit connect modal
+  //   - sign-in token expired    -> wallet signature prompt
   //   - connected but not "ready" -> prepaid top-up / authorize dialog
   // While the prepaid read is still loading we let the send through; submitMode
   // "auto" falls back to the per-prompt wallet path, so we don't false-block on
@@ -336,6 +362,11 @@ export function Chat({
   const canPrompt = useCallback((): boolean => {
     if (!isConnected) {
       open();
+      return false;
+    }
+    // Checked before anything is sent, so the draft stays in the composer.
+    if (!hasUsableAuthToken()) {
+      promptSignIn();
       return false;
     }
     if (prepaid.available && !prepaid.isLoading && !prepaid.ready) {
@@ -359,6 +390,7 @@ export function Chat({
   }, [
     isConnected,
     open,
+    promptSignIn,
     prepaid.available,
     prepaid.isLoading,
     prepaid.ready,
@@ -659,13 +691,7 @@ export function Chat({
         recordModelOutcome(lastSentModelRef.current, "failed");
       }
       if (isProtocolAuthExpiredError(error)) {
-        toast.custom((errorId) => (
-          <AlertError
-            id={errorId}
-            title="Your session expired. Please sign in with your wallet again."
-          />
-        ));
-        open();
+        promptSignIn();
         return;
       }
 

@@ -1,4 +1,5 @@
 import { auth as authSession } from "@/app/(auth)/auth";
+import { jwtExpirySecs } from "@/lib/jwt";
 
 const AUTH_TOKEN_KEYS = ["user-token"] as const;
 let authTokenCache: string | null = null;
@@ -64,6 +65,29 @@ export async function getAuthToken(): Promise<string | null> {
   }
 
   return null;
+}
+
+/** A token this close to its exp counts as gone, so a send never expires mid-flight. */
+const AUTH_TOKEN_SKEW_SECS = 30;
+
+/**
+ * Whether the consumer-api token can still carry a request. It lives an hour
+ * while the NextAuth session holding it lives for weeks, so a tab left open
+ * keeps looking signed in after every call it makes has started to fail.
+ * Synchronous so a send can be gated on it.
+ */
+export function hasUsableAuthToken(): boolean {
+  const token =
+    authTokenCache ??
+    (typeof window === "undefined"
+      ? null
+      : localStorage.getItem(AUTH_TOKEN_KEYS[0]));
+  if (!token) {
+    return false;
+  }
+  const exp = jwtExpirySecs(token);
+  // ponytail: an unreadable token is left for the server to judge.
+  return exp === null || exp - AUTH_TOKEN_SKEW_SECS > Date.now() / 1000;
 }
 
 interface RequestOptions extends Omit<RequestInit, "headers"> {

@@ -1,4 +1,4 @@
-import { GatewayClientError } from "./gateway-client";
+import { GatewayClientError, ProtocolAuthExpiredError } from "./gateway-client";
 
 /**
  * Turns a raw protocol/transport error into one calm sentence a user can act
@@ -12,6 +12,10 @@ export function friendlyProtocolError(
   modelName?: string
 ): string {
   const subject = modelName ? `“${modelName}”` : "This model";
+
+  if (err instanceof ProtocolAuthExpiredError) {
+    return "Your session expired — sign in with your wallet again and retry.";
+  }
 
   if (err instanceof GatewayClientError) {
     let code = "";
