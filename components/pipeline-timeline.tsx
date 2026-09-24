@@ -394,10 +394,22 @@ function PurePipelineTimeline({
   const [expanded, setExpanded] = useState(false);
   const fromBlockRef = useRef<bigint | null>(null);
   const prevLiveRef = useRef(false);
+  // Bumped on every fresh send. A poll result is written only if it was read
+  // for the current turn, so a tick still in flight for the previous job can't
+  // repaint the new one.
+  const turnRef = useRef(0);
 
-  // Each fresh send drops the previous job and clears its evidence + scan window.
+  // Each fresh send (including a regenerate or an edited resend) drops the
+  // previous job and clears its evidence + scan window. The refs are cleared
+  // here too, not just the state: the poll effect runs later in this same
+  // commit and its first tick reads the refs before the reset re-renders, so
+  // it would otherwise read the previous job and write its Completed state
+  // straight back into the cleared evidence.
   useEffect(() => {
     if (live && !prevLiveRef.current) {
+      turnRef.current += 1;
+      jobRef.current = undefined;
+      evidenceRef.current = {};
       setCurrentJobId(null);
       setEvidence({});
       setExpanded(false);
@@ -466,7 +478,9 @@ function PurePipelineTimeline({
       const job = jobRef.current;
       // biome-ignore lint/nursery/noShadow: same as above, for evidence.
       const evidence = evidenceRef.current;
-      if (cancelled) return;
+      const turn = turnRef.current;
+      const stale = () => cancelled || turn !== turnRef.current;
+      if (stale()) return;
       try {
         if (fromBlockRef.current === null) {
           try {
@@ -495,7 +509,7 @@ function PurePipelineTimeline({
             toBlock: "latest",
           });
           const match = logs.at(-1);
-          if (match && !cancelled) {
+          if (match && !stale()) {
             setEvidence((prev) =>
               prev.session
                 ? prev
@@ -521,7 +535,7 @@ function PurePipelineTimeline({
             toBlock: "latest",
           });
           const match = logs.at(-1);
-          if (match && !cancelled) {
+          if (match && !stale()) {
             setEvidence((prev) =>
               prev.job
                 ? prev
@@ -549,7 +563,7 @@ function PurePipelineTimeline({
               ackTimestamp: bigint;
               responseBlobHash: string;
             };
-            if (!cancelled) {
+            if (!stale()) {
               const ack = Number(j.state) >= 1 || Number(j.ackTimestamp) > 0;
               const committed = !isZeroHash(j.responseBlobHash);
               const state = Number(j.state);
@@ -583,7 +597,7 @@ function PurePipelineTimeline({
               toBlock: "latest",
             });
             const match = logs.at(-1);
-            if (match && !cancelled) {
+            if (match && !stale()) {
               setEvidence((prev) =>
                 prev.completed
                   ? prev
