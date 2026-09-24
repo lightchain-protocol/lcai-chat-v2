@@ -331,7 +331,9 @@ export function Chat({
   // open() on a connected wallet only shows the account view. Connection is
   // read through a ref because useChat keeps the onError it was created with.
   const isConnectedRef = useRef(isConnected);
-  isConnectedRef.current = isConnected;
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
   const promptSignIn = useCallback(() => {
     toast.custom((errorId) => (
       <AlertError

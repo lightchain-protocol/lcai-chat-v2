@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 let signedIn = true;
 
@@ -78,12 +78,40 @@ vi.mock("./session", () => ({
 const { ProtocolTransport } = await import("./transport");
 const { ProtocolAuthExpiredError } = await import("./gateway-client");
 
+function relayTokenExpiringIn(secs: number): string {
+  const payload = { exp: Math.floor(Date.now() / 1000) + secs };
+  const b64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `eyJhbGciOiJFUzI1NksifQ.${b64}.sig`;
+}
+
+function makeTransport() {
+  return new ProtocolTransport({
+    gateway: {},
+    publicClient: { chain: { id: 1 } },
+  } as never);
+}
+
+function sendHi(t: InstanceType<typeof ProtocolTransport>) {
+  return t
+    .sendMessages({
+      messages: [
+        { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      ],
+      body: { id: "chat-1", trigger: "regenerate-message" },
+    })
+    .catch(() => {
+      // Later persistence steps are not mocked; the ordering is the point.
+    });
+}
+
 describe("ProtocolTransport.sendMessages relay", () => {
+  afterEach(() => {
+    signedIn = true;
+    calls.length = 0;
+  });
+
   it("re-mints the token and waits for a live socket before submitting", async () => {
-    const t = new ProtocolTransport({
-      gateway: {},
-      publicClient: { chain: { id: 1 } },
-    } as never);
+    const t = makeTransport();
     // The socket from an hour ago has dropped; its token has expired.
     (t as unknown as { relayClient: unknown }).relayClient = {
       getStatus: () => "disconnected",
@@ -92,16 +120,7 @@ describe("ProtocolTransport.sendMessages relay", () => {
       },
     };
 
-    await t
-      .sendMessages({
-        messages: [
-          { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
-        ],
-        body: { id: "chat-1", trigger: "regenerate-message" },
-      })
-      .catch(() => {
-        // Later persistence steps are not mocked; the ordering is the point.
-      });
+    await sendHi(t);
 
     const submitAt = calls.indexOf("submit");
     expect(calls.indexOf("refresh")).toBeGreaterThanOrEqual(0);
@@ -111,13 +130,35 @@ describe("ProtocolTransport.sendMessages relay", () => {
     expect(calls.indexOf("refresh")).toBeLessThan(submitAt);
   });
 
+  it("keeps a held relay token that still has time left", async () => {
+    const t = makeTransport();
+    const live = relayTokenExpiringIn(3000);
+    (
+      t as unknown as { sessionMgr: { relayToken: string } }
+    ).sessionMgr.relayToken = live;
+
+    await sendHi(t);
+
+    expect(calls).not.toContain("refresh");
+    expect(calls).toContain(`relay:${live}`);
+    expect(calls.indexOf("connected")).toBeLessThan(calls.indexOf("submit"));
+  });
+
+  it("re-mints a held relay token that is about to run out", async () => {
+    const t = makeTransport();
+    (
+      t as unknown as { sessionMgr: { relayToken: string } }
+    ).sessionMgr.relayToken = relayTokenExpiringIn(60);
+
+    await sendHi(t);
+
+    expect(calls.indexOf("refresh")).toBeLessThan(calls.indexOf("submit"));
+    expect(calls).toContain("relay:fresh");
+  });
+
   it("refuses before anything is sent once the sign-in has expired", async () => {
     signedIn = false;
-    calls.length = 0;
-    const t = new ProtocolTransport({
-      gateway: {},
-      publicClient: { chain: { id: 1 } },
-    } as never);
+    const t = makeTransport();
 
     await expect(
       t.sendMessages({
@@ -128,6 +169,5 @@ describe("ProtocolTransport.sendMessages relay", () => {
       })
     ).rejects.toBeInstanceOf(ProtocolAuthExpiredError);
     expect(calls).toEqual([]);
-    signedIn = true;
   });
 });

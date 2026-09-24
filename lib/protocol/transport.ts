@@ -15,6 +15,7 @@
  */
 
 import { hasUsableAuthToken } from "../http";
+import { jwtExpirySecs } from "../jwt";
 import { withMemoryPrefix } from "../memory";
 import type { ProtocolLoadingStatus } from "../types";
 import { recordThroughput } from "../model-throughput";
@@ -91,6 +92,9 @@ const SPEECH_SYNTHESIS_DEADLINE_MS = 180_000;
  * wait for the socket to be genuinely connected before it submits.
  */
 const RELAY_CONNECT_DEADLINE_MS = 20_000;
+
+/** A held relay token with less than this left is re-minted before a socket is opened with it. */
+const RELAY_TOKEN_MIN_LEFT_SECS = 5 * 60;
 
 /**
  * A response stream whose relay subscription is wired up independently of the
@@ -488,22 +492,16 @@ export class ProtocolTransport {
     await this.sessionMgr.initialize(
       enableWebSearch ? { requiredCapabilities: ["search"] } : undefined
     );
-    this.setProgressStatus("thinking");
 
     // The relay must be live before the job is paid for. A socket that is not
-    // connected right now is rebuilt with a freshly minted token and awaited:
-    // the held token expires an hour after the session opened, so a chat left
-    // idle past that (or restored from sessionStorage) would reconnect with
-    // it, 401 silently, and the worker's answer would be published to a
-    // channel nobody is subscribed to.
+    // connected right now is rebuilt and awaited, on a fresh token if the held
+    // one is near its hour: a chat left idle past that (or restored from
+    // sessionStorage) would otherwise reconnect with it, 401 silently, and the
+    // worker's answer would be published to a channel nobody is subscribed to.
     if (this.relayClient?.getStatus() !== "connected") {
-      await this.connectRelayWithFreshToken();
-      if (this.relayClient) {
-        await this.waitForRelayConnected(this.relayClient, {
-          signal: options.signal,
-        });
-      }
+      await this.openRelay(options.signal);
     }
+    this.setProgressStatus("thinking");
 
     // Extract plaintext from the last user message
     const lastMessage = options.messages.at(-1);
@@ -714,14 +712,16 @@ export class ProtocolTransport {
     if (!plaintext) {
       throw new Error("No text to synthesize");
     }
+    // Same gate as sendMessages; without it an expired sign-in fails inside
+    // establish and the retry below throws away a perfectly good session.
+    if (!hasUsableAuthToken()) {
+      throw new ProtocolAuthExpiredError();
+    }
 
-    // Establish a session with a LIVE relay socket. A session (and its
-    // sessionStorage snapshot) outlives its short-lived relay token, so a
-    // restored/long-reused session can hand back an on-chain-valid session
-    // whose token has expired — connecting with it silently 401s and the
-    // worker's answer is never routed. So: initialize, re-mint the token, open
-    // a socket with it, and wait for the authenticated handshake. If any of
-    // that fails on a reused session, throw it away and build a fresh one once.
+    // Establish a session with a LIVE relay socket: initialize, open a socket
+    // with a token that still has time left (see openRelay), and wait for the
+    // authenticated handshake. If any of that fails on a reused session, throw
+    // it away and build a fresh one once.
     const establish = async (): Promise<RelayClient> => {
       this.setProgressStatus("preparing_chat");
       await this.sessionMgr.initialize();
@@ -731,14 +731,7 @@ export class ProtocolTransport {
       if (this.sessionMgr.sessionId === null) {
         throw new Error("Session ID not available after initialization");
       }
-      this.setProgressStatus("waiting_for_relay");
-      await this.connectRelayWithFreshToken();
-      const client = this.relayClient;
-      if (!client) {
-        throw new Error("Relay client not connected");
-      }
-      await this.waitForRelayConnected(client, { signal: opts?.signal });
-      return client;
+      return this.openRelay(opts?.signal);
     };
 
     let relayClient: RelayClient;
@@ -1069,17 +1062,20 @@ export class ProtocolTransport {
   }
 
   /**
-   * Tears down any existing relay socket and opens a new one authenticated with
-   * a freshly-minted relay token for the active session.
-   *
-   * A session (and its token) may have been restored from a previous page load
-   * or reused for many minutes, so the held token can be expired. Reconnecting
-   * with a stale token silently 401s at the relay and the response is never
-   * routed, so this re-mints the token (the same acquisition `initialize`
-   * uses) and binds the new socket to it before anything is submitted.
+   * Tears down any existing relay socket and opens a new one, resolving once
+   * the handshake has authenticated. The held token is reused while it has
+   * time left (a new session has just minted it) and re-minted otherwise: a
+   * session and its sessionStorage snapshot outlive the hour-long token, and
+   * a socket opened with a stale one silently 401s at the relay, so nothing
+   * it answers is ever routed.
    */
-  private async connectRelayWithFreshToken(): Promise<void> {
-    await this.sessionMgr.refreshRelayToken();
+  private async openRelay(signal?: AbortSignal): Promise<RelayClient> {
+    this.setProgressStatus("waiting_for_relay");
+    const held = this.sessionMgr.relayToken;
+    const exp = held ? jwtExpirySecs(held) : null;
+    if (exp === null || exp - Date.now() / 1000 < RELAY_TOKEN_MIN_LEFT_SECS) {
+      await this.sessionMgr.refreshRelayToken();
+    }
 
     const relayUrl = this.sessionMgr.getRelayUrl();
     const relayToken = this.sessionMgr.relayToken;
@@ -1087,15 +1083,21 @@ export class ProtocolTransport {
       throw new Error("Relay URL or token not available");
     }
 
-    if (this.relayClient) {
-      this.relayClient.disconnect();
+    this.relayClient?.disconnect();
+    const client = new RelayClient(relayUrl, relayToken);
+    client.onLifecycle((event) => this.handleLifecycleEvent(event));
+    client.onReconnect(() => this.handleReconnect());
+    this.relayClient = client;
+    client.connect();
+    try {
+      await this.waitForRelayConnected(client, { signal });
+    } catch (err) {
+      // Nothing will be submitted; don't leave the socket retrying behind.
+      client.disconnect();
       this.relayClient = null;
+      throw err;
     }
-
-    this.relayClient = new RelayClient(relayUrl, relayToken);
-    this.relayClient.onLifecycle((event) => this.handleLifecycleEvent(event));
-    this.relayClient.onReconnect(() => this.handleReconnect());
-    this.relayClient.connect();
+    return client;
   }
 
   /**

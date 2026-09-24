@@ -173,7 +173,8 @@ export function buildSteps(
       frontierAssigned = true;
       // Once the job completed on chain, an error can only be delivery to this
       // browser; settlement carries on on chain regardless, so it is not the
-      // step that failed.
+      // step that failed. It stays active whether or not anything is still
+      // watching, exactly as it does after a delivered answer.
       if (isError) {
         state = completed ? "active" : "failed";
       } else {
