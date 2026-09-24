@@ -108,7 +108,10 @@ export default async function RootLayout({
             position="top-right"
           />
           <Web3WalletProvider cookies={cookies}>
-            <SessionProvider>
+            {/* The poll is what renews the consumer-api token while a tab
+                stays open; see SIWESessionSync. Focus refetch is on by default,
+                so a laptop opened after hours renews on wake. */}
+            <SessionProvider refetchInterval={5 * 60}>
               <SIWESessionSync />
               {children}
             </SessionProvider>

@@ -1,7 +1,15 @@
 import NextAuth, { type DefaultSession } from "next-auth";
 import type { DefaultJWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
+import { refreshConsumerToken } from "@/lib/siwe/refresh";
 import { authConfig } from "./auth.config";
+
+// Server-side fetch from inside the Next.js container: prefer the internal
+// compose-DNS URL. The public URL (localhost:8090) does not route to
+// consumer-api from within the frontend container.
+const consumerApiBaseUrl =
+  process.env.CONSUMER_API_INTERNAL_URL ??
+  process.env.NEXT_PUBLIC_CONSUMER_API_URL;
 
 export type UserType = {
   id: string;
@@ -53,12 +61,6 @@ export const {
             return null;
           }
 
-          // Server-side fetch from inside the Next.js container: prefer the
-          // internal compose-DNS URL. The public URL (localhost:8090) does not
-          // route to consumer-api from within the frontend container.
-          const consumerApiBaseUrl =
-            process.env.CONSUMER_API_INTERNAL_URL ??
-            process.env.NEXT_PUBLIC_CONSUMER_API_URL;
           if (!consumerApiBaseUrl) {
             console.error("Consumer API URL is not configured");
             return null;
@@ -108,13 +110,31 @@ export const {
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
+    async jwt({ token, user }) {
       if (user) {
         token.id = user.id as string;
         token.walletAddress = user.walletAddress as `0x${string}`;
         token.username = user.username as string;
         token.token = user.token as string;
         token.type = user.type;
+        return token;
+      }
+
+      // This session outlives the consumer-api token inside it by weeks.
+      // Every read of the session is a chance to renew that token before it
+      // runs out; the client polls the session for exactly this reason. The
+      // renewed token is written back into the cookie by the session route
+      // (not by auth() inside a server component, which cannot set cookies).
+      // A refusal leaves the old token in place: the chat asks for a
+      // signature once it stops working.
+      if (typeof token.token === "string" && consumerApiBaseUrl) {
+        const fresh = await refreshConsumerToken(
+          token.token,
+          consumerApiBaseUrl
+        );
+        if (fresh) {
+          token.token = fresh;
+        }
       }
 
       return token;
