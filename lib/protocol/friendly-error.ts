@@ -32,7 +32,7 @@ export function friendlyProtocolError(
       return "The network is busy right now — please try again in a moment.";
     }
     if (err.status === 402) {
-      return "That request needs a small testnet fee that couldn’t be reserved — check your balance and retry.";
+      return `${subject} costs more than your prepaid balance covers — top up and retry.`;
     }
     if (err.status === 403 || code === "delegate_not_authorized") {
       return "Your wallet isn’t authorized to start a session yet — reconnect it and try again.";

@@ -321,7 +321,7 @@ export function Chat({
 
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
-  // stale read or a balance dip falls back to the wallet path gracefully.
+  // stale read falls back to the wallet path gracefully (see walletMayRetry).
   const prepaid = usePrepaidBalance();
   const submitMode = "auto"; // prepaid.ready ? "auto" : "wallet";
 
@@ -355,10 +355,10 @@ export function Chat({
   //   - no wallet connected      -> AppKit connect modal
   //   - sign-in token expired    -> wallet signature prompt
   //   - connected but not "ready" -> prepaid top-up / authorize dialog
-  // While the prepaid read is still loading we let the send through; submitMode
-  // "auto" falls back to the per-prompt wallet path, so we don't false-block on
-  // a slow on-chain read. When prepaid isn't configured (`available` false) the
-  // gate is a no-op.
+  // While the prepaid read is still loading we let the send through, so we
+  // don't false-block on a slow on-chain read; a real shortfall still comes
+  // back as the consumer-api's 402. When prepaid isn't configured
+  // (`available` false) the gate is a no-op.
   const canPrompt = useCallback((): boolean => {
     if (!isConnected) {
       open();
