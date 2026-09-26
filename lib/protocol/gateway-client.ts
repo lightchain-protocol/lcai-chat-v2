@@ -5,6 +5,8 @@
  * Base URL comes from NEXT_PUBLIC_CONSUMER_API_URL env var.
  */
 
+import { formatEther } from "viem";
+
 export type ModelInfo = {
   id: string;
   name: string;
@@ -105,16 +107,34 @@ export class DelegatedSubmitUnavailableError extends Error {
 
 /**
  * Whether "auto" submit mode may retry a refused delegated submit through the
- * user's wallet. A delegate that isn't authorized or a route that isn't there
- * can be worked around; a prepaid shortfall can't — the 402 is decoded from
- * the chain's own simulate, and quietly asking the wallet to pay the fee
- * instead hid "not enough prepaid balance" from the user.
+ * user's wallet: yes for a delegate that isn't authorized or a route that
+ * isn't there; no for a prepaid shortfall, which the user has to see.
  */
 export function walletMayRetry(err: unknown): boolean {
   return (
     err instanceof DelegateNotAuthorizedError ||
     err instanceof DelegatedSubmitUnavailableError
   );
+}
+
+/**
+ * The sentence a user sees when the delegated submit is refused with 402.
+ * The chat shows the error's message verbatim, so it carries the fee and
+ * what is left when the consumer-api reports them. Topping up through the
+ * chat also raises the spending limit, so it fixes both refusal codes.
+ */
+function prepaidShortfallMessage(body: {
+  required?: string;
+  available?: string;
+}): string {
+  try {
+    if (body.required && body.available) {
+      return `This prompt costs ${formatEther(BigInt(body.required))} LCAI but only ${formatEther(BigInt(body.available))} LCAI of your prepaid balance is available — top up and retry.`;
+    }
+  } catch {
+    // A malformed amount falls through to the plain sentence.
+  }
+  return "Your prepaid balance doesn’t cover this prompt — top up and retry.";
 }
 
 export type TokenResponse = {
@@ -371,7 +391,10 @@ export class GatewayClient {
       throw new DelegateNotAuthorizedError(body.delegate ?? "");
     }
     if (res.status === 402) {
-      throw new InsufficientPrepaidBalanceError();
+      const body = await res
+        .json()
+        .catch(() => ({}) as { required?: string; available?: string });
+      throw new InsufficientPrepaidBalanceError(prepaidShortfallMessage(body));
     }
     // Every refusal except 500 is sent before the broadcast (validation,
     // pre-flight chain reads, busy submitter, a deployment without the route).

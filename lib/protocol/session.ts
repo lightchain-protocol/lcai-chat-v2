@@ -574,9 +574,9 @@ export class SessionManager {
    * Then, based on `getSubmitMode()`:
    *  - "delegated"/"auto": call the consumer-api `POST /api/sessions/:id/messages`
    *    which runs `submitJobOnBehalf`, debiting the user's prepaid balance — no
-   *    wallet popup. "auto" falls back to the wallet path when the
-   *    consumer-api refused before broadcasting (reusing the blob), except
-   *    for a prepaid shortfall, which is surfaced instead (walletMayRetry).
+   *    wallet popup. "auto" may fall back to the wallet path when the
+   *    consumer-api refused before broadcasting, reusing the blob
+   *    (see walletMayRetry).
    *  - "wallet": user signs a `submitJob` type-2 TX per prompt (legacy).
    *
    * The blob-then-submit split exists because browser wallets (MetaMask)
@@ -638,7 +638,7 @@ export class SessionManager {
         if (mode === "delegated" || !walletMayRetry(err)) {
           throw err;
         }
-        // mode === "auto" + recoverable → fall through to the wallet path,
+        // mode === "auto" + walletMayRetry → fall through to the wallet path,
         // reusing the blob we already uploaded.
       }
     }

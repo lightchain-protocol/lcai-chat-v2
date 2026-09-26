@@ -32,8 +32,6 @@ export function friendlyProtocolError(
       return "The network is busy right now — please try again in a moment.";
     }
     if (err.status === 402) {
-      // 402 covers both an empty prepaid balance and a spending limit below
-      // this model's fee; fees differ per model, so name it.
       return `${subject} costs more than your prepaid balance covers — top up and retry.`;
     }
     if (err.status === 403 || code === "delegate_not_authorized") {
