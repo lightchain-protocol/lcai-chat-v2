@@ -50,12 +50,7 @@ import type {
   SortitionRequestResponse,
   TokenResponse,
 } from "./gateway-client";
-import {
-  DelegatedSubmitUnavailableError,
-  DelegateNotAuthorizedError,
-  GatewayClientError,
-  InsufficientPrepaidBalanceError,
-} from "./gateway-client";
+import { GatewayClientError, walletMayRetry } from "./gateway-client";
 import { preferenceRequestFields } from "../worker-preference";
 
 /**
@@ -579,8 +574,9 @@ export class SessionManager {
    * Then, based on `getSubmitMode()`:
    *  - "delegated"/"auto": call the consumer-api `POST /api/sessions/:id/messages`
    *    which runs `submitJobOnBehalf`, debiting the user's prepaid balance — no
-   *    wallet popup. "auto" falls back to the wallet path whenever the
-   *    consumer-api refused before broadcasting (reusing the blob).
+   *    wallet popup. "auto" falls back to the wallet path when the
+   *    consumer-api refused before broadcasting (reusing the blob), except
+   *    for a prepaid shortfall, which is surfaced instead (walletMayRetry).
    *  - "wallet": user signs a `submitJob` type-2 TX per prompt (legacy).
    *
    * The blob-then-submit split exists because browser wallets (MetaMask)
@@ -639,11 +635,7 @@ export class SessionManager {
 
         return { jobId: Number(result.jobId), txHash: result.txHash };
       } catch (err) {
-        const recoverable =
-          err instanceof DelegateNotAuthorizedError ||
-          err instanceof InsufficientPrepaidBalanceError ||
-          err instanceof DelegatedSubmitUnavailableError;
-        if (mode === "delegated" || !recoverable) {
+        if (mode === "delegated" || !walletMayRetry(err)) {
           throw err;
         }
         // mode === "auto" + recoverable → fall through to the wallet path,

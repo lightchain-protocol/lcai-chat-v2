@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DelegatedSubmitUnavailableError,
+  DelegateNotAuthorizedError,
   GatewayClient,
   GatewayClientError,
+  InsufficientPrepaidBalanceError,
+  walletMayRetry,
 } from "./gateway-client";
 
 const auth = {
@@ -34,5 +37,16 @@ describe("delegated submit refusals", () => {
     const err = await submitWithStatus(500).catch((e) => e);
     expect(err).toBeInstanceOf(GatewayClientError);
     expect(err).not.toBeInstanceOf(DelegatedSubmitUnavailableError);
+  });
+
+  it("HTTP 402 is a prepaid shortfall the user must see, not a wallet retry", async () => {
+    const err = await submitWithStatus(402).catch((e) => e);
+    expect(err).toBeInstanceOf(InsufficientPrepaidBalanceError);
+    expect(walletMayRetry(err)).toBe(false);
+  });
+
+  it("a missing delegate or an unavailable route may retry through the wallet", () => {
+    expect(walletMayRetry(new DelegateNotAuthorizedError("0x01"))).toBe(true);
+    expect(walletMayRetry(new DelegatedSubmitUnavailableError(503))).toBe(true);
   });
 });

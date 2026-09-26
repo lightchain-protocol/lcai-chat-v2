@@ -321,7 +321,8 @@ export function Chat({
 
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
-  // stale read or a balance dip falls back to the wallet path gracefully.
+  // stale read falls back to the wallet path gracefully; a real prepaid
+  // shortfall is surfaced as one instead (see walletMayRetry).
   const prepaid = usePrepaidBalance();
   const submitMode = "auto"; // prepaid.ready ? "auto" : "wallet";
 
