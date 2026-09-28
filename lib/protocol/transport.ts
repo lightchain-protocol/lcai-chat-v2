@@ -39,7 +39,11 @@ import {
 import type { SettlementEvent, SettlementProgress } from "./settlement";
 import { reduceSettlement } from "./settlement";
 import { StreamMetricsTracker } from "./stream-metrics";
-import { captureResponseProof, decodeBase64ToBytes } from "./verify-response";
+import {
+  captureResponseProof,
+  decodeBase64ToBytes,
+  unwrapResponseEnvelope,
+} from "./verify-response";
 
 /**
  * Hard ceiling on how long the user-message POST may wait for a jobId before
@@ -1784,8 +1788,12 @@ export class ProtocolTransport {
         }
 
         if (wsFrame.payload) {
-          const decrypted = await sessionMgr.decryptResponse(wsFrame.payload);
+          const raw = await sessionMgr.decryptResponse(wsFrame.payload);
           this.setProgressStatus("reasoning");
+          // The terminal frame of a search job wraps the answer in the
+          // committed v2 envelope; chunk frames are always plain text.
+          const decrypted =
+            wsFrame.type === "complete" ? unwrapResponseEnvelope(raw) : raw;
           if (wsFrame.type === "complete") {
             // Capture the verification evidence while the ciphertext is still
             // in hand. It is never persisted, so this is the only chance to

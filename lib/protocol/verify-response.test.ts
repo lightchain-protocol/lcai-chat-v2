@@ -6,6 +6,7 @@ import {
   checkProofAgainstChain,
   recoverProofSigner,
   responseMismatchDigest,
+  unwrapResponseEnvelope,
 } from "./verify-response";
 
 // Fixed domain inputs matching devnet-v2; the digest/ciphertext-hash values
@@ -192,5 +193,25 @@ describe("checkProofAgainstChain with render-time recovery", () => {
     );
     expect(result.status).toBe("unverified");
     expect(result.ciphertextMatches).toBeNull();
+  });
+});
+
+describe("unwrapResponseEnvelope", () => {
+  it("shows only the answer of a search job's v2 envelope", () => {
+    const envelope = JSON.stringify({
+      v: 2,
+      answer: "Paris [1]",
+      searchContext: [{ position: 1, title: "t", url: "u", snippet: "s" }],
+      templateVersion: 1,
+    });
+    expect(unwrapResponseEnvelope(envelope)).toBe("Paris [1]");
+  });
+
+  it("passes plain answers through unchanged", () => {
+    expect(unwrapResponseEnvelope("plain answer")).toBe("plain answer");
+    expect(unwrapResponseEnvelope('{"v":2,"answer":"no sources"}')).toBe(
+      '{"v":2,"answer":"no sources"}'
+    );
+    expect(unwrapResponseEnvelope("{not json")).toBe("{not json");
   });
 });

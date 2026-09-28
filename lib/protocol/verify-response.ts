@@ -283,3 +283,25 @@ export function checkProofAgainstChain(
 
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+/**
+ * A search job's terminal frame carries the worker's v2 response envelope
+ * `{v: 2, answer, searchContext}`: the exact bytes committed on chain, so the
+ * ciphertext hash above verifies. Only `answer` is shown. Mirrors
+ * searchaug.DecodeResponse in pkg; anything else passes through unchanged.
+ */
+export function unwrapResponseEnvelope(text: string): string {
+  if (!text.startsWith("{")) {
+    return text;
+  }
+  try {
+    const env = JSON.parse(text);
+    return env?.v === 2 &&
+      typeof env.answer === "string" &&
+      Array.isArray(env.searchContext)
+      ? env.answer
+      : text;
+  } catch {
+    return text;
+  }
+}
