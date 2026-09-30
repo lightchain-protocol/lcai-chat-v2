@@ -83,6 +83,22 @@ export class InsufficientPrepaidBalanceError extends Error {
   }
 }
 
+/**
+ * The consumer-api's rate limiter refused the submit. The wallet path would
+ * skip the limit, so the user is told to wait instead. The message carries
+ * the wait from the body: the API's CORS config hides `retry-after`.
+ */
+export class RateLimitedError extends Error {
+  constructor(retryAfterSec?: number) {
+    super(
+      typeof retryAfterSec === "number" && retryAfterSec > 0
+        ? `Too many requests — wait ${retryAfterSec}s and retry.`
+        : "Too many requests — wait a moment and retry."
+    );
+    this.name = "RateLimitedError";
+  }
+}
+
 export class DelegateNotAuthorizedError extends Error {
   readonly delegate: string;
   constructor(delegate: string) {
@@ -108,7 +124,8 @@ export class DelegatedSubmitUnavailableError extends Error {
 /**
  * Whether "auto" submit mode may retry a refused delegated submit through the
  * user's wallet: yes for a delegate that isn't authorized or a route that
- * isn't there; no for a prepaid shortfall, which the user has to see.
+ * isn't there; no for a prepaid shortfall or a rate limit, which the user has
+ * to see.
  */
 export function walletMayRetry(err: unknown): boolean {
   return (
@@ -396,7 +413,13 @@ export class GatewayClient {
         .catch(() => ({}) as { required?: string; available?: string });
       throw new InsufficientPrepaidBalanceError(prepaidShortfallMessage(body));
     }
-    // Every refusal except 500 is sent before the broadcast (validation,
+    if (res.status === 429) {
+      const body = await res
+        .json()
+        .catch(() => ({}) as { retryAfterSec?: number });
+      throw new RateLimitedError(body.retryAfterSec);
+    }
+    // Every other refusal except 500 is sent before the broadcast (validation,
     // pre-flight chain reads, busy submitter, a deployment without the route).
     // A 500 can follow a broadcast, so it stays a hard error.
     if (!res.ok && res.status !== 500) {

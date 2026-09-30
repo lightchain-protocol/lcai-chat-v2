@@ -4,6 +4,7 @@ import {
   GatewayClient,
   GatewayClientError,
   InsufficientPrepaidBalanceError,
+  RateLimitedError,
   walletMayRetry,
 } from "./gateway-client";
 
@@ -60,6 +61,22 @@ describe("delegated submit refusals", () => {
       "Your prepaid balance doesn’t cover this prompt — top up and retry."
     );
   });
+
+  it("HTTP 429 tells the user how long to wait when the API reports it", async () => {
+    const err = await submitWithStatus(429, {
+      statusCode: 429,
+      error: "rate_limited",
+      retryAfterSec: 30,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait 30s and retry.");
+  });
+
+  it("HTTP 429 without a wait still tells the user to wait", async () => {
+    const err = await submitWithStatus(429).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait a moment and retry.");
+  });
 });
 
 describe("walletMayRetry", () => {
@@ -67,6 +84,11 @@ describe("walletMayRetry", () => {
 
   it("a prepaid shortfall is shown to the user, not paid from the wallet", async () => {
     const err = await submitWithStatus(402).catch((e) => e);
+    expect(walletMayRetry(err)).toBe(false);
+  });
+
+  it("a rate limit is shown to the user, not paid from the wallet", async () => {
+    const err = await submitWithStatus(429).catch((e) => e);
     expect(walletMayRetry(err)).toBe(false);
   });
 
