@@ -79,6 +79,38 @@ describe("delegated submit refusals", () => {
   });
 });
 
+function uploadWithStatus(status: number, body: object = {}) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(body), { status }))
+  );
+  return new GatewayClient("http://api", auth as any).uploadBlob("AA==", {
+    sessionId: "1",
+  });
+}
+
+describe("prompt upload refusals", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("the API's rate limiter gets the same wait-and-retry message as the submit", async () => {
+    const err = await uploadWithStatus(429, {
+      statusCode: 429,
+      error: "rate_limited",
+      retryAfterSec: 30,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait 30s and retry.");
+  });
+
+  it("the blob quota, which puts no wait in the body, still tells the user to wait", async () => {
+    const err = await uploadWithStatus(429, {
+      error: "blob quota exceeded",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait a moment and retry.");
+  });
+});
+
 describe("walletMayRetry", () => {
   afterEach(() => vi.unstubAllGlobals());
 

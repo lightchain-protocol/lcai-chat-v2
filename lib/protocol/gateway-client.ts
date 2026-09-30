@@ -84,9 +84,10 @@ export class InsufficientPrepaidBalanceError extends Error {
 }
 
 /**
- * The consumer-api's rate limiter refused the submit. The wallet path would
- * skip the limit, so the user is told to wait instead. The message carries
- * the wait from the body: the API's CORS config hides `retry-after`.
+ * The consumer-api's rate limiter refused the prompt upload or the submit.
+ * The wallet path would skip the limit, so the user is told to wait instead.
+ * The message carries the wait from the body: the API's CORS config hides
+ * `retry-after`.
  */
 export class RateLimitedError extends Error {
   constructor(retryAfterSec?: number) {
@@ -361,10 +362,27 @@ export class GatewayClient {
     if (opts?.searchEnabled === true) {
       body.searchEnabled = true;
     }
-    return await this.post<UploadBlobResponse>("/api/blobs", body, {
-      protected: true,
-      bearerOnly: true,
-    });
+    try {
+      return await this.post<UploadBlobResponse>("/api/blobs", body, {
+        protected: true,
+        bearerOnly: true,
+      });
+    } catch (err) {
+      // Mapped here rather than in handleResponse: session setup reads the
+      // GatewayClientError statuses that handler throws for its own calls.
+      if (err instanceof GatewayClientError && err.status === 429) {
+        let retryAfterSec: number | undefined;
+        try {
+          ({ retryAfterSec } = JSON.parse(err.body) as {
+            retryAfterSec?: number;
+          });
+        } catch {
+          // Not JSON: the message falls back to "wait a moment".
+        }
+        throw new RateLimitedError(retryAfterSec);
+      }
+      throw err;
+    }
   }
 
   /**
