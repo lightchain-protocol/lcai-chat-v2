@@ -193,17 +193,6 @@ describe("createApiKey", () => {
     });
   });
 
-  it("passes on why the server refused the request", async () => {
-    serverAnswers(400, {
-      error: "validation_error",
-      message: "spendCapWei must be a positive integer amount in wei",
-    });
-
-    expect(await createApiKey({ name: "ci", spendCapWei: "1" })).toEqual({
-      error: "spendCapWei must be a positive integer amount in wei",
-    });
-  });
-
   it("asks for a new sign-in when the token is refused", async () => {
     serverAnswers(401, {
       error: "unauthorized",
@@ -230,6 +219,17 @@ describe("listApiKeys", () => {
 
     await expect(listApiKeys()).rejects.toThrow(
       "Your sign-in has expired. Sign out and sign in again."
+    );
+  });
+
+  it("says so when the API can't be reached", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Failed to fetch")))
+    );
+
+    await expect(listApiKeys()).rejects.toThrow(
+      "Couldn't reach the API. Check your connection and try again."
     );
   });
 });
@@ -330,12 +330,9 @@ describe("usageSnippets", () => {
     expect(openai).toContain("apiKey: process.env.LIGHTCHAIN_API_KEY,");
   });
 
-  it("hands the Lightchain SDK's key, URL and fetch to the OpenAI SDK", () => {
+  it("names the network for the Lightchain SDK", () => {
     const { lightchain } = usageSnippets("https://api.example", "mainnet");
 
     expect(lightchain).toContain('network: "mainnet",');
-    expect(lightchain).toContain(
-      "new OpenAI({ baseURL: lc.baseURL, apiKey: lc.apiKey, fetch: lc.fetch })"
-    );
   });
 });

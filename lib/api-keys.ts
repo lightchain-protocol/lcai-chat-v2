@@ -82,7 +82,6 @@ export function toCreateKeyBody(
   };
 }
 
-// The key routes, in one place.
 const KEYS = "/api/api-keys";
 const keyPath = (id: string) => `${KEYS}/${id}`;
 
@@ -92,7 +91,9 @@ const UNREACHABLE =
 
 /** Every key of the wallet, revoked ones included, newest first. */
 export async function listApiKeys(): Promise<ApiKey[]> {
-  const res = await $http.get(KEYS);
+  const res = await $http.get(KEYS).catch(() => {
+    throw new Error(UNREACHABLE);
+  });
   if (!res.ok) {
     throw new Error(await refusal(res));
   }
@@ -105,7 +106,7 @@ export async function createApiKey(
 ): Promise<{ created: ApiKey & { key: string } } | { error: string }> {
   try {
     const res = await $http.post(KEYS, body);
-    if (res.status !== 201) {
+    if (!res.ok) {
       return { error: await refusal(res) };
     }
     return { created: await res.json() };
@@ -137,41 +138,45 @@ export async function setSpendCap(
 
 /** Revokes a key at once. It stays listed, marked revoked. */
 export function revokeApiKey(id: string): Promise<{ error?: string }> {
-  return send("POST", `${keyPath(id)}/revoke`, { 404: NO_SUCH_KEY });
+  return keyAction("POST", `${keyPath(id)}/revoke`, { 404: NO_SUCH_KEY });
 }
 
 /** Deletes a revoked key for good. The server refuses an active one. */
 export function deleteApiKey(id: string): Promise<{ error?: string }> {
-  return send("DELETE", keyPath(id), {
+  return keyAction("DELETE", keyPath(id), {
     404: NO_SUCH_KEY,
     409: "Revoke the key before deleting it.",
   });
 }
 
-async function send(
+/** A bodyless call on one key: revoke or delete. */
+async function keyAction(
   method: string,
   path: string,
-  known: Known
+  messages: StatusMessages
 ): Promise<{ error?: string }> {
   try {
     const res = await $http.request(path, { method });
-    return res.ok ? {} : { error: await refusal(res, known) };
+    return res.ok ? {} : { error: await refusal(res, messages) };
   } catch {
     return { error: UNREACHABLE };
   }
 }
 
 /** What to say for a status, where the server's own message won't do. */
-type Known = Partial<Record<number, string>>;
+type StatusMessages = Partial<Record<number, string>>;
 
 /** What to tell the user about a refused request. */
-async function refusal(res: Response, known: Known = {}): Promise<string> {
+async function refusal(
+  res: Response,
+  messages: StatusMessages = {}
+): Promise<string> {
   if (res.status === 401) {
     return "Your sign-in has expired. Sign out and sign in again.";
   }
-  const said = known[res.status];
-  if (said) {
-    return said;
+  const message = messages[res.status];
+  if (message) {
+    return message;
   }
   const body = (await res.json().catch(() => null)) as {
     message?: string;
@@ -187,6 +192,8 @@ export function usageSnippets(
   apiBaseUrl: string,
   network: "mainnet" | "testnet"
 ): { openai: string; lightchain: string } {
+  // ponytail: a fixed example model, as in the docs; put a served one from
+  // /v1/models here if people paste the snippet as it is.
   const call = `const completion = await openai.chat.completions.create({
   model: "gemma4:e2b", // GET /v1/models lists the models served now
   messages: [{ role: "user", content: "Say hello in five words." }],

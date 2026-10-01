@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Wallet,
 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { type KeyedMutator } from "swr";
@@ -63,13 +64,17 @@ import {
   toCreateKeyBody,
   usageSnippets,
 } from "@/lib/api-keys";
-import { $http } from "@/lib/http";
 import { formatLcai } from "@/lib/lcai";
 import { cn } from "@/lib/utils";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
 
 type MintedKey = ApiKey & { key: string };
+
+/** How prose names a key: its name, or its prefix when it has none. */
+function titleOf(key: ApiKey): string {
+  return key.name ? `“${key.name}”` : `${key.prefix}…`;
+}
 
 function formatDay(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -85,7 +90,11 @@ function formatDay(iso: string): string {
  * with one.
  */
 export function DeveloperApiPanel() {
-  const keys = useSWR("/api/api-keys", () => listApiKeys());
+  // Keyed by wallet: sign-out is a soft refresh, and the cache outlives it.
+  const wallet = useSession().data?.user?.walletAddress;
+  const keys = useSWR(wallet ? ["/api/api-keys", wallet] : null, () =>
+    listApiKeys()
+  );
   const [creating, setCreating] = useState(false);
   const [minted, setMinted] = useState<MintedKey | null>(null);
   const active = keys.data?.filter((key) => !key.revokedAt).length;
@@ -124,8 +133,9 @@ export function DeveloperApiPanel() {
               gets the server&apos;s rate and concurrency limits.
             </p>
           </div>
-          {/* Hidden while a minted key shows, so nothing hides it unsaved. */}
-          {!creating && !minted && keys.data && keys.data.length > 0 && (
+          {/* Hidden while a minted key shows, so nothing hides it unsaved,
+              and on an empty list, which has a Create button of its own. */}
+          {!creating && !minted && keys.data?.length !== 0 && (
             <Button onClick={() => setCreating(true)} type="button">
               <Plus />
               Create key
@@ -152,7 +162,7 @@ export function DeveloperApiPanel() {
           data={keys.data}
           error={keys.error as Error | undefined}
           mutate={keys.mutate}
-          onCreate={creating ? undefined : () => setCreating(true)}
+          onCreate={creating || minted ? undefined : () => setCreating(true)}
         />
       </section>
 
@@ -180,20 +190,27 @@ function BalanceSummary() {
   }
 
   if (!pb.available) {
+    if (pb.isLoading) {
+      return <Skeleton className="h-[7.5rem] rounded-2xl" />;
+    }
     return (
       <div className="rounded-2xl border border-bdr-light bg-surface-base-faint/60 px-6 py-5 text-content-default text-sm">
-        Prepaid balance isn&apos;t available on this network yet.
+        {pb.queries.apiBalance.isError
+          ? "Couldn't read your prepaid balance. Reload the page to try again."
+          : "Prepaid balance isn't available on this network yet."}
       </div>
     );
   }
 
-  const hint = pb.ready
-    ? "API calls are paid from this balance through the delegate."
-    : pb.balance === 0n
-      ? "Top up to pay for API calls. Until then, completions answer 402."
-      : pb.isAuthorized
-        ? "The delegate's spending limit is used up. Top up to raise it."
-        : "Authorize the delegate so the API can submit jobs for your keys.";
+  const hint = pb.isLoading
+    ? "…"
+    : pb.ready
+      ? "API calls are paid from this balance through the delegate."
+      : pb.balance === 0n
+        ? "Top up to pay for API calls. Until then, completions answer 402."
+        : pb.isAuthorized
+          ? "The delegate's spending limit is used up. Top up to raise it."
+          : "Authorize the delegate so the API can submit jobs for your keys.";
 
   return (
     <section
@@ -464,7 +481,7 @@ function MintedKeyNotice({
             className="font-medium text-content-strong"
             id="minted-key-heading"
           >
-            Copy {minted.name ? `“${minted.name}”` : "your new key"} now
+            Copy {titleOf(minted)} now
           </h3>
           <p className="mt-1 text-content-default text-sm">
             You won&apos;t see it again. Only a hash of it is stored, so a lost
@@ -549,8 +566,7 @@ function EditSpendCapDialog({
         <form noValidate onSubmit={save}>
           <DialogHeader>
             <DialogTitle className="text-content-strong">
-              Spend cap for{" "}
-              {apiKey.name ? `“${apiKey.name}”` : `${apiKey.prefix}…`}
+              Spend cap for {titleOf(apiKey)}
             </DialogTitle>
             <DialogDescription className="text-content-default">
               It has spent {formatLcai(spent)} so far.
@@ -636,7 +652,9 @@ function KeyList({
   mutate: KeyedMutator<ApiKey[]>;
   onCreate?: () => void;
 }) {
+  // Kept after closing, so the dialog's text holds through its exit animation.
   const [pending, setPending] = useState<Pending | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState<ApiKey | null>(null);
   const [busy, setBusy] = useState(false);
   const confirm = pending ? CONFIRM[pending.action] : null;
@@ -648,7 +666,7 @@ function KeyList({
     setBusy(true);
     const { error: refused } = await confirm.run(pending.key.id);
     setBusy(false);
-    setPending(null);
+    setConfirming(false);
     if (refused) {
       toast.custom((id) => (
         <AlertError description={refused} id={id} title={confirm.failed} />
@@ -730,7 +748,10 @@ function KeyList({
             <KeyRow
               apiKey={key}
               key={key.id}
-              onAction={(action) => setPending({ key, action })}
+              onAction={(action) => {
+                setPending({ key, action });
+                setConfirming(true);
+              }}
               onEditCap={() => setEditing(key)}
             />
           ))}
@@ -756,14 +777,13 @@ function KeyList({
       )}
 
       <AlertDialog
-        onOpenChange={(open) => !open && !busy && setPending(null)}
-        open={pending !== null}
+        onOpenChange={(open) => !open && !busy && setConfirming(false)}
+        open={confirming}
       >
         <AlertDialogContent className="sm:rounded-3xl">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirm?.title}{" "}
-              {pending?.key.name ? `“${pending.key.name}”` : "this key"}?
+              {confirm?.title} {pending && titleOf(pending.key)}?
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm?.lead}{" "}
@@ -794,7 +814,7 @@ function KeyList({
 
 function MobileLabel({ children }: { children: ReactNode }) {
   return (
-    <span className="w-24 shrink-0 text-content-soft text-xs md:hidden">
+    <span className="w-24 shrink-0 text-content-soft text-xs md:sr-only">
       {children}
     </span>
   );
@@ -839,7 +859,7 @@ function KeyRow({
           {apiKey.name ?? "Unnamed key"}
         </p>
         <p className="font-mono text-content-soft text-xs">{apiKey.prefix}…</p>
-        {revoked && apiKey.revokedAt && (
+        {apiKey.revokedAt && (
           <p className="mt-1 text-content-soft text-xs">
             Revoked {formatDay(apiKey.revokedAt)}
           </p>
@@ -923,6 +943,8 @@ function KeyRow({
   );
 }
 
+const TRAILING_SLASHES = /\/+$/;
+
 const SNIPPETS = [
   { id: "openai", label: "OpenAI SDK" },
   { id: "lightchain", label: "@lightchain/sdk" },
@@ -930,7 +952,11 @@ const SNIPPETS = [
 
 function UsageSnippet() {
   const [tab, setTab] = useState<(typeof SNIPPETS)[number]["id"]>("openai");
-  const baseUrl = $http.baseUrl ?? "";
+  // The public URL, not $http's: on the server that is the internal one.
+  const baseUrl = (process.env.NEXT_PUBLIC_CONSUMER_API_URL ?? "").replace(
+    TRAILING_SLASHES,
+    ""
+  );
   const snippets = usageSnippets(baseUrl, isTestnet ? "testnet" : "mainnet");
 
   return (
