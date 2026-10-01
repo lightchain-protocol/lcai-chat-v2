@@ -11,8 +11,6 @@ export type ApiKey = {
   spendCapWei: string | null;
   spentWei: string;
   createdAt: string;
-  /** Null when never used; absent from servers that don't track it. */
-  lastUsedAt?: string | null;
   revokedAt: string | null;
 };
 

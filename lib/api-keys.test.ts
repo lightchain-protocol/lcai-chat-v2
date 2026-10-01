@@ -35,7 +35,6 @@ const keyView: ApiKey = {
   spendCapWei: "5000000000000000000",
   spentWei: "0",
   createdAt: "2026-10-01T12:00:00.000Z",
-  lastUsedAt: null,
   revokedAt: null,
 };
 

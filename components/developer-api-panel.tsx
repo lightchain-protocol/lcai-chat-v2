@@ -1,6 +1,5 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
 import {
   AlertTriangle,
   Check,
@@ -615,7 +614,7 @@ function EditSpendCapDialog({
 }
 
 const ROW_GRID =
-  "md:grid md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.7fr)_7rem_8rem_6rem] md:items-center md:gap-4";
+  "md:grid md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.7fr)_7rem_6rem] md:items-center md:gap-4";
 
 /** What the confirmation asks: revoke an active key, or delete a revoked one. */
 type Pending = { key: ApiKey; action: "revoke" | "delete" };
@@ -740,7 +739,6 @@ function KeyList({
           <span>Key</span>
           <span>Spent / cap</span>
           <span>Created</span>
-          <span>Last used</span>
           <span />
         </div>
         <ul className="divide-y divide-bdr-light">
@@ -818,16 +816,6 @@ function MobileLabel({ children }: { children: ReactNode }) {
       {children}
     </span>
   );
-}
-
-/** Null is never used; undefined, a server that doesn't say. */
-function lastUsed(at: string | null | undefined): string {
-  if (at === undefined) {
-    return "—";
-  }
-  return at === null
-    ? "Never"
-    : formatDistanceToNow(new Date(at), { addSuffix: true });
 }
 
 function KeyRow({
@@ -917,13 +905,6 @@ function KeyRow({
         <MobileLabel>Created</MobileLabel>
         <span className="text-content-default">
           {formatDay(apiKey.createdAt)}
-        </span>
-      </div>
-
-      <div className="flex items-center">
-        <MobileLabel>Last used</MobileLabel>
-        <span className="text-content-default">
-          {lastUsed(apiKey.lastUsedAt)}
         </span>
       </div>
 
