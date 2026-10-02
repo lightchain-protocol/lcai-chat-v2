@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Brain,
   CloudUploadIcon,
   Download,
   DownloadIcon,
@@ -47,12 +48,15 @@ function PureChatHeader({
   isReadonly,
   systemPromptId,
   onSystemPromptChange,
+  onOpenMemory,
 }: {
   chatId: string;
   selectedVisibilityType: VisibilityType;
   isReadonly: boolean;
   systemPromptId?: string;
   onSystemPromptChange?: (promptId: string, prompt: string) => void;
+  /** Private-memory settings (protocol mode only — the E2E envelope story). */
+  onOpenMemory?: () => void;
 }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -242,6 +246,19 @@ function PureChatHeader({
       )}
 
       <PrepaidBalanceButton className="order-5" />
+
+      {!isReadonly && onOpenMemory && (
+        <Button
+          className="order-6 h-9 border-surface-base-extraLight bg-surface-base-faint px-2 text-content-default hover:bg-surface-base-extraLight md:h-fit md:px-2"
+          onClick={onOpenMemory}
+          title="Private memory — stored on this device only"
+          type="button"
+          variant="outline"
+        >
+          <span className="hidden text-sm leading-0 md:inline">Memory</span>
+          <Brain className="size-4.5!" />
+        </Button>
+      )}
 
       <Dialog onOpenChange={setPromptDialogOpen} open={promptDialogOpen}>
         <DialogContent className="sm:max-w-xl sm:rounded-3xl">

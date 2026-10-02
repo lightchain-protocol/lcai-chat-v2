@@ -5,6 +5,7 @@ import {
   CloudDownloadIcon,
   Loader,
   MessageSquarePlus,
+  ReceiptIcon,
   Trash,
   UploadIcon,
 } from "lucide-react";
@@ -169,6 +170,17 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                      >
                       <BriefcaseIcon className="size-4 text-content-soft" />
                       On-chain jobs
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="flex items-center gap-2 text-content-ultra"
+                      disabled={!user}
+                      onClick={() => {
+                        setOpenMobile(false);
+                        router.push("/activity");
+                      }}
+                    >
+                      <ReceiptIcon className="size-4 text-content-soft" />
+                      Transactions &amp; costs
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="flex items-center gap-2 text-content-ultra"

@@ -10,27 +10,65 @@ import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { useAccount, useBalance } from "wagmi";
+import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { ChatHeader } from "@/components/chat-header";
 import type { PromptTemplate } from "@/components/system-prompt-selector";
+import { isSortitionEnabled } from "@/config";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
-import usePrepaidBalance from "@/hooks/use-prepaid-balance";
+import { useLiveWorkerCounts } from "@/hooks/use-live-worker-counts";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
+import { useModels } from "@/hooks/use-models";
+import {
+  type MultiModel,
+  useMultiModelSession,
+} from "@/hooks/use-multi-model-session";
+import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import { useProtocolSession } from "@/hooks/use-protocol-session";
 import useWeb3Clients from "@/hooks/use-web3-clients";
+import { recordModelOutcome } from "@/lib/ai/availability";
+import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
+import {
+  addBranch,
+  applyActiveBranches,
+  type BranchStore,
+  forkAt,
+  loadBranchStore,
+  saveBranchStore,
+  switchBranch,
+} from "@/lib/branches";
 import type { Vote } from "@/lib/db/schema";
-import { $http } from "@/lib/http";
+import { $http, hasUsableAuthToken } from "@/lib/http";
+import {
+  addMemoryEntry,
+  EMPTY_MEMORY_STORE,
+  loadMemoryStore,
+  type MemoryStore,
+  memoryPrefixFromStore,
+  removeMemoryEntry,
+  saveMemoryStore,
+} from "@/lib/memory";
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
+import { resolveModelSelection } from "@/lib/protocol/resolve-model";
+import { NoWorkerAvailableError } from "@/lib/protocol/session";
+import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
+import {
+  fetcher,
+  fetchWithErrorHandlers,
+  generateUUID,
+  votesFetcher,
+} from "@/lib/utils";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { JobTimeoutToast } from "./job-timeout-toast";
+import { MemoryDialog } from "./memory-dialog";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { PrepaidBalanceDialog } from "./prepaid-balance-dialog";
 import { SessionRecoveryBanner } from "./session-recovery-banner";
+import { ShareTranscriptButton } from "./share-transcript-button";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import AlertError from "./ui/toast/AlertError";
 import AlertInfo from "./ui/toast/AlertInfo";
@@ -57,7 +95,66 @@ function isProtocolAuthExpiredError(error: unknown): boolean {
   );
 }
 
+function isNoWorkerAvailableError(error: unknown): boolean {
+  if (error instanceof NoWorkerAvailableError) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const candidate = error as { cause?: unknown };
+  return candidate.cause instanceof NoWorkerAvailableError;
+}
+
+// Whether this failure is worth offering a retry for. A claim timeout spent
+// no fee and the next draw may land; a preflight refusal means nothing can
+// serve the request, and inviting a retry there just fails someone twice.
+function isRetryable(error: unknown): boolean {
+  if (error instanceof NoWorkerAvailableError) return error.retryable;
+  if (error instanceof Error && error.cause instanceof NoWorkerAvailableError) {
+    return error.cause.retryable;
+  }
+  return false;
+}
+
+// Surface the thrown message itself: a capability-constrained timeout carries
+// actionable copy ("… turn off web search") that a generic retry line hides.
+function noWorkerAvailableMessage(error: unknown): string | undefined {
+  if (error instanceof NoWorkerAvailableError) {
+    return error.message || undefined;
+  }
+  if (error instanceof Error && error.cause instanceof NoWorkerAvailableError) {
+    return error.cause.message || undefined;
+  }
+  return;
+}
+
 const isProtocolMode = process.env.NEXT_PUBLIC_USE_PROTOCOL === "true";
+
+/** Device-local memory of the last multi-select model set. */
+const SELECTED_MODELS_KEY = "lc-selected-models";
+
+/**
+ * The live model with the most eligible workers. Iterating in live-list
+ * order and switching only on a strictly-greater count makes ties stable —
+ * the first model among the max wins. Falls back to the first model when no
+ * count is known yet, so callers always get a concrete choice.
+ */
+function pickModelWithMostWorkers(
+  models: { id: string; name: string }[],
+  counts: Record<string, number>
+): { id: string; name: string } {
+  let best = models[0];
+  let bestCount = counts[best.id] ?? 0;
+  for (const model of models) {
+    const count = counts[model.id] ?? 0;
+    if (count > bestCount) {
+      best = model;
+      bestCount = count;
+    }
+  }
+  return best;
+}
 
 export function Chat({
   id,
@@ -85,23 +182,133 @@ export function Chat({
 
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
-  const { status: sessionStatus } = useSession();
+  const { status: sessionStatus, data } = useSession();
   const { open } = useAppKit();
 
   const [input, setInput] = useState<string>("");
   const [usage] = useState<AppUsage | undefined>(initialLastContext);
-  const [currentModelId, setCurrentModelId] = useState(initialChatModel);
+  // The model picker is now multi-select (1–4). One selected model = the
+  // unchanged single-model chat below; 2+ = the additive multi-model fan-out.
+  // Seeded single from the SSR cookie default and hydrated from localStorage
+  // post-mount (below) so SSR and first client render agree.
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([
+    initialChatModel,
+  ]);
+  // The single-model chat, its transport, and everything downstream key off one
+  // model — the first selected. With one model selected this IS that model and
+  // nothing changes; with several, this is the head of the list and the single
+  // transport simply sits idle while the multi-model path runs instead.
+  const currentModelId = selectedModelIds[0] ?? initialChatModel;
   const currentModelIdRef = useRef(currentModelId);
+  // True once the user explicitly picks a model in this session, so the
+  // "most workers" default below stops overriding their choice.
+  const userPickedModelRef = useRef(false);
+  // The most-workers default is applied at most once per session (after the
+  // first time worker counts are known) so it can't thrash the selection.
+  const appliedWorkerDefaultRef = useRef(false);
+  // The model id of the in-flight send, recorded into the device-local
+  // availability heuristic on finish/error.
+  const lastSentModelRef = useRef<string | null>(null);
+
+  // Live models are keyed by on-chain id (0x…hex); the initial/cookie value may
+  // be a legacy name ("llama3-8b") or a model with no active worker, which the
+  // picker can't resolve — leaving it showing "Select model". Auto-select an
+  // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
+  // default is always chosen, like before the live-model picker landed.
+  const { models: availableModels } = useModels();
+  // Live per-model worker count from the liveness-aware availability endpoint
+  // (heartbeat-intersected — dead boxes excluded). Drives the "default to the
+  // model with the most active workers" behaviour below.
+  const workerCountModelIds = useMemo(
+    () => availableModels.map((model) => model.id),
+    [availableModels]
+  );
+  const { counts: workerCounts } = useLiveWorkerCounts(workerCountModelIds);
+  // Ref so the protocol fetch wrapper can name the serving model without
+  // re-creating the transport whenever the live model list refreshes.
+  const availableModelsRef = useRef(availableModels);
+  useEffect(() => {
+    availableModelsRef.current = availableModels;
+  }, [availableModels]);
+  useEffect(() => {
+    if (availableModels.length === 0) {
+      return;
+    }
+
+    const countsKnown = Object.keys(workerCounts).length > 0;
+
+    // Drop any selected model that has gone offline. A multi-selection keeps
+    // the rest; if everything went offline it falls through to the fallback.
+    const liveIds = selectedModelIds.filter((modelId) =>
+      availableModels.some((model) => model.id === modelId)
+    );
+
+    if (liveIds.length === 0) {
+      // Nothing selected is available — pick one usable model so the picker
+      // never shows "Select model". Prefer the most-workers model once counts
+      // are known, otherwise the legacy name/first-in-list default.
+      const fallback = countsKnown
+        ? pickModelWithMostWorkers(availableModels, workerCounts)
+        : (availableModels.find((model) => model.name === DEFAULT_CHAT_MODEL) ??
+          availableModels[0]);
+      setSelectedModelIds([fallback.id]);
+      saveChatModelAsCookie(fallback.id);
+      return;
+    }
+
+    // Prune offline models out of a multi-selection without disturbing order.
+    if (liveIds.length !== selectedModelIds.length) {
+      setSelectedModelIds(liveIds);
+    }
+
+    // The most-workers default only applies to a lone selection — a deliberate
+    // multi-select is never second-guessed. Respect an explicit in-session
+    // pick, and apply the default at most once (and once counts are known) so a
+    // provisional cookie default doesn't thrash while loading.
+    if (liveIds.length !== 1) {
+      return;
+    }
+    if (userPickedModelRef.current || appliedWorkerDefaultRef.current) {
+      return;
+    }
+    if (!countsKnown) {
+      return;
+    }
+
+    appliedWorkerDefaultRef.current = true;
+
+    const soleId = liveIds[0];
+    const best = pickModelWithMostWorkers(availableModels, workerCounts);
+    const bestCount = workerCounts[best.id] ?? 0;
+    const currentCount = workerCounts[soleId] ?? 0;
+    // Switch only to a strictly better model, so the persisted cookie choice is
+    // kept whenever it already ties for the most workers.
+    if (best.id !== soleId && bestCount > currentCount) {
+      setSelectedModelIds([best.id]);
+      saveChatModelAsCookie(best.id);
+    }
+  }, [availableModels, selectedModelIds, workerCounts]);
 
   const [systemPromptId, setSystemPromptId] = useState<string>("default");
   const [systemPrompt, setSystemPrompt] = useState<string | null>(
-    initialSystemPrompt || null,
+    initialSystemPrompt || null
   );
   const systemPromptRef = useRef(systemPrompt);
 
   const [enableWebSearch, setEnableWebSearch] = useState(false);
+  // regenerate comes from the useChat call below, so onError cannot close over
+  // it directly. Same read-at-call-time pattern as enableWebSearchRef.
+  const regenerateRef = useRef<(() => void) | null>(null);
+  // A failed turn is shown in the thread, not as a toast: the wait is ~30s and
+  // someone who switches tabs would never see a toast that came and went.
+  const [turnError, setTurnError] = useState<{
+    title: string;
+    detail?: string;
+    retryable: boolean;
+  } | null>(null);
   const enableWebSearchRef = useRef(enableWebSearch);
-  const { walletClient } = useWeb3Clients();
+
+  const { walletClient, publicClient } = useWeb3Clients();
   const { address, isConnected } = useAccount();
   const balance = useBalance({ address });
 
@@ -114,21 +321,52 @@ export function Chat({
 
   // When the user has a funded prepaid balance + authorized delegate, route
   // prompts through the consumer-api (no per-prompt wallet TX). "auto" so a
-  // stale read or a balance dip falls back to the wallet path gracefully.
+  // stale read falls back to the wallet path gracefully (see walletMayRetry).
   const prepaid = usePrepaidBalance();
   const submitMode = "auto"; // prepaid.ready ? "auto" : "wallet";
+
+  // The consumer-api token behind every call expires an hour after sign-in,
+  // long before the NextAuth session holding it, so a tab left open ends up
+  // looking signed in with a dead token. Ask for a fresh signature: a plain
+  // open() on a connected wallet only shows the account view. Connection is
+  // read through a ref because useChat keeps the onError it was created with.
+  const isConnectedRef = useRef(isConnected);
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
+  const promptSignIn = useCallback(() => {
+    toast.custom((errorId) => (
+      <AlertError
+        id={errorId}
+        title="Your session expired. Please sign in with your wallet again."
+      />
+    ));
+    // AppKit routes any view at runtime (its own SIWX flow opens this one);
+    // SIWXSignMessage is only missing from the public Views type.
+    open(
+      isConnectedRef.current
+        ? ({ view: "SIWXSignMessage" } as never)
+        : undefined
+    );
+  }, [open]);
 
   // Guard run before every user-initiated send. Returns false (and surfaces the
   // appropriate modal) when the prompt can't be answered:
   //   - no wallet connected      -> AppKit connect modal
+  //   - sign-in token expired    -> wallet signature prompt
   //   - connected but not "ready" -> prepaid top-up / authorize dialog
-  // While the prepaid read is still loading we let the send through; submitMode
-  // "auto" falls back to the per-prompt wallet path, so we don't false-block on
-  // a slow on-chain read. When prepaid isn't configured (`available` false) the
-  // gate is a no-op.
+  // While the prepaid read is still loading we let the send through, so we
+  // don't false-block on a slow on-chain read; a real shortfall still comes
+  // back as the consumer-api's 402. When prepaid isn't configured
+  // (`available` false) the gate is a no-op.
   const canPrompt = useCallback((): boolean => {
     if (!isConnected) {
       open();
+      return false;
+    }
+    // Checked before anything is sent, so the draft stays in the composer.
+    if (!hasUsableAuthToken()) {
+      promptSignIn();
       return false;
     }
     if (prepaid.available && !prepaid.isLoading && !prepaid.ready) {
@@ -152,12 +390,39 @@ export function Chat({
   }, [
     isConnected,
     open,
+    promptSignIn,
     prepaid.available,
     prepaid.isLoading,
     prepaid.ready,
     prepaid.balance,
     prepaid.isAuthorized,
   ]);
+
+  // Device-local private memory (lib/memory.ts). The ref feeds the
+  // transport's getMemoryPrefix so the lazily-created protocol transport
+  // always reads the latest store without being recreated. Loaded post-mount
+  // so SSR and the first client render agree.
+  const [memoryStore, setMemoryStore] =
+    useState<MemoryStore>(EMPTY_MEMORY_STORE);
+  const memoryRef = useRef<MemoryStore>(EMPTY_MEMORY_STORE);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const store = loadMemoryStore();
+    memoryRef.current = store;
+    setMemoryStore(store);
+  }, []);
+
+  const updateMemoryStore = useCallback((next: MemoryStore) => {
+    memoryRef.current = next;
+    setMemoryStore(next);
+    saveMemoryStore(next);
+  }, []);
+
+  const getMemoryPrefix = useCallback(
+    () => memoryPrefixFromStore(memoryRef.current),
+    []
+  );
 
   // Protocol mode: session management for on-chain encrypted chat
   const {
@@ -172,7 +437,19 @@ export function Chat({
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
-  } = useProtocolSession(currentModelId, walletClient, address, id, submitMode);
+    fetchOnChainJob,
+    fetchWorkerStake,
+    getShareEvidence,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
+  } = useProtocolSession(
+    currentModelId,
+    walletClient,
+    address,
+    id,
+    submitMode,
+    getMemoryPrefix
+  );
   // Read-only preflight: union of capabilities across all workers eligible
   // for this model (web-search epic, Story 16). Populates at chat mount via
   // /api/models/:hex/capabilities so the toggle reflects reality BEFORE a
@@ -212,6 +489,11 @@ export function Chat({
             selectedVisibilityType: visibilityType,
             systemPrompt: systemPromptRef.current,
           };
+          // Record the outcome-tracking ref here too: in non-protocol mode
+          // this happens in prepareSendMessagesRequest, but that hook isn't
+          // called for this transport's own fetch, so availability outcomes
+          // in protocol mode were never recorded without it.
+          lastSentModelRef.current = currentModelIdRef.current;
           const { response } = await t.sendMessages({
             messages: protocolBody.messages ?? [],
             body: {
@@ -220,6 +502,12 @@ export function Chat({
               // ProtocolTransport forwards this through SessionManager.submitJob
               // → GatewayClient.uploadBlob → consumer-api side-channel write.
               enableWebSearch: enableWebSearchRef.current,
+              // Name of the serving model (live list), recorded into the
+              // assistant message's protocolMeta for the proof panel and
+              // transcripts.
+              friendlyModelId: availableModelsRef.current.find(
+                (m) => m.id === currentModelIdRef.current
+              )?.name,
             },
             signal: init?.signal ?? undefined,
           });
@@ -235,6 +523,7 @@ export function Chat({
           ...init,
         }),
       prepareSendMessagesRequest(request) {
+        lastSentModelRef.current = currentModelIdRef.current;
         return {
           body: {
             id: request.id,
@@ -254,17 +543,21 @@ export function Chat({
   const { data: promptTemplates } = useSWR<PromptTemplate[]>(
     sessionStatus === "authenticated" ? "/api/prompts" : null,
     async (url: string) => {
-      const response = await $http.get(url);
+      const response = await $http.get(url, {
+        headers: {
+          Authorization: `Bearer ${data?.user.token}`,
+        },
+      });
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   // Match initial system prompt to a template ID
   useEffect(() => {
     if (initialSystemPrompt && promptTemplates) {
       const matchedTemplate = promptTemplates.find(
-        (template) => template.prompt === initialSystemPrompt,
+        (template) => template.prompt === initialSystemPrompt
       );
       if (matchedTemplate) {
         setSystemPromptId(matchedTemplate.id);
@@ -275,6 +568,50 @@ export function Chat({
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  // Restore a previously-chosen multi-selection post-mount (never during SSR,
+  // so hydration matches). The auto-default effect above then prunes anything
+  // that has since gone offline.
+  const hydratedSelectionRef = useRef(false);
+  useEffect(() => {
+    if (hydratedSelectionRef.current) {
+      return;
+    }
+    hydratedSelectionRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(SELECTED_MODELS_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed: unknown = JSON.parse(raw);
+      const ids = Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === "string").slice(0, 4)
+        : [];
+      if (ids.length > 0) {
+        userPickedModelRef.current = true;
+        setSelectedModelIds(ids);
+      }
+    } catch {
+      // Private mode / malformed value — keep the SSR default.
+    }
+  }, []);
+
+  // Wraps the picker's change so an explicit selection is remembered for the
+  // session and persisted (localStorage for the full set, cookie for the head
+  // so an SSR reload starts on the same first model).
+  const handleModelsChange = useCallback((ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
+    userPickedModelRef.current = true;
+    setSelectedModelIds(ids);
+    try {
+      window.localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(ids));
+    } catch {
+      // Private mode / quota — the selection just won't persist across reloads.
+    }
+    saveChatModelAsCookie(ids[0]);
+  }, []);
 
   useEffect(() => {
     systemPromptRef.current = systemPrompt;
@@ -303,7 +640,7 @@ export function Chat({
       {
         id: toastId,
         duration: Number.POSITIVE_INFINITY,
-      },
+      }
     );
   }, [timedOutJob, claimJobTimeout, startNewSession, clearTimedOutJob]);
 
@@ -323,26 +660,62 @@ export function Chat({
     transport,
     onData: (dataPart) => {
       setDataStream((ds) =>
-        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : [],
+        ds ? ([...ds, dataPart] as DataUIPart<CustomUIDataTypes>[]) : []
       );
       // if (dataPart.type === "data-usage") {
       //   setUsage(dataPart.data);
       // }
     },
+    // The installed @ai-sdk/react (2.0.26) pins its own nested ai@5.0.26,
+    // whose ChatOnFinishCallback carries no isAbort/isError (that shape is
+    // from the newer `ai` this repo also depends on directly, ~L4146 of the
+    // top-level node_modules/ai/dist/index.d.ts, but @ai-sdk/react resolves
+    // its own isolated, older copy — pnpm keeps the two separate). Tracing
+    // that version's Chat.makeRequest confirms onFinish is only ever invoked
+    // after a clean, non-aborted, non-errored stream — an abort returns early
+    // in the catch block and a real error routes to onError instead — so the
+    // outcome-recording guard the fields would have added is already true by
+    // construction here; nothing to destructure.
     onFinish: () => {
+      if (lastSentModelRef.current) {
+        recordModelOutcome(lastSentModelRef.current, "completed");
+      }
       mutate(unstable_serialize(getChatHistoryPaginationKey));
       prepaid.refetch();
       balance.refetch();
     },
     onError: (error: any) => {
+      // An expired delegate isn't a model failure — the model never got the
+      // chance to answer.
+      if (lastSentModelRef.current && !isProtocolAuthExpiredError(error)) {
+        recordModelOutcome(lastSentModelRef.current, "failed");
+      }
       if (isProtocolAuthExpiredError(error)) {
-        toast.custom((errorId) => (
-          <AlertError
-            id={errorId}
-            title="Your session expired. Please sign in with your wallet again."
-          />
-        ));
-        open();
+        promptSignIn();
+        return;
+      }
+
+      if (isConnectionFailure(error)) {
+        setTurnError({
+          title: "Couldn't reach the network",
+          detail:
+            "Your message wasn't sent and nothing was charged — the fee is only taken once a worker picks the job up.",
+          retryable: true,
+        });
+        return;
+      }
+
+      if (isNoWorkerAvailableError(error)) {
+        const message =
+          noWorkerAvailableMessage(error) ??
+          "No worker available right now — please try again.";
+        setTurnError({
+          title: message,
+          // No job was submitted, so no fee moved. Saying so pre-empts the
+          // question anyone paying per message will have.
+          detail: "Nothing was charged for this message.",
+          retryable: isRetryable(error),
+        });
         return;
       }
 
@@ -352,6 +725,221 @@ export function Chat({
       ));
     },
   });
+
+  useEffect(() => {
+    regenerateRef.current = () => {
+      regenerate();
+    };
+  }, [regenerate]);
+
+  // Clear a previous failure the moment a new turn starts, so the row cannot
+  // linger beneath a question that is currently being answered.
+  useEffect(() => {
+    if (status === "submitted" || status === "streaming") setTurnError(null);
+  }, [status]);
+
+  // Multi-model fan-out (protocol mode). Drives its own N transports and
+  // streams each answer into the SAME `messages` list as a sibling assistant
+  // row via setMessages — the single-model transport above is untouched.
+  const multiModel = useMultiModelSession({
+    chatId: id,
+    walletClient,
+    publicClient,
+    address,
+    getMemoryPrefix,
+    setMessages,
+    // Same post-turn refresh the single-model onFinish does: surface the new
+    // chat in the sidebar and pull the paid-job balance changes.
+    onFinish: () => {
+      mutate(unstable_serialize(getChatHistoryPaginationKey));
+      prepaid.refetch();
+      balance.refetch();
+    },
+  });
+
+  // The live { id, name } models behind the current selection, in pick order.
+  const selectedModels = useMemo<MultiModel[]>(
+    () =>
+      selectedModelIds
+        .map((modelId) => availableModels.find((m) => m.id === modelId))
+        .filter((m): m is MultiModel => m !== undefined),
+    [selectedModelIds, availableModels]
+  );
+
+  const isMultiModel = isProtocolMode && selectedModels.length >= 2;
+
+  // Optimistic session pre-warm: once the user starts composing, kick off the
+  // on-chain sortition handshake for a single selected model so it overlaps
+  // typing instead of blocking the first send. Gated hard so it can never
+  // change existing behaviour:
+  //   - protocol + sortition only (the delegate signs server-side; the legacy
+  //     wallet-TX path would pop a signature prompt while typing);
+  //   - single model only (compare mode would speculatively open N sessions);
+  //   - once per selected model (retyping never re-fires; switching models
+  //     re-arms for the new one);
+  //   - best-effort in the transport (no-ops if ready/in-progress, swallows
+  //     errors), so a warm that never lands leaves the send path unchanged.
+  const prewarmedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!(isProtocolMode && isSortitionEnabled)) {
+      return;
+    }
+    if (input.trim().length === 0 || selectedModelIds.length !== 1) {
+      return;
+    }
+    const modelId = selectedModelIds[0];
+    if (prewarmedForRef.current === modelId) {
+      return;
+    }
+    // Resolve rather than match on id: during the window before /api/models
+    // lands, the selection is still the legacy name, and an id-only match
+    // skipped the warm for exactly the sender who most needed it — the one
+    // typing into a session that had not been opened yet.
+    const model = resolveModelSelection(modelId, availableModels);
+    if (!model) {
+      return;
+    }
+    prewarmedForRef.current = modelId;
+    // Warm the SAME transport the single-model send uses. Warming through the
+    // multi-model map built a second SessionManager under another storage key,
+    // so every chat opened two on-chain sessions and orphaned one.
+    getProtocolTransport()
+      .then((transport) =>
+        transport.prewarm(
+          enableWebSearchRef.current
+            ? { requiredCapabilities: ["search"] }
+            : undefined
+        )
+      )
+      .catch(() => {
+        // best-effort: the send re-runs initialize and reports any failure
+      });
+  }, [input, selectedModelIds, availableModels, getProtocolTransport]);
+
+  const runMultiModel = multiModel.run;
+
+  // The send the whole UI calls. One model → the untouched useChat/protocol
+  // path. Two or more → append the prompt once and fan it out. Same shape as
+  // useChat.sendMessage so every existing call site (composer, suggestions,
+  // ?query=) routes through here unchanged.
+  const sendChatMessage: typeof sendMessage = useCallback(
+    (message, options) => {
+      if (isMultiModel) {
+        const parts =
+          message && typeof message === "object" && "parts" in message
+            ? ((message as { parts?: ChatMessage["parts"] }).parts ?? [])
+            : [];
+        const userMessage: ChatMessage = {
+          id: generateUUID(),
+          role: "user",
+          parts,
+          metadata: { createdAt: new Date().toISOString() },
+        };
+        runMultiModel({
+          userMessage,
+          models: selectedModels,
+          groupId: generateUUID(),
+          enableWebSearch: enableWebSearchRef.current,
+          systemPrompt: systemPromptRef.current,
+          selectedVisibilityType: visibilityType,
+        });
+        return Promise.resolve();
+      }
+      return sendMessage(message, options);
+    },
+    [isMultiModel, runMultiModel, selectedModels, sendMessage, visibilityType]
+  );
+
+  // While a multi-model turn streams, the composer must show a Stop and the
+  // busy state even though useChat itself is idle (it isn't driving the send).
+  const effectiveStatus = multiModel.isRunning ? "streaming" : status;
+  const effectiveStop = multiModel.isRunning ? multiModel.stop : stop;
+
+  // --- Conversation branching (device-local, lib/branches.ts) -------------
+  // Loaded post-mount (not in useState) so SSR and the first client render
+  // agree; the branched view is applied once per chat right after.
+  const [branchStore, setBranchStore] = useState<BranchStore>({});
+  const branchesLoadedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Readonly viewers see the true flat history (branch controls are gated the same way).
+    if (isReadonly) {
+      return;
+    }
+    if (branchesLoadedRef.current === id) {
+      return;
+    }
+    branchesLoadedRef.current = id;
+    const store = loadBranchStore(id);
+    setBranchStore(store);
+    if (Object.keys(store).length > 0) {
+      setMessages((prev) => applyActiveBranches(prev, store));
+    }
+  }, [id, isReadonly, setMessages]);
+
+  const handleFork = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1 || index >= messages.length - 1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = forkAt(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleSwitchBranch = useCallback(
+    (anchorId: string, target: number) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const result = switchBranch(
+        branchStore,
+        anchorId,
+        target,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(result.store);
+      saveBranchStore(id, result.store);
+      setMessages([
+        ...messages.slice(0, index + 1),
+        ...(result.tail as ChatMessage[]),
+      ]);
+    },
+    [messages, branchStore, id, setMessages]
+  );
+
+  const handleAddBranch = useCallback(
+    (anchorId: string) => {
+      const index = messages.findIndex((m) => m.id === anchorId);
+      if (index === -1) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = addBranch(
+        branchStore,
+        anchorId,
+        messages.slice(index + 1),
+        now
+      );
+      setBranchStore(next);
+      saveBranchStore(id, next);
+      setMessages(messages.slice(0, index + 1));
+    },
+    [messages, branchStore, id, setMessages]
+  );
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
@@ -364,7 +952,7 @@ export function Chat({
         return;
       }
 
-      sendMessage({
+      sendChatMessage({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
       });
@@ -372,11 +960,11 @@ export function Chat({
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
-  }, [query, sendMessage, hasAppendedQuery, id, canPrompt]);
+  }, [query, sendChatMessage, hasAppendedQuery, id, canPrompt]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher,
+    votesFetcher
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -395,6 +983,9 @@ export function Chat({
         <ChatHeader
           chatId={id}
           isReadonly={isReadonly}
+          onOpenMemory={
+            isProtocolMode ? () => setMemoryDialogOpen(true) : undefined
+          }
           onSystemPromptChange={(promptId, prompt) => {
             setSystemPromptId(promptId);
             setSystemPrompt(prompt);
@@ -420,19 +1011,44 @@ export function Chat({
 
         <Messages
           activeJobs={activeJobs}
+          branchStore={isReadonly ? undefined : branchStore}
           chatId={id}
           claimJobTimeout={claimJobTimeout}
           disputeJob={disputeJob}
+          disputeResponseMismatch={disputeResponseMismatch}
+          explorerBaseUrl={process.env.NEXT_PUBLIC_EXPLORER_URL}
+          fetchOnChainJob={fetchOnChainJob}
+          fetchWorkerStake={fetchWorkerStake}
+          hasMismatchEvidence={hasMismatchEvidence}
           isArtifactVisible={false}
           isReadonly={isReadonly}
           messages={messages}
+          multiModelLive={multiModel.live}
+          onAddBranch={isReadonly ? undefined : handleAddBranch}
+          onFork={isReadonly ? undefined : handleFork}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
+          onRetryTurn={() => {
+            setTurnError(null);
+            regenerateRef.current?.();
+          }}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
-          selectedModelId={initialChatModel}
+          selectedModelId={currentModelId}
           setMessages={setMessages}
           status={status}
+          turnError={turnError}
           votes={votes}
         />
+
+        {!isReadonly && messages.length > 0 && (
+          <div className="flex justify-end px-4 pt-1">
+            <ShareTranscriptButton
+              chatId={id}
+              getShareEvidence={getShareEvidence}
+              messages={messages}
+            />
+          </div>
+        )}
 
         <div
           className={
@@ -447,24 +1063,51 @@ export function Chat({
               disabledPlaceholder="Session recovering..."
               enableWebSearch={enableWebSearch}
               input={input}
+              memoryActive={
+                isProtocolMode &&
+                memoryStore.enabled &&
+                memoryStore.entries.length > 0
+              }
               messages={messages}
               onBeforeSubmit={canPrompt}
-              onModelChange={setCurrentModelId}
+              onModelsChange={handleModelsChange}
+              onOpenMemory={() => setMemoryDialogOpen(true)}
               onWebSearchToggle={setEnableWebSearch}
               searchCapable={searchCapable}
-              selectedModelId={currentModelId}
+              selectedModelIds={selectedModelIds}
               selectedVisibilityType={visibilityType}
-              sendMessage={sendMessage}
+              sendMessage={sendChatMessage}
               setAttachments={setAttachments}
               setInput={setInput}
               setMessages={setMessages}
-              status={status}
-              stop={stop}
+              status={effectiveStatus}
+              stop={effectiveStop}
               usage={usage}
             />
           )}
         </div>
       </div>
+
+      <MemoryDialog
+        onAdd={(text) =>
+          updateMemoryStore(
+            addMemoryEntry(
+              memoryStore,
+              text,
+              generateUUID(),
+              new Date().toISOString()
+            )
+          )
+        }
+        onClear={() => updateMemoryStore({ ...memoryStore, entries: [] })}
+        onOpenChange={setMemoryDialogOpen}
+        onRemove={(entryId) =>
+          updateMemoryStore(removeMemoryEntry(memoryStore, entryId))
+        }
+        onToggle={(enabled) => updateMemoryStore({ ...memoryStore, enabled })}
+        open={memoryDialogOpen}
+        store={memoryStore}
+      />
 
       <PrepaidBalanceDialog
         onOpenChange={setPrepaidGateOpen}

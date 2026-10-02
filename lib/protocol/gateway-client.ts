@@ -5,6 +5,8 @@
  * Base URL comes from NEXT_PUBLIC_CONSUMER_API_URL env var.
  */
 
+import { formatEther } from "viem";
+
 export type ModelInfo = {
   id: string;
   name: string;
@@ -90,6 +92,51 @@ export class DelegateNotAuthorizedError extends Error {
   }
 }
 
+/**
+ * The consumer-api refused a delegated submit before anything reached the
+ * chain, so the wallet path can send the same prompt without paying twice.
+ */
+export class DelegatedSubmitUnavailableError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`Delegated submit unavailable (HTTP ${status})`);
+    this.name = "DelegatedSubmitUnavailableError";
+    this.status = status;
+  }
+}
+
+/**
+ * Whether "auto" submit mode may retry a refused delegated submit through the
+ * user's wallet: yes for a delegate that isn't authorized or a route that
+ * isn't there; no for a prepaid shortfall, which the user has to see.
+ */
+export function walletMayRetry(err: unknown): boolean {
+  return (
+    err instanceof DelegateNotAuthorizedError ||
+    err instanceof DelegatedSubmitUnavailableError
+  );
+}
+
+/**
+ * The sentence a user sees when the delegated submit is refused with 402.
+ * The chat shows the error's message verbatim, so it carries the fee and
+ * what is left when the consumer-api reports them. Topping up through the
+ * chat also raises the spending limit, so it fixes both refusal codes.
+ */
+function prepaidShortfallMessage(body: {
+  required?: string;
+  available?: string;
+}): string {
+  try {
+    if (body.required && body.available) {
+      return `This prompt costs ${formatEther(BigInt(body.required))} LCAI but only ${formatEther(BigInt(body.available))} LCAI of your prepaid balance is available — top up and retry.`;
+    }
+  } catch {
+    // A malformed amount falls through to the plain sentence.
+  }
+  return "Your prepaid balance doesn’t cover this prompt — top up and retry.";
+}
+
 export type TokenResponse = {
   token: string;
   expiresAt: string;
@@ -102,6 +149,25 @@ export type PendingTokenResponse = {
 
 export type SessionStatusResponse = {
   sessionStatus: string; // "active" | "awaiting_reassignment" | "reassigning" | "closed" | "unknown"
+};
+
+export type SortitionRequestResponse = {
+  reqId: string;
+  worker: string;
+  /** 0x-prefixed hex public key */
+  workerEncryptionKey: string;
+  /** 0x-prefixed hex public key, or "0x" when no disputer */
+  disputerEncryptionKey: string;
+  capabilities: string[];
+  /** False when a worker preference could not be met within the retry budget. */
+  preferenceHonored?: boolean;
+  /** Why it could not be met, ready to show. Absent when it was. */
+  preferenceNote?: string;
+};
+
+export type SortitionKeysResponse = {
+  sessionId: string;
+  txHash: string;
 };
 
 export type AuthProvider = {
@@ -128,6 +194,22 @@ export class ProtocolAuthExpiredError extends Error {
     this.name = "ProtocolAuthExpiredError";
   }
 }
+
+export type WorkerAvailabilityStatus = "available" | "busy" | "unknown";
+
+export type WorkerModelAvailability = {
+  modelId: string;
+  eligibleWorkers: number;
+  freeSlots: number | null;
+  status: WorkerAvailabilityStatus;
+};
+
+export type WorkerAvailability = {
+  status: WorkerAvailabilityStatus;
+  maxConcurrentJobs: number | null;
+  models: WorkerModelAvailability[];
+  checkedAt: number;
+};
 
 export class GatewayClient {
   private readonly baseUrl: string;
@@ -160,6 +242,64 @@ export class GatewayClient {
   ): Promise<ModelCapabilitiesResponse> {
     return await this.get<ModelCapabilitiesResponse>(
       `/api/models/${modelIdHex}/capabilities`
+    );
+  }
+
+  /**
+   * Sortition session bootstrap — Step 1.
+   * Consumer-api blocks while a worker self-claims the slot (a couple of
+   * blocks when a live worker is eligible; server-capped at CLAIM_TIMEOUT_MS,
+   * 12 s by default, so a genuinely unstaffed model fails fast rather than
+   * hanging). Throws GatewayClientError with status 408 when no worker claims.
+   */
+  async requestSortitionSession(
+    modelId: string,
+    opts?: {
+      expirySecs?: number;
+      requiredCapabilities?: string[];
+      avoidWorkers?: string[];
+      preferWorker?: string;
+    }
+  ): Promise<SortitionRequestResponse> {
+    const body: Record<string, unknown> = { modelId };
+    if (opts?.expirySecs !== undefined) {
+      body.expirySecs = opts.expirySecs;
+    }
+    // Capability names the claiming worker must have declared on-chain.
+    if (opts?.requiredCapabilities && opts.requiredCapabilities.length > 0) {
+      body.requiredCapabilities = opts.requiredCapabilities;
+    }
+    // This consumer's own preference about who serves it. Sent per request
+    // and stored on no server, so nobody but the person holding the browser
+    // decides which workers they will accept.
+    if (opts?.avoidWorkers && opts.avoidWorkers.length > 0) {
+      body.avoidWorkers = opts.avoidWorkers;
+    }
+    if (opts?.preferWorker) {
+      body.preferWorker = opts.preferWorker;
+    }
+    return await this.post<SortitionRequestResponse>(
+      "/api/sessions/sortition/request",
+      body,
+      { protected: true }
+    );
+  }
+
+  /**
+   * Sortition session bootstrap — Step 2.
+   * Delivers the encrypted session keys to consumer-api; the delegate has
+   * already signed the createSession TX on-chain server-side.
+   * Returns the resulting sessionId and txHash.
+   */
+  async provideSortitionKeys(
+    reqId: string,
+    encWorkerKey: string,
+    encDisputerKey: string
+  ): Promise<SortitionKeysResponse> {
+    return await this.post<SortitionKeysResponse>(
+      `/api/sessions/sortition/${reqId}/keys`,
+      { encWorkerKey, encDisputerKey },
+      { protected: true }
     );
   }
 
@@ -204,11 +344,10 @@ export class GatewayClient {
     if (opts?.searchEnabled === true) {
       body.searchEnabled = true;
     }
-    return await this.post<UploadBlobResponse>(
-      "/api/blobs",
-      body,
-      { protected: true, bearerOnly: true }
-    );
+    return await this.post<UploadBlobResponse>("/api/blobs", body, {
+      protected: true,
+      bearerOnly: true,
+    });
   }
 
   /**
@@ -252,7 +391,16 @@ export class GatewayClient {
       throw new DelegateNotAuthorizedError(body.delegate ?? "");
     }
     if (res.status === 402) {
-      throw new InsufficientPrepaidBalanceError();
+      const body = await res
+        .json()
+        .catch(() => ({}) as { required?: string; available?: string });
+      throw new InsufficientPrepaidBalanceError(prepaidShortfallMessage(body));
+    }
+    // Every refusal except 500 is sent before the broadcast (validation,
+    // pre-flight chain reads, busy submitter, a deployment without the route).
+    // A 500 can follow a broadcast, so it stays a hard error.
+    if (!res.ok && res.status !== 500) {
+      throw new DelegatedSubmitUnavailableError(res.status);
     }
 
     return this.handleResponse<SubmitMessageResponse>(res);
@@ -320,6 +468,38 @@ export class GatewayClient {
       return { sessionStatus: data.sessionStatus ?? "active" };
     } catch {
       return { sessionStatus: "unknown" };
+    }
+  }
+
+  /**
+   * Whether a prompt sent now would find a worker.
+   *
+   * `claimSession` refuses the draw once a worker holds `maxConcurrentJobs`
+   * jobs in flight, so submitting against a full worker is not slow — it is
+   * paid for and then times out, surfacing as "No worker available". Asking
+   * first lets the composer say so before anyone spends anything.
+   *
+   * Unauthenticated, and it never throws: a gateway that cannot answer yields
+   * `unknown`, which callers must not treat as busy.
+   */
+  async getWorkerAvailability(
+    modelIds?: string[]
+  ): Promise<WorkerAvailability> {
+    const query =
+      modelIds && modelIds.length > 0
+        ? `?models=${encodeURIComponent(modelIds.join(","))}`
+        : "";
+    try {
+      return await this.get<WorkerAvailability>(
+        `/api/workers/availability${query}`
+      );
+    } catch {
+      return {
+        status: "unknown",
+        maxConcurrentJobs: null,
+        models: [],
+        checkedAt: Math.floor(Date.now() / 1000),
+      };
     }
   }
 

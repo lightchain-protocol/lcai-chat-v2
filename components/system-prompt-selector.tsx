@@ -52,15 +52,19 @@ export function SystemPromptSelector({
   onCreateNew,
   disabled = false,
 }: SystemPromptSelectorProps) {
-  const { status: sessionStatus } = useSession();
+  const { status: sessionStatus, data } = useSession();
 
   const { data: templates = [] } = useSWR<PromptTemplate[]>(
     sessionStatus === "authenticated" ? "/api/prompts" : null,
     async (url: string) => {
-      const response = await $http.get(url);
+      const response = await $http.get(url, {
+        headers: {
+          Authorization: `Bearer ${data?.user.token}`,
+        },
+      });
       if (!response.ok) return null;
       return response.json();
-    }
+    },
   );
 
   const [selectedId, setSelectedId] = useState<string | undefined>(value);

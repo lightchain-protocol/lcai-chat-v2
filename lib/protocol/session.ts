@@ -8,7 +8,8 @@
  */
 
 import type { Abi, Log, PublicClient, WalletClient } from "viem";
-import { decodeEventLog, toHex } from "viem";
+import { decodeEventLog, hexToBytes, toHex } from "viem";
+import { isSortitionEnabled } from "@/config";
 import { aiConfigAbi } from "@/contracts/ai-config-abi";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 
@@ -21,7 +22,17 @@ export type OnChainJob = {
   submittedAt: number;
   completedAt: number;
   deadline: number;
+  /**
+   * Settlement commitments. Without these the client cannot check that the
+   * answer it rendered is the answer the chain was told about.
+   */
+  promptBlobHash: `0x${string}`;
+  responseBlobHash: `0x${string}`;
+  responseCiphertextHash: `0x${string}`;
+  submitBlockNumber: number;
+  completionBlockNumber: number;
 };
+
 import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 
 import {
@@ -36,13 +47,11 @@ import type {
   PendingTokenResponse,
   PrepareSessionResponse,
   SelectSessionResponse,
+  SortitionRequestResponse,
   TokenResponse,
 } from "./gateway-client";
-import {
-  DelegateNotAuthorizedError,
-  GatewayClientError,
-  InsufficientPrepaidBalanceError,
-} from "./gateway-client";
+import { GatewayClientError, walletMayRetry } from "./gateway-client";
+import { preferenceRequestFields } from "../worker-preference";
 
 /**
  * How a job is submitted on-chain:
@@ -50,8 +59,9 @@ import {
  *  - "delegated": consumer-api calls submitJobOnBehalf, debiting the user's
  *                 prepaid balance. No wallet popup. Throws if the delegate
  *                 isn't authorized or the balance is empty.
- *  - "auto":      try "delegated"; on DelegateNotAuthorized / InsufficientBalance
- *                 fall back to "wallet" with the already-uploaded blob.
+ *  - "auto":      try "delegated"; on any refusal made before the broadcast
+ *                 (not 401/500 or a network error) fall back to "wallet"
+ *                 with the already-uploaded blob.
  */
 export type SubmitMode = "wallet" | "delegated" | "auto";
 
@@ -80,9 +90,63 @@ export class MaxReassignmentsError extends Error {
 export class MissingDisputerKeyError extends Error {
   constructor() {
     super(
-      "Disputer encryption key not available — session cannot be recovered",
+      "Disputer encryption key not available — session cannot be recovered"
     );
     this.name = "MissingDisputerKeyError";
+  }
+}
+
+/**
+ * Thrown when the sortition /request endpoint returns 408 — no worker
+ * claimed the slot within the server-side timeout. The UI should surface
+ * a "no worker available, retry" message rather than a generic error.
+ */
+export class NoWorkerAvailableError extends Error {
+  /**
+   * Whether sending the same thing again could plausibly succeed.
+   *
+   * True for a claim timeout: the draw found nobody in time, no fee was
+   * spent, and the next draw may land. False when consumer-api refused up
+   * front because nothing can serve the request — offering "try again" there
+   * only invites someone to fail twice.
+   */
+  readonly retryable: boolean;
+
+  constructor(message?: string, retryable = false) {
+    super(message ?? "No worker available — retry session initialization");
+    this.name = "NoWorkerAvailableError";
+    this.retryable = retryable;
+  }
+}
+
+/**
+ * The human-readable sentence consumer-api attached to a refusal, if it sent
+ * one. Only `message` is trusted: it is written for the person reading it,
+ * whereas `error`/`reason` are machine codes that would read as jargon.
+ *
+ * Returns undefined for anything unparseable so the caller keeps its own
+ * wording rather than surfacing a fragment of a JSON body.
+ */
+/**
+ * Whether consumer-api marked this refusal as worth retrying. Only the claim
+ * timeout is; the preflight refusals mean nothing can serve the request.
+ */
+function serverRetryable(err: GatewayClientError): boolean {
+  try {
+    return (JSON.parse(err.body) as { retryable?: unknown }).retryable === true;
+  } catch {
+    return false;
+  }
+}
+
+function serverMessage(err: GatewayClientError): string | undefined {
+  try {
+    const parsed = JSON.parse(err.body) as { message?: unknown };
+    return typeof parsed.message === "string" && parsed.message.trim()
+      ? parsed.message
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -149,6 +213,13 @@ export class SessionManager {
   // UI layer having to remember.
   private requestedCapabilities: string[] = [];
   private onStatusChange?: (status: SessionStatus) => void;
+  /**
+   * The in-flight initialize() promise, if one is running. Lets a concurrent
+   * caller (e.g. a send that fires while a pre-warm is still establishing the
+   * session) await the SAME init instead of returning early and then tripping
+   * the "session not ready" guard.
+   */
+  private initInFlight: Promise<void> | null = null;
 
   private readonly gateway: GatewayClient;
   private readonly modelId: string;
@@ -229,127 +300,268 @@ export class SessionManager {
       // Stale session — reset and fall through to create a new one
       this.reset();
     }
+    // An init is already running (typically a pre-warm): await that exact run
+    // rather than returning and letting the caller race ahead of a not-yet-
+    // ready session.
+    if (this.initInFlight) {
+      return this.initInFlight;
+    }
     if (this.state.status !== "idle" && this.state.status !== "error") {
-      return; // Already in progress
+      return; // in an in-between state with no tracked promise — leave as-is
     }
 
-    // Check if the wallet has enough balance before preparing the session to avoid misleading errors
-    const account = this.walletClient.account;
-    if (!account) throw new Error("Wallet account not available");
+    const run = (async () => {
+      // Check if the wallet has enough balance before preparing the session to avoid misleading errors
+      const account = this.walletClient.account;
+      if (!account) throw new Error("Wallet account not available");
 
-    const balance = await this.publicClient.getBalance({
-      address: account.address,
-    });
-
-    if (balance === 0n) {
-      throw new Error("Wallet has no balance");
-    }
-
-    // Persist the requested capability set so failover/reassignment can
-    // re-request the same constraint without the UI layer having to
-    // remember.
-    this.requestedCapabilities = opts?.requiredCapabilities ?? [];
-
-    try {
-      // Step 1: Select — dispatcher picks a worker and commits (worker, nonce,
-      // expiry) to short-lived storage. We receive the worker's encryption key
-      // so we can encrypt the session key for it before returning in Step 3.
-      this.setState("preparing");
-      let selected = await this.gateway.selectSession(this.modelId, {
-        requiredCapabilities: this.requestedCapabilities,
+      const balance = await this.publicClient.getBalance({
+        address: account.address,
       });
 
-      // Step 2: ECDH key exchange — encrypt the generated session key for the
-      // worker (and disputer, if provided).
-      this.setState("key_exchange");
-      let keyExchange = await this.performKeyExchange(selected);
-      this.sessionKey = keyExchange.sessionKey;
+      if (balance === 0n) {
+        throw new Error("Wallet has no balance");
+      }
 
-      // Step 3: Prepare — send the encrypted keys back; dispatcher signs the
-      // committed (worker, nonce, expiry) tuple with the keys bound into the
-      // EIP-712 domain (audit requirement).
-      let prepared = await this.gateway.prepareSession({
-        modelId: this.modelId,
-        encWorkerKey: keyExchange.encWorkerKey,
-        encDisputerKey: keyExchange.encDisputerKey,
-        requiredCapabilities: this.requestedCapabilities,
-        selectionId: selected.selectionId,
-      });
+      // Persist the requested capability set so failover/reassignment can
+      // re-request the same constraint without the UI layer having to
+      // remember.
+      this.requestedCapabilities = opts?.requiredCapabilities ?? [];
 
-      // Record the bound worker's full capability list so the UI can gate
-      // per-message features. Dispatcher echoes this from the heartbeat at
-      // selection time; an empty/undefined list = legacy worker.
-      this.state.workerCapabilities =
-        prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
-
-      // Step 4: Create session on-chain via user's wallet
-      this.setState("creating");
-      const modelIdBytes32 = padHexTo32Bytes(this.modelId);
-      this.modelIdBytes32 = modelIdBytes32;
-
-      let sessionId: number;
       try {
-        sessionId = await this.createSessionOnChain(
-          modelIdBytes32,
-          { ...selected, signature: prepared.signature },
-          keyExchange,
-        );
-      } catch (err) {
-        // Retry once on stale dispatcher signature (nonce consumed, or the
-        // pending selection TTL expired mid-flight — both signal a fresh
-        // select → prepare round is needed).
-        if (
-          isStaleSignatureError(err) ||
-          isPendingSelectionMissing(err) ||
-          isSelectionSuperseded(err)
-        ) {
-          selected = await this.gateway.selectSession(this.modelId, {
+        if (isSortitionEnabled) {
+          // ----------------------------------------------------------------
+          // SORTITION PATH: request → wrap keys (0x-hex) → provideKeys
+          // Delegate signs createSession on-chain server-side — no wallet TX.
+          // ----------------------------------------------------------------
+
+          // Step 1: Request — consumer-api blocks until a worker self-claims
+          // (typically ~10-25 s; the server caps the wait at CLAIM_TIMEOUT_MS,
+          // 60 s by default). A 408 means no worker claimed in time.
+          this.setState("preparing");
+          let req: SortitionRequestResponse;
+          try {
+            // The capability constraint rides the session request and is
+            // enforced on-chain at claimSession — only a worker that declared
+            // every required capability can claim.
+            req = await this.gateway.requestSortitionSession(this.modelId, {
+              requiredCapabilities: this.requestedCapabilities,
+              // Read fresh each attempt: someone can avoid a worker from the
+              // message it just answered, and the next send should honour it.
+              ...preferenceRequestFields(),
+            });
+          } catch (err) {
+            // 408: consumer-api's own "no worker claimed within CLAIM_TIMEOUT_MS".
+            // 504: a proxy/LB in front of consumer-api timed out this same
+            // long-poll before the 408 could return (the fronting request timeout
+            // sits at ~the same ceiling). To the user both mean the same thing —
+            // no worker claimed — so surface the clean retry message instead of a
+            // raw "Gateway API error: 504".
+            // 503: consumer-api refused up front because nothing can serve
+            // this request — nobody registered for the model, nobody online,
+            // or nobody holding the capabilities asked for. Unlike the
+            // timeouts above it arrives immediately, costs no fee, and says
+            // which of those it was.
+            if (
+              err instanceof GatewayClientError &&
+              (err.status === 408 || err.status === 504 || err.status === 503)
+            ) {
+              // The API knows which model, which capability, and whether
+              // anyone is registered at all, so prefer its sentence over a
+              // guess made here — this used to name web search even when
+              // search had nothing to do with the failure.
+              throw new NoWorkerAvailableError(
+                serverMessage(err) ??
+                  (this.requestedCapabilities.length > 0
+                    ? "No worker online right now supports the options selected — try again, or turn them off."
+                    : undefined),
+                // A proxy 504 cut off the same long-poll a 408 reports, so it
+                // means the same thing to the reader: nobody claimed in time.
+                serverRetryable(err) || err.status === 504
+              );
+            }
+            throw err;
+          }
+
+          // Step 2: ECDH key exchange using 0x-hex encoded keys (mirrors the
+          // rewrapAndUpdateKey / updateSessionKey path at session.ts:600-616).
+          this.setState("key_exchange");
+          const sessionKey = await generateSessionKey();
+          this.sessionKey = sessionKey;
+
+          // Defence-in-depth: hexToBytes does `hex.slice(2)` unconditionally, so a
+          // prefix-less key silently loses its leading byte. The API should return
+          // 0x-hex, but normalise here too so a raw-hex key can't corrupt the key.
+          const as0xHex = (k: string): `0x${string}` =>
+            (k.startsWith("0x") ? k : `0x${k}`) as `0x${string}`;
+
+          const workerPubRaw = hexToBytes(as0xHex(req.workerEncryptionKey));
+          const workerPub = await importPublicKey(workerPubRaw);
+          const encWorkerKeyBytes = await encryptSessionKey(
+            sessionKey,
+            workerPub
+          );
+          const encWorkerKey = toHex(encWorkerKeyBytes);
+
+          let encDisputerKey = "0x";
+          if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
+            this.disputerEncryptionKey = req.disputerEncryptionKey;
+            const disputerPubRaw = hexToBytes(
+              as0xHex(req.disputerEncryptionKey)
+            );
+            const disputerPub = await importPublicKey(disputerPubRaw);
+            const encDisputerKeyBytes = await encryptSessionKey(
+              sessionKey,
+              disputerPub
+            );
+            encDisputerKey = toHex(encDisputerKeyBytes);
+          }
+
+          // Step 3: Provide keys — consumer-api submits createSession on-chain
+          // via the delegate (no wallet popup).
+          this.setState("creating");
+          const { sessionId: sessionIdStr } =
+            await this.gateway.provideSortitionKeys(
+              req.reqId,
+              encWorkerKey,
+              encDisputerKey
+            );
+          const sessionId = Number(sessionIdStr);
+
+          // Capture session metadata for downstream use.
+          this.state.workerCapabilities = req.capabilities;
+          // Store disputer key for failover rewrap — only when a non-empty key was returned.
+          if (req.disputerEncryptionKey && req.disputerEncryptionKey !== "0x") {
+            this.disputerEncryptionKey = req.disputerEncryptionKey;
+          }
+
+          // Step 4: Wait for relay token (unchanged — Layer B mints it).
+          const relayToken = await this.waitForRelayToken(sessionId);
+
+          this.state = {
+            status: "ready",
+            sessionId,
+            relayUrl: this.relayUrl,
+            relayToken,
+            error: null,
+            workerCapabilities: this.state.workerCapabilities,
+          };
+          this.onStatusChange?.("ready");
+          this.persist();
+        } else {
+          // ----------------------------------------------------------------
+          // LEGACY PATH: select → prepare → createSessionOnChain (wallet TX)
+          // ----------------------------------------------------------------
+
+          // Step 1: Select — dispatcher picks a worker and commits (worker, nonce,
+          // expiry) to short-lived storage. We receive the worker's encryption key
+          // so we can encrypt the session key for it before returning in Step 3.
+          this.setState("preparing");
+          let selected = await this.gateway.selectSession(this.modelId, {
             requiredCapabilities: this.requestedCapabilities,
           });
-          keyExchange = await this.performKeyExchange(selected);
+
+          // Step 2: ECDH key exchange — encrypt the generated session key for the
+          // worker (and disputer, if provided).
+          this.setState("key_exchange");
+          let keyExchange = await this.performKeyExchange(selected);
           this.sessionKey = keyExchange.sessionKey;
-          prepared = await this.gateway.prepareSession({
+
+          // Step 3: Prepare — send the encrypted keys back; dispatcher signs the
+          // committed (worker, nonce, expiry) tuple with the keys bound into the
+          // EIP-712 domain (audit requirement).
+          let prepared = await this.gateway.prepareSession({
             modelId: this.modelId,
             encWorkerKey: keyExchange.encWorkerKey,
             encDisputerKey: keyExchange.encDisputerKey,
             requiredCapabilities: this.requestedCapabilities,
             selectionId: selected.selectionId,
           });
+
+          // Record the bound worker's full capability list so the UI can gate
+          // per-message features. Dispatcher echoes this from the heartbeat at
+          // selection time; an empty/undefined list = legacy worker.
           this.state.workerCapabilities =
             prepared.workerCapabilities ?? selected.workerCapabilities ?? [];
-          sessionId = await this.createSessionOnChain(
-            modelIdBytes32,
-            { ...selected, signature: prepared.signature },
-            keyExchange,
-          );
-        } else {
-          throw err;
+
+          // Step 4: Create session on-chain via user's wallet
+          this.setState("creating");
+          const modelIdBytes32 = padHexTo32Bytes(this.modelId);
+          this.modelIdBytes32 = modelIdBytes32;
+
+          let sessionId: number;
+          try {
+            sessionId = await this.createSessionOnChain(
+              modelIdBytes32,
+              { ...selected, signature: prepared.signature },
+              keyExchange
+            );
+          } catch (err) {
+            // Retry once on stale dispatcher signature (nonce consumed, or the
+            // pending selection TTL expired mid-flight — both signal a fresh
+            // select → prepare round is needed).
+            if (
+              isStaleSignatureError(err) ||
+              isPendingSelectionMissing(err) ||
+              isSelectionSuperseded(err)
+            ) {
+              selected = await this.gateway.selectSession(this.modelId, {
+                requiredCapabilities: this.requestedCapabilities,
+              });
+              keyExchange = await this.performKeyExchange(selected);
+              this.sessionKey = keyExchange.sessionKey;
+              prepared = await this.gateway.prepareSession({
+                modelId: this.modelId,
+                encWorkerKey: keyExchange.encWorkerKey,
+                encDisputerKey: keyExchange.encDisputerKey,
+                requiredCapabilities: this.requestedCapabilities,
+                selectionId: selected.selectionId,
+              });
+              this.state.workerCapabilities =
+                prepared.workerCapabilities ??
+                selected.workerCapabilities ??
+                [];
+              sessionId = await this.createSessionOnChain(
+                modelIdBytes32,
+                { ...selected, signature: prepared.signature },
+                keyExchange
+              );
+            } else {
+              throw err;
+            }
+          }
+
+          const relayToken = await this.waitForRelayToken(sessionId);
+
+          this.state = {
+            status: "ready",
+            sessionId,
+            relayUrl: this.relayUrl,
+            relayToken,
+            error: null,
+            // Preserve the capability list captured during prepareSession above —
+            // ready-state writes must NOT clobber it.
+            workerCapabilities: this.state.workerCapabilities,
+          };
+          this.onStatusChange?.("ready");
+          this.persist();
         }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.state = {
+          ...this.state,
+          status: "error",
+          error: msg,
+        };
+        this.onStatusChange?.("error");
+        throw err;
       }
-
-      const relayToken = await this.waitForRelayToken(sessionId);
-
-      this.state = {
-        status: "ready",
-        sessionId,
-        relayUrl: this.relayUrl,
-        relayToken,
-        error: null,
-        // Preserve the capability list captured during prepareSession above —
-        // ready-state writes must NOT clobber it.
-        workerCapabilities: this.state.workerCapabilities,
-      };
-      this.onStatusChange?.("ready");
-      this.persist();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.state = {
-        ...this.state,
-        status: "error",
-        error: msg,
-      };
-      this.onStatusChange?.("error");
-      throw err;
+    })();
+    this.initInFlight = run;
+    try {
+      await run;
+    } finally {
+      this.initInFlight = null;
     }
   }
 
@@ -362,8 +574,9 @@ export class SessionManager {
    * Then, based on `getSubmitMode()`:
    *  - "delegated"/"auto": call the consumer-api `POST /api/sessions/:id/messages`
    *    which runs `submitJobOnBehalf`, debiting the user's prepaid balance — no
-   *    wallet popup. "auto" falls back to the wallet path on
-   *    DelegateNotAuthorized / InsufficientPrepaidBalance (reusing the blob).
+   *    wallet popup. "auto" may fall back to the wallet path when the
+   *    consumer-api refused before broadcasting, reusing the blob
+   *    (see walletMayRetry).
    *  - "wallet": user signs a `submitJob` type-2 TX per prompt (legacy).
    *
    * The blob-then-submit split exists because browser wallets (MetaMask)
@@ -383,18 +596,23 @@ export class SessionManager {
     const account = this.walletClient.account;
     if (!account) throw new Error("Wallet account not available");
 
-    // 1. Encrypt → base64
-    const encryptedBase64 = await this.encryptPrompt(plaintext);
+    // 1. Encode the prompt envelope (search → sentinel byte + JSON; else raw
+    //    UTF-8) then encrypt the resulting bytes. The sentinel + JSON format
+    //    matches pkg/searchaug.DecodePrompt so the dispatcher can read it.
+    const payload = this.encodePromptPayload(
+      plaintext,
+      opts?.searchEnabled === true
+    );
+    const encryptedBase64 = await this.encryptPromptBytes(payload);
 
     // 2. Upload to gateway — gateway submits the real blob TX. Post-audit the
     // on-chain submitJob accepts a single blob hash per job; if the prompt spans
     // multiple blobs we can't fit it in one job under the current contract.
-    // searchEnabled rides the same upload as an opt-in side-channel (web-search
-    // epic, Story 15) — the gateway writes job-flags:{sid}:{blobHash} so the
-    // dispatcher can populate the per-job control flag.
+    // sessionId is required by the dispatcher-free /api/blobs so consumer-api
+    // routes the blob to the right session. searchEnabled now travels inside the
+    // encrypted prompt envelope above (encodePromptPayload), not as a side-channel.
     const blobResponse = await this.gateway.uploadBlob(encryptedBase64, {
       sessionId: String(this.state.sessionId),
-      searchEnabled: opts?.searchEnabled === true,
     });
     const blobHashes = blobResponse.blobHashes as `0x${string}`[];
     if (blobHashes.length === 0) {
@@ -402,7 +620,7 @@ export class SessionManager {
     }
     if (blobHashes.length > 1) {
       throw new Error(
-        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`,
+        `Prompt too large: spans ${blobHashes.length} blobs, but contract accepts only one per job`
       );
     }
 
@@ -412,18 +630,15 @@ export class SessionManager {
       try {
         const result = await this.gateway.submitMessage(
           this.state.sessionId,
-          blobHashes[0],
+          blobHashes[0]
         );
 
         return { jobId: Number(result.jobId), txHash: result.txHash };
       } catch (err) {
-        const recoverable =
-          err instanceof DelegateNotAuthorizedError ||
-          err instanceof InsufficientPrepaidBalanceError;
-        if (mode === "delegated" || !recoverable) {
+        if (mode === "delegated" || !walletMayRetry(err)) {
           throw err;
         }
-        // mode === "auto" + recoverable → fall through to the wallet path,
+        // mode === "auto" + walletMayRetry → fall through to the wallet path,
         // reusing the blob we already uploaded.
       }
     }
@@ -433,7 +648,7 @@ export class SessionManager {
 
   /** Wallet-signed submitJob path (legacy / fallback). */
   private async submitJobViaWallet(
-    blobHash: `0x${string}`,
+    blobHash: `0x${string}`
   ): Promise<{ jobId: number; txHash: string }> {
     if (this.state.sessionId === null) {
       throw new Error("Session ID not available");
@@ -489,6 +704,42 @@ export class SessionManager {
   }
 
   /**
+   * Builds the prompt envelope bytes.
+   *
+   * When search is enabled: one sentinel byte `0x00` followed by UTF-8
+   * `JSON.stringify({ v: 1, prompt, search: true })`.  This matches the
+   * format expected by Go `pkg/searchaug.DecodePrompt`.
+   *
+   * When search is disabled: raw UTF-8 bytes of the plaintext (unchanged).
+   */
+  private encodePromptPayload(
+    plaintext: string,
+    searchEnabled: boolean
+  ): Uint8Array {
+    if (!searchEnabled) {
+      return new TextEncoder().encode(plaintext);
+    }
+    const json = JSON.stringify({ v: 1, prompt: plaintext, search: true });
+    const body = new TextEncoder().encode(json);
+    const out = new Uint8Array(body.length + 1);
+    out[0] = 0x00; // sentinel — matches pkg/searchaug.DecodePrompt
+    out.set(body, 1);
+    return out;
+  }
+
+  /**
+   * Encrypts raw payload bytes using the session key.
+   * Returns base64-encoded ciphertext suitable for the gateway API.
+   */
+  private async encryptPromptBytes(payload: Uint8Array): Promise<string> {
+    if (!this.sessionKey) {
+      throw new Error("Session not initialized — no session key");
+    }
+    const ciphertext = await encrypt(this.sessionKey, payload);
+    return uint8ToBase64(ciphertext);
+  }
+
+  /**
    * Encrypts a plaintext prompt using the session key.
    * Returns base64-encoded ciphertext suitable for the gateway API.
    */
@@ -519,6 +770,28 @@ export class SessionManager {
   updateToken(token: string) {
     this.state.relayToken = token;
     this.persist();
+  }
+
+  /**
+   * Re-mints the relay token for the currently-active session from the same
+   * source `initialize()` uses (`getSessionToken` → the gateway's ES256K relay
+   * token), replacing whatever is in state, and returns it.
+   *
+   * A relay token is short-lived, but a session — and its sessionStorage
+   * snapshot — is not: a restored or long-reused session keeps a token that
+   * has since expired, and reconnecting with it earns a silent 401 from the
+   * relay. Callers that must have a live socket right now (a one-off speech
+   * job whose worker answers in a second) re-mint first so the handshake can
+   * actually authenticate.
+   */
+  async refreshRelayToken(): Promise<string> {
+    if (this.state.sessionId === null) {
+      throw new Error("No active session — cannot refresh relay token");
+    }
+    const relayToken = await this.waitForRelayToken(this.state.sessionId);
+    this.state = { ...this.state, relayToken, relayUrl: this.relayUrl };
+    this.persist();
+    return relayToken;
   }
 
   /**
@@ -574,7 +847,7 @@ export class SessionManager {
       if (isMaxReassignmentsError(err)) {
         throw new MaxReassignmentsError(
           this.state.sessionId,
-          extractMaxFromError(err),
+          extractMaxFromError(err)
         );
       }
       throw err;
@@ -601,7 +874,7 @@ export class SessionManager {
       const workerPub = await importPublicKey(workerPubRaw);
       const encWorkerKeyBytes = await encryptSessionKey(
         this.sessionKey,
-        workerPub,
+        workerPub
       );
 
       if (!this.disputerEncryptionKey) throw new MissingDisputerKeyError();
@@ -609,7 +882,7 @@ export class SessionManager {
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         this.sessionKey,
-        disputerPub,
+        disputerPub
       );
 
       const encWorkerKeyHex = toHex(encWorkerKeyBytes);
@@ -677,7 +950,61 @@ export class SessionManager {
       submittedAt: Number(job.submittedAt),
       completedAt: Number(job.completedAt),
       deadline: Number(job.deadline),
+      promptBlobHash: job.promptBlobHash,
+      responseBlobHash: job.responseBlobHash,
+      responseCiphertextHash: job.responseCiphertextHash,
+      submitBlockNumber: Number(job.submitBlockNumber),
+      completionBlockNumber: Number(job.completionBlockNumber),
     };
+  }
+
+  /**
+   * Reads the stake bonded behind a worker — what a successful dispute
+   * slashes, i.e. the concrete measure of how much an answer is backed by.
+   */
+  async getWorkerStake(worker: string): Promise<bigint> {
+    return await this.publicClient.readContract({
+      address: this.workerRegistryAddress,
+      abi: workerRegistryAbi,
+      functionName: "getWorkerStake",
+      args: [worker as `0x${string}`],
+    });
+  }
+
+  /**
+   * Bond-free cryptographic dispute: submits the received ciphertext and the
+   * worker's signature; the contract slashes the worker when
+   * keccak256(ciphertext) differs from the committed responseCiphertextHash.
+   * Callable only within the live page session that received the answer —
+   * the ciphertext is never persisted.
+   */
+  async disputeResponseMismatch(args: {
+    jobId: number;
+    ciphertext: Uint8Array;
+    signature: `0x${string}`;
+  }): Promise<{ txHash: string }> {
+    const account = this.walletClient.account;
+    if (!account) throw new Error("Wallet account not available");
+
+    const callParams = {
+      account,
+      address: this.jobRegistryAddress,
+      abi: jobRegistryAbi,
+      functionName: "disputeResponseMismatch",
+      args: [BigInt(args.jobId), toHex(args.ciphertext), args.signature],
+    } as const;
+
+    const gasEstimate = await this.publicClient.estimateContractGas(callParams);
+    const { request } = await this.publicClient.simulateContract({
+      ...callParams,
+      gas: (gasEstimate * 120n) / 100n,
+    });
+    const hash = await this.walletClient.writeContract(request);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`disputeResponseMismatch TX reverted (tx ${hash})`);
+    }
+    return { txHash: hash };
   }
 
   /**
@@ -788,7 +1115,7 @@ export class SessionManager {
   private async createSessionOnChain(
     modelIdBytes32: `0x${string}`,
     prepared: PrepareSessionResponse,
-    keyExchange: { encWorkerKey: string; encDisputerKey: string },
+    keyExchange: { encWorkerKey: string; encDisputerKey: string }
   ): Promise<number> {
     const account = this.walletClient.account;
 
@@ -852,7 +1179,7 @@ export class SessionManager {
       const disputerPub = await importPublicKey(disputerPubRaw);
       const encDisputerKeyBytes = await encryptSessionKey(
         sessionKey,
-        disputerPub,
+        disputerPub
       );
       encDisputerKey = uint8ToBase64(encDisputerKeyBytes);
     }
@@ -1090,7 +1417,7 @@ function isSelectionSuperseded(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 function isReadyTokenResponse(
-  response: TokenResponse | PendingTokenResponse,
+  response: TokenResponse | PendingTokenResponse
 ): response is TokenResponse {
   return "token" in response && Boolean(response.token);
 }

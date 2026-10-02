@@ -27,6 +27,26 @@ export const fetcher = async (url: string) => {
   return response.json();
 };
 
+/**
+ * Votes fetcher. A 404 here just means the chat has no persisted votes yet
+ * (a brand-new or not-yet-saved chat), so it is a normal empty state rather
+ * than an error. Returning [] instead of throwing stops SWR from retrying the
+ * benign 404 in a tight loop — the console spam seen on fresh chats.
+ */
+export const votesFetcher = async (url: string) => {
+  const response = await $http.get(url);
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    const { code, cause } = await response.json();
+    throw new ChatSDKError(code as ErrorCode, cause);
+  }
+
+  return response.json();
+};
+
 export async function fetchWithErrorHandlers(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -99,16 +119,35 @@ type APIMessage = DBMessage & {
 };
 
 export function convertToUIMessages(messages: APIMessage[]): ChatMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    role: message.role as 'user' | 'assistant' | 'system',
-    parts: message.parts as UIMessagePart<CustomUIDataTypes, ChatTools>[],
-    metadata: {
-      createdAt: formatISO(message.createdAt),
-      ...(message.jobId != null ? { jobId: message.jobId } : {}),
-      ...(message.protocolMeta ? { protocolMeta: message.protocolMeta } : {}),
-    },
-  }));
+  // Per-row tolerance: a half-written in-flight row (null createdAt, missing
+  // parts) must not take down the whole /chat/[id] render — skip it; the live
+  // stream or the next reload replaces it.
+  return messages.flatMap((message) => {
+    try {
+      const createdAt = message.createdAt
+        ? formatISO(message.createdAt)
+        : formatISO(new Date(0));
+      return [
+        {
+          id: message.id,
+          role: message.role as 'user' | 'assistant' | 'system',
+          parts: (Array.isArray(message.parts)
+            ? message.parts
+            : []) as UIMessagePart<CustomUIDataTypes, ChatTools>[],
+          metadata: {
+            createdAt,
+            ...(message.jobId != null ? { jobId: message.jobId } : {}),
+            ...(message.protocolMeta
+              ? { protocolMeta: message.protocolMeta }
+              : {}),
+          },
+        },
+      ];
+    } catch (error) {
+      console.warn('Skipping malformed message row', message?.id, error);
+      return [];
+    }
+  });
 }
 
 export function getTextFromMessage(message: ChatMessage): string {

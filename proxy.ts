@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { isDevelopmentEnvironment } from "./lib/constants";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -17,10 +16,14 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Auth.js names the session cookie `__Secure-authjs.session-token` only when
+  // it was set over https; a production build served over plain http (the
+  // compose devnet) sets the un-prefixed name. Detect by presence rather than
+  // by NODE_ENV so `/chat/:id` does not bounce every http visitor to "/".
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
-    secureCookie: !isDevelopmentEnvironment,
+    secureCookie: request.cookies.has("__Secure-authjs.session-token"),
   });
 
   // Allow unauthenticated access to home page (they'll see greeting with connect button)

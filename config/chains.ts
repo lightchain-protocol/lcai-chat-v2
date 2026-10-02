@@ -43,7 +43,13 @@ export const lcai: Chain = {
 };
 
 export const lcaiTestnet: Chain = {
-  id: 8200,
+  // Overridable via NEXT_PUBLIC_CHAIN_ID (baked at build time), matching the
+  // RPC URL below, so a private devnet presents its own chain id to the wallet
+  // instead of claiming to be the public testnet. Unset falls back to 8200.
+  //
+  // Must be `||` and not `??`: Number(undefined) is NaN and Number("") is 0,
+  // both falsy but neither nullish, so `??` would let them through.
+  id: Number(process.env.NEXT_PUBLIC_CHAIN_ID) || 8200,
   name: "LightchainAI Testnet",
   nativeCurrency: {
     name: "LightchainAI",

@@ -17,10 +17,19 @@ const queryClient = new QueryClient({
 });
 
 // Set up metadata
+//
+// `url` has to match the origin actually serving the dapp. Wallets check a
+// signing request against this value, so a hardcoded production URL while
+// running on localhost makes WalletConnect warn and can leave the request
+// hanging without ever surfacing in the wallet. Use the live origin in the
+// browser; keep the production URL for SSR, where there is no window.
 const metadata = {
   name: "LCAI Chat",
   description: "LCAI Chat using AI SDK with Web3 Authentication",
-  url: "https://chat.lightchain.ai",
+  url:
+    typeof window === "undefined"
+      ? "https://chat.lightchain.ai"
+      : window.location.origin,
   icons: ["https://avatars.githubusercontent.com/u/179229932"],
 };
 

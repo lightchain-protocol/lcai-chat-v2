@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { $http } from "@/lib/http";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
+import { useSession } from "next-auth/react";
 
 type SystemPromptEditorProps = {
   open: boolean;
@@ -31,6 +32,7 @@ export function SystemPromptEditor({
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const { status: sessionStatus } = useSession();
 
   const handleSave = async () => {
     if (!name.trim() || !prompt.trim()) {

@@ -4,11 +4,18 @@ import equal from "fast-deep-equal";
 import { motion } from "framer-motion";
 import { memo, useMemo, useState } from "react";
 import { useIsClient } from "usehooks-ts";
+import { isAgentDescriptor } from "@/lib/agent/timeline";
 import type { Vote } from "@/lib/db/schema";
+import type { ArtifactDescriptor } from "@/lib/protocol/artifact";
+import { servedModelIdFromMessage } from "@/lib/protocol/served-model";
+import type { OnChainJob } from "@/lib/protocol/session";
 import type { TrackedJob } from "@/lib/protocol/transport";
 import type { ChatMessage, WebSearchSource } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
+import { AgentTimeline } from "./agent-timeline";
 import { Shimmer } from "./ai-elements/shimmer";
+import { AssistantAvatar } from "./assistant-answer";
+import { BranchControls, type BranchControlsData } from "./branch-controls";
 import { CitationResponse, type CitationSource } from "./citation-response";
 import { useDataStream } from "./data-stream-provider";
 import { MessageContent } from "./elements/message";
@@ -19,6 +26,7 @@ import { MessageEditor } from "./message-editor";
 import { MessageJobActions } from "./message-job-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
+import { ProvenanceChip } from "./provenance-chip";
 import { SourceLinkChip } from "./source-link-chip";
 import { Weather } from "./weather";
 
@@ -35,11 +43,24 @@ const PurePreviewMessage = ({
   trackedJob,
   claimJobTimeout,
   disputeJob,
+  disputeResponseMismatch,
+  hasMismatchEvidence,
+  fetchOnChainJob,
+  fetchWorkerStake,
+  explorerBaseUrl,
+  branch,
+  disableActions,
 }: {
   chatId: string;
   message: ChatMessage;
   vote: Vote | undefined;
   isLoading: boolean;
+  /**
+   * Suppresses the per-message action bar (copy/vote/regenerate), branch
+   * controls, and job actions. Set on multi-model answer columns, where a
+   * whole-turn regenerate or a per-column branch would target the wrong thing.
+   */
+  disableActions?: boolean;
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
@@ -48,15 +69,105 @@ const PurePreviewMessage = ({
   trackedJob?: TrackedJob;
   claimJobTimeout?: (jobId: number) => Promise<{ txHash: string }>;
   disputeJob?: (jobId: number) => Promise<{ txHash: string; bond: bigint }>;
+  /** Files disputeResponseMismatch with live-session evidence, if retained. */
+  disputeResponseMismatch?: (jobId: number) => Promise<{ txHash: string }>;
+  hasMismatchEvidence?: (jobId: number) => boolean;
+  /** Reads a job from the chain so a reloaded answer stays verifiable. */
+  fetchOnChainJob?: (jobId: number) => Promise<OnChainJob | null>;
+  fetchWorkerStake?: (worker: string) => Promise<bigint | null>;
+  explorerBaseUrl?: string;
+  /** Fork + sibling navigator; omitted on read-only views and while loading. */
+  branch?: BranchControlsData;
 }) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const isClient = useIsClient();
 
   const parts = message.parts ?? [];
 
-  const attachmentsFromMessage = parts.filter(
-    (part) => part.type === "file"
+  const attachmentsFromMessage = parts.filter((part) => part.type === "file");
+
+  // Arrives as a data part both live and after a reload: the worker sends it
+  // on its own frame kind mid-stream, and completeAssistantMessage persists
+  // the same shape, so a refresh keeps the badge.
+  const generationStats = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-generationStats" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const responseProof = useMemo(() => {
+    for (const part of parts) {
+      // Require a real payload: rows persisted while the API stripped unknown
+      // data keys come back as `{}`, which is truthy but carries no proof.
+      if (
+        part.type === "data-responseProof" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  // Agent-mode frames render as one step timeline per message, not as
+  // individual artifact cards — pairing tool_call/tool_result needs the
+  // whole set.
+  const agentDescriptors = useMemo(
+    () =>
+      parts
+        .filter(
+          (part) =>
+            part.type === "data-artifact" &&
+            part.data &&
+            isAgentDescriptor(part.data)
+        )
+        .map((part) => (part as { data: ArtifactDescriptor }).data),
+    [parts]
   );
+
+  // The settlement journey and browser-measured timing, reconciled in place
+  // during the stream (stable part ids) and persisted in final form, so the
+  // same record renders live and after a reload.
+  const settlement = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-settlement" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  const streamMetrics = useMemo(() => {
+    for (const part of parts) {
+      if (
+        part.type === "data-streamMetrics" &&
+        part.data &&
+        Object.keys(part.data).length > 0
+      ) {
+        return part.data;
+      }
+    }
+    return null;
+  }, [parts]);
+
+  // The friendly catalogue id of the model that served this answer — from
+  // metadata.protocolMeta after a reload, from the data-protocolMeta part
+  // while the stream is still live (the row's metadata only exists after the
+  // persist round trip). Drives tier labels and the Max readouts in the
+  // provenance chip.
+  const servedModelId = servedModelIdFromMessage(message);
 
   const protocolFinalText = useMemo(() => {
     for (const part of parts) {
@@ -142,11 +253,7 @@ const PurePreviewMessage = ({
           "justify-start": message.role === "assistant",
         })}
       >
-        {message.role === "assistant" && (
-          <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background p-1 ring-1 ring-border">
-            <LCAIIcon size={14} />
-          </div>
-        )}
+        {message.role === "assistant" && <AssistantAvatar />}
 
         <div
           className={cn("flex flex-col", {
@@ -154,12 +261,13 @@ const PurePreviewMessage = ({
               (p) => p.type === "text" && p.text?.trim()
             ),
             "min-h-96": message.role === "assistant" && requiresScrollPadding,
-            "w-full":
-              (message.role === "assistant" &&
-                parts.some(
-                  (p) => p.type === "text" && p.text?.trim()
-                )) ||
-              mode === "edit",
+            // Only the user's bubble shrink-wraps; assistant content is
+            // left-aligned flow at any width. Keying this on "has text" meant a
+            // turn that produced none — the failure case — collapsed to its
+            // widest child, so the provenance panel opened into a third of the
+            // column and the settlement labels broke mid-word. The failure is
+            // exactly when that trail needs reading.
+            "w-full": message.role === "assistant" || mode === "edit",
             "max-w-[calc(100%-2.5rem)] sm:max-w-[min(fit-content,80%)]":
               message.role === "user" && mode !== "edit",
           })}
@@ -182,6 +290,10 @@ const PurePreviewMessage = ({
             </div>
           )}
 
+          {agentDescriptors.length > 0 && (
+            <AgentTimeline descriptors={agentDescriptors} />
+          )}
+
           {parts.map((part, index) => {
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
@@ -194,6 +306,12 @@ const PurePreviewMessage = ({
                   reasoning={part.text}
                 />
               );
+            }
+
+            // Agent frames render together in the timeline above; every
+            // other artifact schema is ignored until it has a renderer.
+            if (type === "data-artifact") {
+              return null;
             }
 
             if (type === "text") {
@@ -364,18 +482,60 @@ const PurePreviewMessage = ({
             </div>
           )}
 
-          {!isReadonly && (
-            <MessageActions
-              chatId={chatId}
-              isLoading={isLoading}
-              key={`action-${message.id}`}
-              message={message}
-              setMode={setMode}
-              vote={vote}
-            />
+          {message.role === "assistant" &&
+            (generationStats ||
+              responseProof ||
+              settlement ||
+              streamMetrics ||
+              // A paid job with no surviving proof parts (e.g. persisted while
+              // the API stripped data keys) still gets the chip: it shows the
+              // on-chain record honestly as "Not verified" rather than hiding.
+              jobId !== undefined) && (
+              <ProvenanceChip
+                disputeResponseMismatch={disputeResponseMismatch}
+                explorerBaseUrl={explorerBaseUrl}
+                fallbackWorker={trackedJob?.worker}
+                fetchOnChainJob={fetchOnChainJob}
+                fetchWorkerStake={fetchWorkerStake}
+                hasMismatchEvidence={hasMismatchEvidence}
+                jobId={jobId}
+                live={isLoading}
+                metrics={streamMetrics}
+                proof={responseProof}
+                servedModelId={servedModelId}
+                settlement={settlement}
+                stats={generationStats}
+              />
+            )}
+
+          {!isReadonly && !disableActions && (
+            // A flex parent makes MessageActions a flex ITEM, so it shrinks to
+            // its content and the `justify-end` it sets on itself has nothing
+            // to push against — a user message's controls sat at the left of
+            // the column instead of under the bubble they belong to. The row
+            // has to do the aligning, matching the same conditional the
+            // message body above uses.
+            <div
+              className={cn("flex w-full items-center gap-1", {
+                "justify-end": message.role === "user",
+              })}
+            >
+              <MessageActions
+                chatId={chatId}
+                isLoading={isLoading}
+                key={`action-${message.id}`}
+                message={message}
+                regenerate={
+                  message.role === "assistant" ? () => regenerate() : undefined
+                }
+                setMode={setMode}
+                vote={vote}
+              />
+              {branch && !isLoading && <BranchControls branch={branch} />}
+            </div>
           )}
 
-          {!isReadonly && jobId !== undefined && (
+          {!isReadonly && !disableActions && jobId !== undefined && (
             <MessageJobActions
               jobId={jobId}
               messageRole={message.role as "user" | "assistant"}
@@ -413,9 +573,11 @@ export const PreviewMessage = memo(
   }
 );
 
+const WWW_PREFIX = /^www\./;
+
 function formatSourceHost(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    return new URL(url).hostname.replace(WWW_PREFIX, "");
   } catch {
     return url;
   }
@@ -462,3 +624,55 @@ export const ThinkingMessage = ({
     </motion.div>
   );
 };
+
+/**
+ * A turn that failed, shown in the thread where the answer would have been.
+ *
+ * A toast is the wrong surface for this: it is transient, and someone who
+ * switches tabs during a ~30s wait comes back to a conversation that simply
+ * stops, with no way to tell whether it failed or is still going. The place a
+ * reader looks for the answer is the place that has to say there isn't one.
+ *
+ * Deliberately not a real message: it is never persisted, never sent as
+ * history, and disappears on retry — so a failure cannot end up quoted back
+ * to a model as though the assistant had said it.
+ */
+export const TurnFailedMessage = ({
+  title,
+  detail,
+  onRetry,
+}: {
+  title: string;
+  detail?: string;
+  /** Omitted when retrying cannot help, so no button promises a fix. */
+  onRetry?: () => void;
+}) => (
+  <motion.div
+    animate={{ opacity: 1 }}
+    className="group/message w-full"
+    data-role="assistant"
+    data-testid="message-turn-failed"
+    initial={{ opacity: 0 }}
+    transition={{ duration: 0.2 }}
+  >
+    <div className="flex items-start justify-start gap-3">
+      <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
+        <LCAIIcon size={14} />
+      </div>
+
+      <div className="flex w-full min-w-0 flex-col gap-1">
+        <p className="text-content-strong text-sm">{title}</p>
+        {detail && <p className="text-content-medium text-xs">{detail}</p>}
+        {onRetry && (
+          <button
+            className="w-fit text-content-secondary text-xs underline underline-offset-2 hover:text-content-strong"
+            onClick={onRetry}
+            type="button"
+          >
+            Try again
+          </button>
+        )}
+      </div>
+    </div>
+  </motion.div>
+);

@@ -3,11 +3,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
-import config from "@/config";
+import config, { isSortitionEnabled } from "@/config";
+import { jobRegistryAbi } from "@/contracts/job-registry-abi";
+import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
 import useWeb3Clients from "@/hooks/use-web3-clients";
 import { $http } from "@/lib/http";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
+import { resolveModelSelection } from "@/lib/protocol/resolve-model";
 import type { SessionStatus, SubmitMode } from "@/lib/protocol/session";
 import type { FailoverStatus, TrackedJob } from "@/lib/protocol/transport";
 import { ProtocolTransport } from "@/lib/protocol/transport";
@@ -19,8 +22,13 @@ import type { ProtocolLoadingStatus } from "@/lib/types";
  * Lazily initializes on first use — session is created when getTransport()
  * is called (typically on first message send in chat.tsx).
  *
- * The local modelId (e.g. "chat-model") is resolved to the gateway's hex
- * model ID on first getTransport() call by fetching GET /api/models.
+ * `modelId` is now always the real gateway hex model id, sourced directly
+ * from the model picker (which reads live from /api/models via useModels()).
+ * No more friendly-local-id fuzzy matching — resolveModelId() just confirms
+ * the id is one of the currently-available models before using it, and
+ * throws instead of silently falling back to models[0] if it isn't (a
+ * silent fallback previously meant picking an unintended model with no
+ * visible error).
  */
 // biome-ignore lint/nursery/useMaxParams: positional args mirror the prior signature; an options object would churn every call site.
 export function useProtocolSession(
@@ -33,7 +41,13 @@ export function useProtocolSession(
    * flip from "wallet" to "delegated" the moment the user finishes setting up
    * a prepaid balance. Defaults to "wallet" (legacy per-prompt TX).
    */
-  submitMode: SubmitMode = "wallet"
+  submitMode: SubmitMode = "wallet",
+  /**
+   * Device-local private memory prefix (lib/memory.ts), read once per send at
+   * envelope assembly. A ref-backed getter keeps the lazily-created transport
+   * in sync with later edits without recreating it.
+   */
+  getMemoryPrefix?: () => string
 ) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -48,12 +62,16 @@ export function useProtocolSession(
   const [timedOutJob, setTimedOutJob] = useState<TrackedJob | null>(null);
   const transportRef = useRef<ProtocolTransport | null>(null);
   const gatewayRef = useRef<GatewayClient | null>(null);
-  const resolvedModelIdRef = useRef<string | null>(null);
   const walletClientRef = useRef(walletClient);
   const addressRef = useRef(address);
   const submitModeRef = useRef<SubmitMode>(submitMode);
   const walletAddress = address ?? null;
   const lastWalletAddressRef = useRef<string | null>(walletAddress);
+  // Tracks the modelId a transport was actually built for, so the
+  // model-switch effect below only tears down when it *changes* — not on
+  // every render, and not on the very first mount (releaseTransport() is
+  // already called for that by the existing chatId effect).
+  const lastModelIdRef = useRef<string>(modelId);
 
   // Protocol always targets the first configured chain (lcaiDevnet),
   // regardless of which chain the wallet is connected to.
@@ -79,10 +97,17 @@ export function useProtocolSession(
     return gatewayRef.current;
   }, []);
 
-  // Resolve local model ID to gateway hex ID (cached after first call)
+  // Resolve the composer's selection to an on-chain model id.
+  //
+  // The selection is USUALLY a hex id from the picker, but not always: with no
+  // `chat-model` cookie the page renders holding DEFAULT_CHAT_MODEL, which is
+  // the legacy name, and chat.tsx only swaps it for the id once /api/models
+  // resolves. The composer is live in that window, so a fast sender arrives
+  // here with "llama3-8b" — which used to throw, blaming absent workers, while
+  // the model had five. Names now resolve; only a genuinely unknown selection
+  // throws, and it no longer claims to know anything about workers, because
+  // /api/models is the registry and carries no liveness.
   const resolveModelId = useCallback(async (): Promise<string> => {
-    if (resolvedModelIdRef.current) return resolvedModelIdRef.current;
-
     const gateway = getGateway();
     const { models } = await gateway.getModels();
 
@@ -90,16 +115,18 @@ export function useProtocolSession(
       throw new Error("No models available from gateway");
     }
 
-    const match = models.find((m) =>
-      m.name.toLowerCase().includes(modelId.toLowerCase())
-    );
-    const resolved = match?.id ?? models[0].id;
-    resolvedModelIdRef.current = resolved;
-    return resolved;
+    const resolved = resolveModelSelection(modelId, models);
+    if (!resolved) {
+      throw new Error(
+        `Model ${modelId} is not one this network serves — pick another from the model menu.`
+      );
+    }
+
+    return resolved.id;
   }, [modelId, getGateway]);
 
   // Lazily create the transport — returns a promise since model resolution is async
-  const getTransport = useCallback(async () => {
+  const createTransport = useCallback(async () => {
     if (transportRef.current) return transportRef.current;
 
     const client = walletClientRef.current;
@@ -144,6 +171,7 @@ export function useProtocolSession(
       workerRegistryAddress,
       relayUrl: process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8888/ws",
       getSubmitMode: () => submitModeRef.current,
+      getMemoryPrefix,
       registerProtocolSession: async ({
         chatId: targetChatId,
         sessionId,
@@ -183,8 +211,8 @@ export function useProtocolSession(
               systemPrompt,
               completionState: "completed",
               relaySource: "protocol-user",
-              jobId,
-              protocolMeta: { jobId, sessionId },
+              ...(jobId != null ? { jobId } : {}),
+              protocolMeta: { ...(jobId != null ? { jobId } : {}), sessionId },
             }
           );
 
@@ -198,8 +226,27 @@ export function useProtocolSession(
     });
     transport.setOnSessionStatus((s) => {
       setStatus(s as SessionStatus);
+      // Refresh capability snapshot — the transport only knows the bound
+      // worker's capabilities after the session reaches "ready". Reading on
+      // every status change keeps the chat input's Switch in sync.
+      setWorkerCapabilities(transport.workerCapabilities);
 
-      if (s === "preparing" || s === "key_exchange") {
+      // A background pre-warm (first keystroke) opens the session before
+      // anything is sent. Its statuses are not a turn: surfacing them made the
+      // on-chain timeline appear, fully ticked, over an empty chat, and a warm
+      // that failed would have shown a turn error for a message never sent.
+      if (transport.isWarmingOnly) {
+        return;
+      }
+
+      if (s === "preparing") {
+        // In the sortition path the dispatcher blocks here for ~10-25 s while
+        // a worker self-claims the slot — show "finding a worker" so the UI
+        // doesn't look stuck. Legacy path shows the generic preparing label.
+        setProgressStatus(
+          isSortitionEnabled ? "finding_worker" : "preparing_chat"
+        );
+      } else if (s === "key_exchange") {
         setProgressStatus("preparing_chat");
       } else if (s === "creating") {
         setProgressStatus("writing_on_chain");
@@ -213,10 +260,6 @@ export function useProtocolSession(
       } else {
         setError(null);
       }
-      // Refresh capability snapshot — the transport only knows the bound
-      // worker's capabilities after the session reaches "ready". Reading on
-      // every status change keeps the chat input's Switch in sync.
-      setWorkerCapabilities(transport.workerCapabilities);
     });
     transport.setOnFailoverStatus(setFailoverStatus);
     transport.setOnProgressStatus(setProgressStatus);
@@ -243,14 +286,28 @@ export function useProtocolSession(
     resolveModelId,
     protocolChainId,
     publicClient,
+    getMemoryPrefix,
   ]);
+
+  // One transport per chat even when two callers race inside the async
+  // model-resolution window (pre-warm on the first keystroke, send on Enter):
+  // the in-flight promise is shared until it settles.
+  const transportPromiseRef = useRef<Promise<ProtocolTransport> | null>(null);
+  const getTransport = useCallback(async () => {
+    if (transportRef.current) return transportRef.current;
+    if (!transportPromiseRef.current) {
+      transportPromiseRef.current = createTransport().finally(() => {
+        transportPromiseRef.current = null;
+      });
+    }
+    return transportPromiseRef.current;
+  }, [createTransport]);
 
   /** Drop relay + in-memory state; keep sessionStorage for this chat. */
   const releaseTransport = useCallback(() => {
     transportRef.current?.release();
     transportRef.current = null;
     gatewayRef.current = null;
-    resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
     setProgressStatus("idle");
@@ -263,7 +320,6 @@ export function useProtocolSession(
     transportRef.current?.destroy();
     transportRef.current = null;
     gatewayRef.current = null;
-    resolvedModelIdRef.current = null;
     setStatus("idle");
     setError(null);
     setFailoverStatus("none");
@@ -310,6 +366,18 @@ export function useProtocolSession(
     releaseTransport();
   }, [chatId, releaseTransport]);
 
+  // NEW: tear down the transport when the user picks a different model
+  // mid-chat. Without this, changing `modelId` was silently a no-op —
+  // getTransport() would keep returning the already-built transport bound
+  // to the old model, since only chatId changes triggered a release.
+  // Skips the very first render (lastModelIdRef starts equal to modelId),
+  // so this doesn't double-release alongside the chatId effect on mount.
+  useEffect(() => {
+    if (lastModelIdRef.current === modelId) return;
+    lastModelIdRef.current = modelId;
+    releaseTransport();
+  }, [modelId, releaseTransport]);
+
   const claimJobTimeout = useCallback(async (jobId: number) => {
     const transport = transportRef.current;
     if (!transport) throw new Error("No active transport");
@@ -331,6 +399,114 @@ export function useProtocolSession(
     setTimedOutJob(null);
   }, []);
 
+  /**
+   * Reads a job straight from the chain. The proof panel needs this rather
+   * than the tracked-job cache (current page load only) — a reloaded
+   * conversation still has to be verifiable, and after a reload there is no
+   * transport until the next send, so fall back to a plain publicClient read.
+   */
+  const fetchOnChainJob = useCallback(
+    async (jobId: number) => {
+      const transport = transportRef.current;
+      if (transport) {
+        try {
+          return await transport.getJob(jobId);
+        } catch {
+          return null;
+        }
+      }
+      const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
+      if (!jobRegistryAddress || jobRegistryAddress === "0x") {
+        console.warn(
+          "[fetchOnChainJob] no registry for chain",
+          protocolChainId
+        );
+        return null;
+      }
+      try {
+        const job = await publicClient.readContract({
+          address: jobRegistryAddress,
+          abi: jobRegistryAbi,
+          functionName: "getJob",
+          args: [BigInt(jobId)],
+        });
+        return {
+          sessionId: Number(job.sessionId),
+          worker: job.worker,
+          state: job.state,
+          escrowedFee: job.escrowedFee,
+          submittedAt: Number(job.submittedAt),
+          completedAt: Number(job.completedAt),
+          deadline: Number(job.deadline),
+          promptBlobHash: job.promptBlobHash,
+          responseBlobHash: job.responseBlobHash,
+          responseCiphertextHash: job.responseCiphertextHash,
+          submitBlockNumber: Number(job.submitBlockNumber),
+          completionBlockNumber: Number(job.completionBlockNumber),
+        };
+      } catch (err) {
+        console.warn("[fetchOnChainJob] read failed", err);
+        return null;
+      }
+    },
+    [protocolChainId, publicClient]
+  );
+
+  /** Stake bonded behind a worker, for the proof panel. Null on failure. */
+  const fetchWorkerStake = useCallback(
+    async (worker: string) => {
+      const transport = transportRef.current;
+      if (transport) {
+        try {
+          return await transport.getWorkerStake(worker);
+        } catch {
+          return null;
+        }
+      }
+      const workerRegistryAddress =
+        config.workerRegistryAddress[protocolChainId];
+      if (!workerRegistryAddress || workerRegistryAddress === "0x") return null;
+      try {
+        return await publicClient.readContract({
+          address: workerRegistryAddress,
+          abi: workerRegistryAbi,
+          functionName: "getWorkerStake",
+          args: [worker as `0x${string}`],
+        });
+      } catch {
+        return null;
+      }
+    },
+    [protocolChainId, publicClient]
+  );
+
+  /**
+   * Cryptographic dispute with the evidence captured at receipt. Only filable
+   * while the page session that received the answer is alive — the ciphertext
+   * is never persisted, so post-reload this throws and the caller should
+   * steer the user to the bond dispute.
+   */
+  const disputeResponseMismatch = useCallback(async (jobId: number) => {
+    const transport = transportRef.current;
+    if (!transport) throw new Error("No active transport");
+    const result = await transport.disputeResponseMismatch(jobId);
+    setActiveJobs(transport.listJobs());
+    return result;
+  }, []);
+
+  /** True while disputeResponseMismatch(jobId) can still be filed. */
+  const hasMismatchEvidence = useCallback((jobId: number) => {
+    return transportRef.current?.hasMismatchEvidence(jobId) ?? false;
+  }, []);
+
+  /**
+   * Live-session share evidence (ciphertext + signature) for one job, or null
+   * once the window has passed. Backs the verifiable-transcript export.
+   */
+  const getShareEvidence = useCallback((jobId: number) => {
+    return transportRef.current?.getShareEvidence(jobId) ?? null;
+  }, []);
+
   return {
     status,
     error,
@@ -346,5 +522,10 @@ export function useProtocolSession(
     claimJobTimeout,
     disputeJob,
     clearTimedOutJob,
+    fetchOnChainJob,
+    fetchWorkerStake,
+    getShareEvidence,
+    disputeResponseMismatch,
+    hasMismatchEvidence,
   };
 }

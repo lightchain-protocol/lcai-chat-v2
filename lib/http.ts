@@ -1,4 +1,5 @@
 import { auth as authSession } from "@/app/(auth)/auth";
+import { jwtExpirySecs } from "@/lib/jwt";
 
 const AUTH_TOKEN_KEYS = ["user-token"] as const;
 let authTokenCache: string | null = null;
@@ -66,6 +67,29 @@ export async function getAuthToken(): Promise<string | null> {
   return null;
 }
 
+/** A token this close to its exp counts as gone, so a send never expires mid-flight. */
+const AUTH_TOKEN_SKEW_SECS = 30;
+
+/**
+ * Whether the consumer-api token can still carry a request. It lives an hour
+ * while the NextAuth session holding it lives for weeks, so a tab left open
+ * keeps looking signed in after every call it makes has started to fail.
+ * Synchronous so a send can be gated on it.
+ */
+export function hasUsableAuthToken(): boolean {
+  const token =
+    authTokenCache ??
+    (typeof window === "undefined"
+      ? null
+      : localStorage.getItem(AUTH_TOKEN_KEYS[0]));
+  if (!token) {
+    return false;
+  }
+  const exp = jwtExpirySecs(token);
+  // ponytail: an unreadable token is left for the server to judge.
+  return exp === null || exp - AUTH_TOKEN_SKEW_SECS > Date.now() / 1000;
+}
+
 interface RequestOptions extends Omit<RequestInit, "headers"> {
   headers?: HeadersInit;
   auth?: boolean;
@@ -77,7 +101,7 @@ interface JsonRequestOptions extends Omit<RequestOptions, "body"> {}
 async function buildHeaders(
   headers?: HeadersInit,
   auth = true,
-  bearerToken?: string
+  bearerToken?: string,
 ): Promise<Headers> {
   const resolvedHeaders = new Headers(headers);
 
@@ -93,7 +117,7 @@ async function buildHeaders(
 
 export async function request(
   path: string | URL | Request,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
 ): Promise<Response> {
   const { auth = true, headers, ...rest } = options;
 
@@ -107,12 +131,12 @@ async function jsonRequest(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {}
+  options: JsonRequestOptions = {},
 ): Promise<Response> {
   const headers = await buildHeaders(
     options.headers,
     options.auth ?? true,
-    options.bearerToken
+    options.bearerToken,
   );
 
   if (body !== undefined && !headers.has("Content-Type")) {
@@ -129,7 +153,7 @@ async function jsonRequest(
 
 export function getRequest(
   path: string,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
 ): Promise<Response> {
   return request(path, { ...options, method: "GET" });
 }
@@ -137,7 +161,7 @@ export function getRequest(
 export function postRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {}
+  options: JsonRequestOptions = {},
 ): Promise<Response> {
   return jsonRequest("POST", path, body, options);
 }
@@ -145,7 +169,7 @@ export function postRequest(
 export function putRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {}
+  options: JsonRequestOptions = {},
 ): Promise<Response> {
   return jsonRequest("PUT", path, body, options);
 }
@@ -153,7 +177,7 @@ export function putRequest(
 export function patchRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {}
+  options: JsonRequestOptions = {},
 ): Promise<Response> {
   return jsonRequest("PATCH", path, body, options);
 }
@@ -161,7 +185,7 @@ export function patchRequest(
 export function deleteRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {}
+  options: JsonRequestOptions = {},
 ): Promise<Response> {
   return jsonRequest("DELETE", path, body, options);
 }

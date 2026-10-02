@@ -1,9 +1,9 @@
 "use client";
 
 import type { UseChatHelpers } from "@ai-sdk/react";
-import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
+import { Brain } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import {
@@ -11,7 +11,6 @@ import {
   type Dispatch,
   memo,
   type SetStateAction,
-  startTransition,
   useCallback,
   useEffect,
   useRef,
@@ -19,36 +18,61 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
-import { saveChatModelAsCookie } from "@/app/(chat)/actions";
-import { SelectItem } from "@/components/ui/select";
-import { chatModels } from "@/lib/ai/models";
+import { NoWorkersNotice } from "@/components/no-workers-notice";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
+import { useJobFee } from "@/hooks/use-job-fee";
+import { formatLcai } from "@/lib/lcai";
 import { $http } from "@/lib/http";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
+import { ModelSelect } from "./model-picker";
 import {
   PromptInput,
-  PromptInputModelSelect,
-  PromptInputModelSelectContent,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
 } from "./elements/prompt-input";
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  CpuIcon,
-  PaperclipIcon,
-  StopIcon,
-} from "./icons";
+import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import AlertError from "./ui/toast/AlertError";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
+
+/**
+ * What this message will cost, shown before it is sent.
+ *
+ * Every send escrows a real fee on chain, and that number only ever appeared
+ * afterwards in the provenance panel — so the first time anyone saw the price
+ * was after paying it. Selecting several models bills one job each, which is
+ * why the figure is a total and says how many.
+ *
+ * Renders nothing while unknown rather than guessing: an absent price beats a
+ * wrong one, and this must never be a reason the composer cannot be used.
+ */
+function JobFeeIndicator({ modelIds }: { modelIds: string[] }) {
+  const { totalWei, perModel } = useJobFee(modelIds);
+  if (totalWei === null) return null;
+
+  return (
+    <span
+      className="ml-1 shrink-0 select-none self-center font-mono text-[10px] text-content-subtle"
+      data-testid="job-fee-indicator"
+      title={
+        perModel > 1
+          ? `Each message costs ${formatLcai(totalWei)} in total — one job per selected model, escrowed on chain.`
+          : `Each message escrows ${formatLcai(totalWei)} on chain as the worker's fee.`
+      }
+    >
+      {formatLcai(totalWei)}
+      {perModel > 1 ? ` · ${perModel} jobs` : ""}
+    </span>
+  );
+}
 
 function PureMultimodalInput({
   chatId,
@@ -63,8 +87,8 @@ function PureMultimodalInput({
   sendMessage,
   className,
   selectedVisibilityType,
-  selectedModelId,
-  onModelChange,
+  selectedModelIds,
+  onModelsChange,
   usage,
   enableWebSearch,
   onWebSearchToggle,
@@ -72,6 +96,8 @@ function PureMultimodalInput({
   disabled,
   disabledPlaceholder,
   onBeforeSubmit,
+  memoryActive,
+  onOpenMemory,
 }: {
   chatId: string;
   input: string;
@@ -85,28 +111,22 @@ function PureMultimodalInput({
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
   className?: string;
   selectedVisibilityType: VisibilityType;
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
+  /** 1–4 selected models. One → single-model chat; 2+ → multi-model fan-out. */
+  selectedModelIds: string[];
+  onModelsChange?: (modelIds: string[]) => void;
   usage?: AppUsage;
   enableWebSearch?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
-  /**
-   * Whether the session's bound worker advertises the "search" capability
-   * (web-search epic, Story 16). When false, the Switch is rendered disabled
-   * with a tooltip explaining the constraint — the user must start a new
-   * conversation requesting search up front to enable it. The flag is sourced
-   * from SessionManager.workerCapabilities.
-   */
   searchCapable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string;
-  /**
-   * Pre-send guard. Returns false to block the send (e.g. no wallet connected
-   * or an unfunded/undelegated prepaid balance), in which case it is expected
-   * to surface the relevant modal. When it returns false the typed input and
-   * attachments are preserved so the user can resend after resolving the issue.
-   */
   onBeforeSubmit?: () => boolean;
+  /**
+   * Device-local memory (lib/memory.ts) is enabled and has entries shaping
+   * prompts. Indicator only — click opens the memory dialog (chat.tsx).
+   */
+  memoryActive?: boolean;
+  onOpenMemory?: () => void;
 }) {
   const session = useSession();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -137,15 +157,24 @@ function PureMultimodalInput({
 
   const canUseChat = session.status === "authenticated";
 
+  // Block the composer only when live workers exist and every one is full:
+  // a full worker fails the draw rather than queueing, and that clears on its
+  // own as jobs finish. "Nobody live" is a liveness reading derived from
+  // on-chain claims, and refusing to send is exactly what keeps it at zero,
+  // so that case shows the notice but never blocks. Busy only when every
+  // selected model is full: one busy column should not stop a fan-out the
+  // others can serve. `unknown` never blocks.
+  const { isBusy: noWorkersAvailable, hasEligibleWorkers } =
+    useWorkerAvailability(selectedModelIds);
+  const inputBlocked = disabled || (noWorkersAvailable && hasEligibleWorkers);
+
   useEffect(() => {
     if (textareaRef.current) {
       const domValue = textareaRef.current.value;
-      // Prefer DOM value over localStorage to handle hydration
       const finalValue = domValue || localStorageInput || "";
       setInput(finalValue);
       adjustHeight();
     }
-    // Only run once after hydration
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adjustHeight, localStorageInput, setInput]);
 
@@ -161,8 +190,6 @@ function PureMultimodalInput({
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
 
   const submitForm = useCallback(() => {
-    // Gate before mutating any state so a blocked send leaves the typed message
-    // and attachments intact for resend after the user funds / authorizes.
     if (onBeforeSubmit && !onBeforeSubmit()) {
       return;
     }
@@ -170,7 +197,7 @@ function PureMultimodalInput({
     window.history.replaceState({}, "", `/chat/${chatId}`);
 
     if (status === "error") {
-      setMessages((currentMessages) => currentMessages.slice(0, -1)); // remove last message if error
+      setMessages((currentMessages) => currentMessages.slice(0, -1));
     }
 
     sendMessage({
@@ -241,18 +268,6 @@ function PureMultimodalInput({
     }
   }, []);
 
-  // const _modelResolver = useMemo(() => {
-  //   return myProvider.languageModel(selectedModelId);
-  // }, [selectedModelId]);
-
-  // const contextProps = useMemo(
-  //   () => ({
-  //     usage,
-  //     subscriptionTier,
-  //   }),
-  //   [usage, subscriptionTier]
-  // );
-
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files || []);
@@ -318,6 +333,9 @@ function PureMultimodalInput({
           }
         }}
       >
+        {noWorkersAvailable && (
+          <NoWorkersNotice hasEligibleWorkers={hasEligibleWorkers} />
+        )}
         {(attachments.length > 0 || uploadQueue.length > 0) && (
           <div
             className="flex flex-row items-end gap-2 overflow-x-scroll"
@@ -365,7 +383,7 @@ function PureMultimodalInput({
             className="grow resize-none border-0! border-none! bg-transparent px-2 pt-0 pb-2 pl-8! text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
             disableAutoResize={true}
-            disabled={disabled || !canUseChat}
+            disabled={inputBlocked || !canUseChat}
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
@@ -378,32 +396,46 @@ function PureMultimodalInput({
             rows={1}
             value={input}
           />{" "}
-          {/* <Context {...contextProps} /> */}
         </div>
         <PromptInputToolbar className="border-top-0! border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
-            {/* <AttachmentsButton
-              fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
-              status={status}
-            /> */}
             <WebSearchToggle
               enabled={enableWebSearch ?? false}
               onToggle={onWebSearchToggle}
               searchCapable={searchCapable ?? false}
             />
-            <ModelSelectorCompact
-              onModelChange={onModelChange}
-              selectedModelId={selectedModelId}
+            {memoryActive && (
+              <Button
+                aria-label="Memory is active"
+                className="h-8 gap-1.5 rounded-lg px-2 font-normal text-sm"
+                data-testid="memory-active-indicator"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpenMemory?.();
+                }}
+                title="Memory is on — your saved notes shape prompts on this device only (nothing is shared with other devices)"
+                type="button"
+                variant="ghost"
+              >
+                <Brain className="size-4 text-primary" />
+                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
+                  Memory
+                </span>
+              </Button>
+            )}
+            <ModelSelect
+              onChange={(id) => onModelsChange?.([id])}
+              selectedId={selectedModelIds[0] ?? ""}
             />
+            <JobFeeIndicator modelIds={selectedModelIds} />
           </PromptInputTools>
 
-          {status === "submitted" ? (
+          {status === "submitted" || status === "streaming" ? (
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
             <PromptInputSubmit
               className="size-8 rounded-full bg-gradient-primary text-white disabled:text-muted-foreground disabled:[background:#c1c1c1] dark:disabled:[background:#303030]"
-              disabled={disabled || !input.trim() || uploadQueue.length > 0}
+              disabled={inputBlocked || !input.trim() || uploadQueue.length > 0}
               status={status}
             >
               <ArrowUpIcon size={14} />
@@ -412,11 +444,21 @@ function PureMultimodalInput({
         </PromptInputToolbar>
       </PromptInput>
 
+      {/* The first message opens an on-chain session before the model is even
+          reached, so it lands noticeably slower than the ones after it. Said
+          once, up front, so a long wait on "hello" reads as setup, not a hang. */}
+      {messages.length === 0 && canUseChat && !inputBlocked && (
+        <p className="mt-2 text-center text-content-subtle text-xs">
+          Your first message opens a session on chain, so it takes a few seconds
+          longer than the rest.
+        </p>
+      )}
+
       {messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 &&
         canUseChat &&
-        !disabled && (
+        !inputBlocked && (
           <SuggestedActions
             chatId={chatId}
             onBeforeSubmit={onBeforeSubmit}
@@ -443,7 +485,7 @@ export const MultimodalInput = memo(
     if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
       return false;
     }
-    if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+    if (!equal(prevProps.selectedModelIds, nextProps.selectedModelIds)) {
       return false;
     }
     if (prevProps.enableWebSearch !== nextProps.enableWebSearch) {
@@ -455,9 +497,10 @@ export const MultimodalInput = memo(
     if (prevProps.disabled !== nextProps.disabled) {
       return false;
     }
-    // Re-render when the send guard changes identity so submitForm/SuggestedActions
-    // capture the latest readiness closure instead of a stale one.
     if (prevProps.onBeforeSubmit !== nextProps.onBeforeSubmit) {
+      return false;
+    }
+    if (prevProps.memoryActive !== nextProps.memoryActive) {
       return false;
     }
 
@@ -465,14 +508,6 @@ export const MultimodalInput = memo(
   }
 );
 
-/**
- * WebSearchToggle renders the per-message web-search switch (web-search
- * epic, Story 16). When the session's bound worker doesn't advertise the
- * "search" capability, the switch renders disabled and a tooltip explains
- * how to enable it. This mirrors a real-world constraint: the worker's
- * BYOK TAVILY_API_KEY is set at boot, so mid-session capability changes
- * aren't possible without a new session and a new worker binding.
- */
 function WebSearchToggle({
   enabled,
   onToggle,
@@ -538,71 +573,6 @@ function PureAttachmentsButton({
 
 // biome-ignore lint/correctness/noUnusedVariables: This is used in the future
 const AttachmentsButton = memo(PureAttachmentsButton);
-
-function PureModelSelectorCompact({
-  selectedModelId,
-  onModelChange,
-}: {
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
-}) {
-  const [optimisticModelId, setOptimisticModelId] = useState(selectedModelId);
-
-  useEffect(() => {
-    setOptimisticModelId(selectedModelId);
-  }, [selectedModelId]);
-
-  const selectedModel = chatModels.find(
-    (model) => model.id === optimisticModelId
-  );
-
-  return (
-    <PromptInputModelSelect
-      onValueChange={(modelName) => {
-        const model = chatModels.find((m) => m.name === modelName);
-        if (model) {
-          setOptimisticModelId(model.id);
-          onModelChange?.(model.id);
-          startTransition(() => {
-            saveChatModelAsCookie(model.id);
-          });
-        }
-      }}
-      value={selectedModel?.name}
-    >
-      <Trigger
-        className="flex h-8 items-center gap-2 rounded-xl border-0 px-1.5 text-content-default shadow-none transition-colors hover:bg-surface-base-faint focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-surface-base-faint"
-        type="button"
-      >
-        <CpuIcon size={16} />
-        <span className="hidden font-medium text-xs sm:block">
-          {selectedModel?.name}
-        </span>
-        <ChevronDownIcon size={16} />
-      </Trigger>
-      <PromptInputModelSelectContent className="max-w-[300px] rounded-lg p-0">
-        <div className="flex flex-col gap-px">
-          {chatModels.map((model) => (
-            <SelectItem
-              className="rounded-lg"
-              key={model.id}
-              value={model.name}
-            >
-              <h6 className="mb-0.5 truncate font-medium text-xs">
-                {model.name}
-              </h6>
-              <p className="mt-px text-[10px] text-muted-foreground leading-tight">
-                {model.description}
-              </p>
-            </SelectItem>
-          ))}
-        </div>
-      </PromptInputModelSelectContent>
-    </PromptInputModelSelect>
-  );
-}
-
-const ModelSelectorCompact = memo(PureModelSelectorCompact);
 
 function PureStopButton({
   stop,

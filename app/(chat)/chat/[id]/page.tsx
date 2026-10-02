@@ -6,6 +6,7 @@ import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { $http } from "@/lib/http";
+import type { ChatMessage } from "@/lib/types";
 import { convertToUIMessages } from "@/lib/utils";
 
 export default async function Page(props: { params: Promise<{ id: string }> }) {
@@ -44,16 +45,25 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     }
   }
 
-  const messagesResponse = await $http.get(`/api/chat/${id}/messages`, {
-    cache: "no-store",
-    bearerToken: session.user?.token,
-  });
-  if (!messagesResponse.ok) {
-    redirect("/");
+  // Mid-flight tolerance: while a job is streaming, the messages endpoint can
+  // transiently fail or return a half-written row (in-flight assistant
+  // message). That must never 500 the page or bounce the user to "/" — render
+  // with what we have; autoResume picks the live stream back up client-side.
+  let uiMessages: ChatMessage[] = [];
+  try {
+    const messagesResponse = await $http.get(`/api/chat/${id}/messages`, {
+      cache: "no-store",
+      bearerToken: session.user?.token,
+    });
+    if (messagesResponse.ok) {
+      const messages = await messagesResponse.json();
+      if (Array.isArray(messages)) {
+        uiMessages = convertToUIMessages(messages);
+      }
+    }
+  } catch (error) {
+    console.warn(`Messages fetch for chat ${id} failed; rendering empty`, error);
   }
-  const messages = await messagesResponse.json();
-
-  const uiMessages = convertToUIMessages(messages);
 
   const cookieStore = await cookies();
   const chatModelFromCookie = cookieStore.get("chat-model");

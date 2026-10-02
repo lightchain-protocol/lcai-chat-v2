@@ -3,14 +3,20 @@ import {
   Copy,
   CopyCheck,
   Loader,
-  Pencil,
+  RefreshCw,
+  Square,
   ThumbsDown,
   ThumbsUp,
+  Volume2,
 } from "lucide-react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
+import { ttsModelId } from "@/config";
+import { readAloudProgressLabel, readAloudTooltip } from "@/lib/read-aloud";
+import { useTextToSpeech } from "@/hooks/use-text-to-speech";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
 import type { ChatMessage } from "@/lib/types";
@@ -24,12 +30,15 @@ export function PureMessageActions({
   vote,
   isLoading,
   setMode,
+  regenerate,
 }: {
   chatId: string;
   message: ChatMessage;
   vote: Vote | undefined;
   isLoading: boolean;
   setMode?: (mode: "view" | "edit") => void;
+  /** Re-runs the last turn. Omitted on read-only views. */
+  regenerate?: () => void;
 }) {
   const { mutate } = useSWRConfig();
   const [_, copyToClipboard] = useCopyToClipboard();
@@ -43,13 +52,6 @@ export function PureMessageActions({
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     if (!textFromParts) {
-      toast.custom((id) => (
-        <AlertError
-          description="Please try again"
-          id={id}
-          title="There's no text to copy!"
-        />
-      ));
       return;
     }
 
@@ -58,7 +60,58 @@ export function PureMessageActions({
     setTimeout(() => setCopied(false), 1200);
   };
 
+  // Read-aloud: synthesizes the message as speech via a one-off protocol job
+  // on the TTS model and plays the returned MP3. Never added to the thread.
+  const tts = useTextToSpeech();
+
+  // Read-aloud is a paid job on the speech model; offer it only where a worker
+  // actually serves that model. A failed reading (status unknown) still shows
+  // the button — hiding it on an RPC blink would be the worse outage.
+  // No poll: this renders once per message, and whether a worker serves the
+  // speech model changes on worker registration, not by the second. This is
+  // its own query key (the composer polls the selected models, not this one);
+  // a window focus or the next mount refetches it.
+  const speech = useWorkerAvailability([ttsModelId], { poll: false });
+  const speechUnstaffed =
+    speech.availability !== undefined &&
+    speech.availability.status !== "unknown" &&
+    !speech.hasEligibleWorkers;
+
+  const handleReadAloud = async () => {
+    if (!textFromParts) {
+      return;
+    }
+    try {
+      await tts.speak(textFromParts);
+    } catch (err) {
+      const timedOut =
+        err instanceof Error && err.message.toLowerCase().includes("timed out");
+      toast.custom((toastId) => (
+        <AlertError
+          description={
+            timedOut
+              ? "The audio didn't arrive in time. Please try again."
+              : undefined
+          }
+          id={toastId}
+          title={
+            timedOut
+              ? "Read aloud timed out"
+              : "Couldn't read this message aloud."
+          }
+        />
+      ));
+    }
+  };
+
   if (isLoading) {
+    return null;
+  }
+
+  // A turn that produced no text was never written to the database, so copy
+  // has nothing to read and a vote would reference a message row that does
+  // not exist. Offering the buttons at all only invites two failures.
+  if (!textFromParts) {
     return null;
   }
 
@@ -67,6 +120,10 @@ export function PureMessageActions({
     return (
       <Actions className="-mr-0.5 justify-end">
         <div className="relative">
+          {/* Edit is deliberately off in protocol mode: editing deletes the
+              trailing messages and re-runs the turn, which submits a new paid
+              on-chain job with no cost disclosure. Regenerate below is the
+              disclosed path. */}
           {/* {setMode && (
             <Action
               className="-left-10 absolute top-0 opacity-0 transition-opacity group-hover/message:opacity-100"
@@ -89,6 +146,59 @@ export function PureMessageActions({
       <Action onClick={handleCopy} tooltip="Copy">
         {copied ? <CopyCheck /> : <Copy />}
       </Action>
+
+      <Action
+        data-testid="message-read-aloud"
+        // Spinner state is inert; the busy job either finishes or is cancelled
+        // by clicking again once it is playing.
+        disabled={
+          speechUnstaffed || !tts.isAvailable || tts.state === "synthesizing"
+        }
+        onClick={handleReadAloud}
+        // Disabled rather than hidden when nobody serves speech. A control
+        // that vanishes reads as a bug and leaves people clicking where it
+        // used to be; saying why is the entire point of checking first.
+        tooltip={readAloudTooltip({
+          unstaffed: speechUnstaffed,
+          walletReady: tts.isAvailable,
+          state: tts.state,
+          progress: tts.progress,
+        })}
+      >
+        {tts.state === "synthesizing" ? (
+          <Loader className="animate-spin" />
+        ) : tts.state === "playing" ? (
+          <Square />
+        ) : (
+          <Volume2 />
+        )}
+      </Action>
+
+      {/* Reading a message aloud takes ~30s across claim, submit and
+          synthesis. A spinner alone for that long reads as a hang, and the
+          phase is only in a tooltip nobody thinks to hover, so it is stated
+          in the open beside the button. */}
+      {tts.state === "synthesizing" && (
+        <span
+          aria-live="polite"
+          className="ml-1 select-none self-center text-content-medium text-xs"
+          data-testid="read-aloud-progress"
+        >
+          {readAloudProgressLabel(tts.progress)}
+        </span>
+      )}
+
+      {regenerate && (
+        // Every regeneration is a new on-chain job with its own fee, so this
+        // says so rather than looking like a free retry.
+        <Action
+          data-testid="message-regenerate"
+          onClick={() => regenerate()}
+          tooltip="Regenerate (submits a new paid job)"
+        >
+          <RefreshCw />
+        </Action>
+      )}
 
       <Action
         data-testid="message-upvote"
