@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import usePrepaidBalance from "@/hooks/use-prepaid-balance";
+import usePrepaidBalance, { PREPAID_NOTICE } from "@/hooks/use-prepaid-balance";
 import { cn } from "@/lib/utils";
 import { parseWeb3Error } from "@/lib/utils/web3-errors";
 import AlertError from "./ui/toast/AlertError";
@@ -144,7 +144,7 @@ export function PrepaidBalanceDialog(props: DialogProps) {
 
           <div className="my-6 h-px w-full bg-bdr-light" />
 
-          {pb.available ? (
+          {pb.status === "available" ? (
             <div className="space-y-6">
               <div className="rounded-2xl border border-bdr-light bg-surface-base-subtle p-4">
                 <div className="flex items-center justify-between">
@@ -330,9 +330,14 @@ export function PrepaidBalanceDialog(props: DialogProps) {
                 </Button>
               </div>
             </div>
+          ) : pb.status === "loading" ? (
+            <p className="flex items-center gap-2 text-content-soft text-sm">
+              <Loader2Icon className="size-4 animate-spin" />
+              Loading your balance…
+            </p>
           ) : (
             <p className="text-content-soft text-sm">
-              Prepaid balance isn&apos;t available on this network yet.
+              {PREPAID_NOTICE[pb.status]}
             </p>
           )}
         </div>

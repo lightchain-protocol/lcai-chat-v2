@@ -49,7 +49,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { isTestnet } from "@/config";
-import usePrepaidBalance from "@/hooks/use-prepaid-balance";
+import usePrepaidBalance, { PREPAID_NOTICE } from "@/hooks/use-prepaid-balance";
 import {
   type ApiKey,
   type CreateKeyForm,
@@ -188,15 +188,13 @@ function BalanceSummary() {
     );
   }
 
-  if (!pb.available) {
-    if (pb.isLoading) {
+  if (pb.status !== "available") {
+    if (pb.status === "loading") {
       return <Skeleton className="h-[7.5rem] rounded-2xl" />;
     }
     return (
       <div className="rounded-2xl border border-bdr-light bg-surface-base-faint/60 px-6 py-5 text-content-default text-sm">
-        {pb.queries.apiBalance.isError
-          ? "Couldn't read your prepaid balance. Reload the page to try again."
-          : "Prepaid balance isn't available on this network yet."}
+        {PREPAID_NOTICE[pb.status]}
       </div>
     );
   }

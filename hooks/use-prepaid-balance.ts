@@ -1,14 +1,89 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  useMutation,
+  useQuery,
+} from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
 import { useCallback, useMemo } from "react";
 import { type Address, getContract, parseEther } from "viem";
 import { useAccount } from "wagmi";
 import config from "@/config";
 import { jobRegistryAbi } from "@/contracts/job-registry-abi";
 import { GatewayAuth } from "@/lib/protocol/gateway-auth";
-import { GatewayClient } from "@/lib/protocol/gateway-client";
+import {
+  type BalanceResponse,
+  GatewayClient,
+  GatewayClientError,
+} from "@/lib/protocol/gateway-client";
 import useWeb3Clients from "./use-web3-clients";
+
+/** Where the user's prepaid balance stands, as far as the consumer-api has said. */
+export type PrepaidStatus =
+  | "signed-out"
+  | "loading"
+  | "available"
+  | "unavailable"
+  | "error";
+
+/** What to say instead of the balance when there is none to show. */
+export const PREPAID_NOTICE = {
+  "signed-out": "Sign in with your wallet to see your prepaid balance.",
+  unavailable: "Prepaid balance isn't available on this network yet.",
+  error: "Couldn't read your prepaid balance. Reload the page to try again.",
+} as const;
+
+/**
+ * `GET /api/balance` needs the sign-in token, so it waits for one and is keyed
+ * on it: a wallet that connects before it signs in fetches once it has, and a
+ * renewed or re-signed token fetches again instead of keeping a refusal. The
+ * last answer stays up meanwhile; signed out, prepaidStatus ignores it.
+ */
+export function apiBalanceQueryOptions(address?: string, token?: string) {
+  return queryOptions({
+    queryKey: ["prepaid-api-balance", address?.toLowerCase(), token],
+    enabled: !!address && !!token,
+    queryFn: () => new GatewayClient(undefined, new GatewayAuth()).getBalance(),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * "unavailable" only when this build has no JobRegistry or the consumer-api
+ * says the feature is off; no answer yet is "loading", a failed one "error".
+ * No token while the session is still being read (first load, or the update
+ * that follows a sign-in) is not signed out either. Signed in takes a wallet
+ * and a token, the same as the query, so "loading" always has a fetch behind it.
+ */
+export function prepaidStatus({
+  hasContract,
+  address,
+  token,
+  sessionLoading,
+  api,
+}: {
+  hasContract: boolean;
+  address?: string;
+  token?: string;
+  sessionLoading: boolean;
+  api: { data?: BalanceResponse; error: unknown };
+}): PrepaidStatus {
+  if (!hasContract) return "unavailable";
+  if (!(address && token)) return sessionLoading ? "loading" : "signed-out";
+  if (api.data?.delegate) return "available";
+  // The consumer-api's own 503 body, not a proxy's 503 for a down API.
+  if (
+    api.error instanceof GatewayClientError &&
+    api.error.status === 503 &&
+    api.error.body.includes('"feature_disabled"')
+  ) {
+    return "unavailable";
+  }
+  return api.error ? "error" : "loading";
+}
 
 /**
  * Reads + writes the user's prepaid balance, delegate authorization, and
@@ -20,6 +95,8 @@ import useWeb3Clients from "./use-web3-clients";
 export default function usePrepaidBalance() {
   const { publicClient, walletClient } = useWeb3Clients();
   const { address } = useAccount();
+  const session = useSession();
+  const token = session.data?.user?.token;
 
   const protocolChainId = config.chains[0].id;
   const jobRegistryAddress = config.jobRegistryAddress[protocolChainId];
@@ -36,12 +113,7 @@ export default function usePrepaidBalance() {
     [jobRegistryAddress, publicClient, walletClient]
   );
 
-  const apiBalance = useQuery({
-    queryKey: ["prepaid-api-balance", address?.toLowerCase()],
-    enabled: !!address,
-    queryFn: () => new GatewayClient(undefined, new GatewayAuth()).getBalance(),
-    staleTime: 30_000,
-  });
+  const apiBalance = useQuery(apiBalanceQueryOptions(address, token));
 
   const delegateAddress = apiBalance.data?.delegate as Address | undefined;
 
@@ -127,13 +199,7 @@ export default function usePrepaidBalance() {
       refetchAll();
       return hash;
     },
-    [
-      requireWritable,
-      walletClient,
-      publicClient,
-      delegateAddress,
-      refetchAll,
-    ]
+    [requireWritable, walletClient, publicClient, delegateAddress, refetchAll]
   );
 
   /** Pull `amount` LCAI back from the prepaid balance to the wallet. */
@@ -245,9 +311,17 @@ export default function usePrepaidBalance() {
   const isAuthorized = delegateAuthorized.data ?? false;
   const needsAllowanceSync =
     isAuthorized && balance > 0n && allowance < balance;
+  const status = prepaidStatus({
+    hasContract: !!contract,
+    address,
+    token,
+    sessionLoading: session.status === "loading",
+    api: apiBalance,
+  });
 
   return {
-    available: !!contract && !!delegateAddress,
+    status,
+    available: status === "available",
     balance,
     allowance,
     isAuthorized,
@@ -256,12 +330,17 @@ export default function usePrepaidBalance() {
     ready: balance > 0n && isAuthorized && allowance > 0n,
     delegateAddress,
     isLoading:
+      status === "loading" ||
       onChainBalance.isLoading ||
       delegateAuthorized.isLoading ||
-      delegateAllowanceQuery.isLoading ||
-      apiBalance.isLoading,
+      delegateAllowanceQuery.isLoading,
     refetch: refetchAll,
-    queries: { onChainBalance, delegateAuthorized, delegateAllowanceQuery, apiBalance },
+    queries: {
+      onChainBalance,
+      delegateAuthorized,
+      delegateAllowanceQuery,
+      apiBalance,
+    },
     depositAndAuthorize,
     withdrawBalance,
     authorizeDelegate,
