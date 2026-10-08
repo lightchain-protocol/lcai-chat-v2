@@ -85,7 +85,7 @@ REDIS_URL=                  # Redis connection string (optional)
     /chat/[id]/page.tsx     - Individual chat page
     page.tsx                - New chat page
     layout.tsx              - Chat layout with sidebar
-    actions.ts              - Server actions (title generation, etc.)
+    actions.ts              - Server actions (e.g. selected-model cookie)
   layout.tsx                - Root layout with fonts, theme provider
   globals.css               - Tailwind styles and CSS variables
 
