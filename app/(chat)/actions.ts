@@ -2,12 +2,10 @@
 
 import { generateText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
-import type { VisibilityType } from "@/components/visibility-selector";
 import { myProvider } from "@/lib/ai/providers";
 import {
   deleteMessagesByChatIdAfterTimestamp,
   getMessageById,
-  updateChatVisiblityById,
 } from "@/lib/db/queries";
 
 export async function saveChatModelAsCookie(model: string) {
@@ -43,14 +41,4 @@ export async function deleteTrailingMessages({ id }: { id: string }) {
     chatId: message.chatId,
     timestamp: message.createdAt,
   });
-}
-
-export async function updateChatVisibility({
-  chatId,
-  visibility,
-}: {
-  chatId: string;
-  visibility: VisibilityType;
-}) {
-  await updateChatVisiblityById({ chatId, visibility });
 }
