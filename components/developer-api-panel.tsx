@@ -926,7 +926,7 @@ const TRAILING_SLASHES = /\/+$/;
 
 const SNIPPETS = [
   { id: "openai", label: "OpenAI SDK" },
-  { id: "lightchain", label: "@lightchain/sdk" },
+  { id: "lightchain", label: "@lightchainai/sdk" },
 ] as const;
 
 function UsageSnippet() {
@@ -953,8 +953,8 @@ function UsageSnippet() {
             {baseUrl}/v1
           </code>{" "}
           and pass the key. Or let{" "}
-          <code className="font-mono text-xs">@lightchain/sdk</code> supply the
-          URL for the network.
+          <code className="font-mono text-xs">@lightchainai/sdk</code> supply
+          the URL for the network.
         </p>
       </div>
       <div className="flex w-fit gap-1 rounded-[10px] border border-bdr-light p-1">

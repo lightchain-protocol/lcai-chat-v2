@@ -184,7 +184,7 @@ async function refusal(
 
 /**
  * How to call the API with a key: through the OpenAI SDK directly, and
- * through `@lightchain/sdk`, which supplies the network's URL.
+ * through `@lightchainai/sdk`, which supplies the network's URL.
  */
 export function usageSnippets(
   apiBaseUrl: string,
@@ -208,7 +208,7 @@ const openai = new OpenAI({
 
 ${call}`,
     lightchain: `import OpenAI from "openai";
-import { Lightchain } from "@lightchain/sdk";
+import { Lightchain } from "@lightchainai/sdk";
 
 const lc = new Lightchain({
   network: "${network}",
