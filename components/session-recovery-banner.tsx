@@ -32,7 +32,7 @@ const STATUS_CONFIG: Record<
     actions: ["retry", "newSession"],
   },
   rollover_required: {
-    text: "This session cannot be recovered. Start a new session to continue.",
+    text: "This session cannot be recovered. Start a new session to continue: the model will no longer see the earlier messages.",
     showSpinner: false,
     actions: ["newSession"],
   },
