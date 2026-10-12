@@ -13,7 +13,7 @@ import {
   type ModelLiveness,
   useLiveWorkerCounts,
 } from "@/hooks/use-live-worker-counts";
-import { useModels } from "@/hooks/use-models";
+import { useChatModels } from "@/hooks/use-models";
 import { formatThroughput, typicalThroughput } from "@/lib/model-throughput";
 import { cn } from "@/lib/utils";
 import { ModelLogo } from "./model-logo";
@@ -85,7 +85,7 @@ export function ModelSelect({
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
-  const { models } = useModels();
+  const { models } = useChatModels();
   const modelIds = useMemo(() => models.map((m) => m.id), [models]);
   const { byModel } = useLiveWorkerCounts(modelIds);
 
