@@ -14,6 +14,7 @@
  * doesn't support custom headers.
  */
 
+import { isSortitionEnabled } from "@/config";
 import { hasUsableAuthToken } from "../http";
 import { jwtExpirySecs } from "../jwt";
 import { withMemoryPrefix } from "../memory";
@@ -73,6 +74,17 @@ const UNSPECIFIED_RELAY_ERROR =
 /** Shown when a job completes without ever producing any answer text. */
 const EMPTY_ANSWER_ERROR =
   "The worker finished without returning an answer. Please try again.";
+
+/** Turns in a row a session may end on a worker error before it is replaced. */
+const WORKER_ERROR_TURNS_BEFORE_NEW_SESSION = 2;
+
+/**
+ * Added to the error of the turn that gives a session up. The worker rebuilds
+ * a conversation from its session's own jobs, so the new session starts
+ * without the earlier turns and the user has to hear that.
+ */
+const NEW_SESSION_NOTICE =
+  " Your next message will start a new session: this conversation continues, but the model will no longer see the earlier messages.";
 
 /** Cap on retained mismatch evidence entries (FIFO eviction past this). */
 const MAX_MISMATCH_EVIDENCE = 50;
@@ -234,6 +246,16 @@ export class ProtocolTransport {
    */
   private inFlightStreams = 0;
   private releaseWhenIdle = false;
+  /**
+   * Turns in a row, per session, that a worker error frame ended. A worker
+   * that cannot read one earlier job of a session fails every later job in
+   * it, so after the second such turn trying again there is pointless.
+   * ponytail: in memory only - a reload (or leaving the chat and coming back)
+   * starts the count at zero, so a session that is still in use then takes
+   * two more failed turns to be replaced. Keep the count in the session's
+   * sessionStorage snapshot if that turns out to matter.
+   */
+  private readonly workerErrorTurns = new Map<number, number>();
   private onJobUpdateCallback?: (job: TrackedJob) => void;
   private onJobTimeoutCallback?: (job: TrackedJob) => void;
   /**
@@ -419,6 +441,29 @@ export class ProtocolTransport {
     this.relayClient = null;
     this.sessionMgr.reset();
     this.onSessionStatus?.("idle");
+  }
+
+  /**
+   * Counts a turn that a worker error frame ended and, on the second in a
+   * row, gives the session up. Returns true when it was reset here, so the
+   * next message opens a new one.
+   */
+  private noteWorkerError(sessionId: number): boolean {
+    const turns = (this.workerErrorTurns.get(sessionId) ?? 0) + 1;
+    this.workerErrorTurns.set(sessionId, turns);
+    // A transport the chat has already let go of will not send again, and
+    // nobody is left to read the notice: leave its session as it is.
+    if (turns < WORKER_ERROR_TURNS_BEFORE_NEW_SESSION || this.releaseWhenIdle) {
+      return false;
+    }
+    if (!isSortitionEnabled) {
+      // Opening a session here is a wallet transaction, which has to be the
+      // user's own click: the recovery banner offers "New Session".
+      this.setFailoverStatus("rollover_required");
+      return false;
+    }
+    this.startNewSession();
+    return true;
   }
 
   /**
@@ -1656,9 +1701,17 @@ export class ProtocolTransport {
           if (errorFrame.code === "RATE_LIMITED" && errorFrame.droppedSeq > 0) {
             return;
           }
+          // Only the worker's own frame, ending this turn, counts toward
+          // replacing the session: the relay's rate-limit frame says nothing
+          // about the worker.
+          const replaced =
+            !closed &&
+            errorFrame.code !== "RATE_LIMITED" &&
+            this.noteWorkerError(sessionId);
           // consumer-api publishes error frames with no `message` field, which
           // would otherwise surface as an error with no text at all.
-          fail(errorFrame.message || UNSPECIFIED_RELAY_ERROR);
+          const message = errorFrame.message || UNSPECIFIED_RELAY_ERROR;
+          fail(replaced ? `${message}${NEW_SESSION_NOTICE}` : message);
           return;
         }
 
@@ -1872,6 +1925,8 @@ export class ProtocolTransport {
             return;
           }
 
+          // The worker answered, so it can read this session's history.
+          this.workerErrorTurns.delete(sessionId);
           this.setProgressStatus("streaming");
           if (reasoningStarted) {
             emit({ type: "reasoning-end", id: reasoningPartId });
