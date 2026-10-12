@@ -3,6 +3,7 @@ import {
   isHexModelId,
   type ResolvableModel,
   resolveModelSelection,
+  withoutModel,
 } from "./resolve-model";
 
 const LLAMA_ID =
@@ -58,5 +59,18 @@ describe("resolveModelSelection", () => {
 
   it("returns undefined when the gateway list is empty", () => {
     expect(resolveModelSelection("llama3-8b", [])).toBeUndefined();
+  });
+});
+
+describe("withoutModel", () => {
+  it("drops the model whatever the case of its id and keeps the rest in order", () => {
+    const speech = { id: UNSERVED_ID, name: "tts-piper" };
+    const served = [MODELS[0], speech, MODELS[1]];
+
+    expect(withoutModel(served, UNSERVED_ID.toUpperCase())).toEqual(MODELS);
+  });
+
+  it("returns every model when the id is not in the list", () => {
+    expect(withoutModel(MODELS, UNSERVED_ID)).toEqual(MODELS);
   });
 });

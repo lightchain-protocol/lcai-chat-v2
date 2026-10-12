@@ -18,7 +18,7 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { useLiveWorkerCounts } from "@/hooks/use-live-worker-counts";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
-import { useModels } from "@/hooks/use-models";
+import { useChatModels } from "@/hooks/use-models";
 import {
   type MultiModel,
   useMultiModelSession,
@@ -215,7 +215,7 @@ export function Chat({
   // picker can't resolve — leaving it showing "Select model". Auto-select an
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
-  const { models: availableModels } = useModels();
+  const { models: availableModels } = useChatModels();
   // Live per-model worker count from the liveness-aware availability endpoint
   // (heartbeat-intersected — dead boxes excluded). Drives the "default to the
   // model with the most active workers" behaviour below.
