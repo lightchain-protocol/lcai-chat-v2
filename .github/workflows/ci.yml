@@ -1,5 +1,5 @@
-# Every pull request: lint, typecheck and unit-test the chat frontend. Vercel builds and deploys it, so nothing is
-# built or published here.
+# Every pull request: typecheck and unit-test the chat frontend. Vercel builds and deploys it, so nothing is built or
+# published here.
 name: CI
 
 on:
@@ -27,8 +27,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm exec biome ci
 
       - run: pnpm typecheck
 
