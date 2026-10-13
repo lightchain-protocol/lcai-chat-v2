@@ -64,7 +64,7 @@ export function SystemPromptSelector({
       });
       if (!response.ok) return null;
       return response.json();
-    },
+    }
   );
 
   const [selectedId, setSelectedId] = useState<string | undefined>(value);

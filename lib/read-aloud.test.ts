@@ -65,9 +65,9 @@ describe("readAloudTooltip", () => {
     for (const state of ["idle", "playing", "synthesizing"]) {
       for (const unstaffed of [true, false]) {
         for (const walletReady of [true, false]) {
-          expect(readAloudTooltip({ unstaffed, walletReady, state })).not.toMatch(
-            /sorry|oops|unfortunately/i
-          );
+          expect(
+            readAloudTooltip({ unstaffed, walletReady, state })
+          ).not.toMatch(/sorry|oops|unfortunately/i);
         }
       }
     }
@@ -97,9 +97,18 @@ describe("readAloudProgressLabel", () => {
 
   it("is always short enough to sit beside a button", () => {
     const statuses = [
-      "idle", "finding_worker", "preparing_chat", "writing_on_chain",
-      "submitting_job", "waiting_for_relay", "decoding_prompt", "thinking",
-      "reasoning", "streaming", "completed", "error",
+      "idle",
+      "finding_worker",
+      "preparing_chat",
+      "writing_on_chain",
+      "submitting_job",
+      "waiting_for_relay",
+      "decoding_prompt",
+      "thinking",
+      "reasoning",
+      "streaming",
+      "completed",
+      "error",
     ] as const;
     for (const status of statuses) {
       expect(readAloudProgressLabel(status).length).toBeLessThanOrEqual(34);

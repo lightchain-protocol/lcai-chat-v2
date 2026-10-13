@@ -29,4 +29,3 @@ export function isConnectionFailure(error: unknown): boolean {
   }
   return false;
 }
-

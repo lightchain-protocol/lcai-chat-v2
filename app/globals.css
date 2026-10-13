@@ -63,19 +63,17 @@
 
   /* content color */
   --content-dark: #020203;
-  --content-light: #7E7F94;
-  --content-medium: #4E4E5C;
-  --content-primary: #0F0F14;
+  --content-light: #7e7f94;
+  --content-medium: #4e4e5c;
+  --content-primary: #0f0f14;
   --content-soft: #656678;
   --content-default: #373842;
-  --content-extraLight: #9798B6;
-  --content-strong: #22232A;
+  --content-extraLight: #9798b6;
+  --content-strong: #22232a;
   --content-secondary: #565e78;
   --content-ultra: #020203;
 
-
   --transparency-dark-mode-24: rgba(204, 206, 239, 0.24);
-
 
   /* border color */
   --border-default: rgba(2, 2, 3, 0.04);
@@ -94,7 +92,7 @@
   --foreground: hsl(0 0% 98%);
   --card: hsl(240 10% 3.9%);
   --card-foreground: hsl(0 0% 98%);
-  --popover: #0F0F14;
+  --popover: #0f0f14;
   --popover-foreground: hsl(0 0% 98%);
   --primary-foreground: hsl(0 0% 98%);
   --secondary: hsl(240 3.7% 15.9%);
@@ -128,7 +126,7 @@
   --surface-base-subtle: rgba(204, 206, 239, 0.02);
   --surface-base-extraLight: rgba(204, 206, 239, 0.06);
   --surface-base-light: rgba(204, 206, 239, 0.08);
-  --surface-elevation-light: #0F0F14;
+  --surface-elevation-light: #0f0f14;
   --surface-base-dark: #181822;
   --surface-x-soft: rgba(204, 206, 239, 0.04);
   --surface-base-faint: rgba(204, 206, 239, 0.04);
@@ -137,22 +135,21 @@
 
   /* content color */
   --content-dark: #ffffff;
-  --content-light: #4E4E5C;
-  --content-medium: #7E7F94;
-  --content-primary: #CCCEEF;
-  --content-soft: rgba(154,156,207,0.80);
-  --content-default: #9798B6;
-  --content-strong: #CCCEEF;
-  --content-secondary: #9A9CCF;
+  --content-light: #4e4e5c;
+  --content-medium: #7e7f94;
+  --content-primary: #ccceef;
+  --content-soft: rgba(154, 156, 207, 0.8);
+  --content-default: #9798b6;
+  --content-strong: #ccceef;
+  --content-secondary: #9a9ccf;
   --content-ultra: #f6f6f6;
 
   /* border color */
-  --border-default: rgba(115, 118, 170, 0.20);
+  --border-default: rgba(115, 118, 170, 0.2);
   --border-light: rgba(204, 206, 239, 0.08);
   --border-soft: rgba(204, 206, 239, 0.12);
   --border-error-toast: #220404;
   --border-extraLight: rgba(204, 206, 239, 0.06);
-
 
   /* shadow */
   --shadow-toast: 0 8px 36px 0 rgba(216, 216, 216, 0.12);
@@ -160,7 +157,6 @@
 
 /* define theme */
 @theme {
-
   --breakpoint-toast-mobile: 600px;
 
   --radius-md: calc(var(--radius) - 2px);
@@ -213,16 +209,15 @@
   --color-surface-m-soft: var(--surface-m-soft);
   --color-surface-m-light: var(--surface-m-light);
   --color-surface-base-subtle: var(--surface-base-subtle);
-  --color-surface-base-brand-strong: #8C71F6;
+  --color-surface-base-brand-strong: #8c71f6;
   --color-surface-base-faint: var(--surface-base-faint);
-  --color-surface-base-error-default: #E93544;
+  --color-surface-base-error-default: #e93544;
   --color-surface-base-extraLight: var(--surface-base-extraLight);
   --color-surface-base-light: var(--surface-base-light);
   --color-surface-elevation-light: var(--surface-elevation-light);
   --color-surface-base-dark: var(--surface-base-dark);
-  --color-surface-base-brand-default: #693EE0;
+  --color-surface-base-brand-default: #693ee0;
   --color-surface-x-soft: var(--surface-x-soft);
-
 
   --color-transparency-dark-mode-24: var(--transparency-dark-mode-24);
 
@@ -237,9 +232,8 @@
   --color-content-strong: var(--content-strong);
   --color-content-secondary: var(--content-secondary);
   --color-content-ultra: var(--content-ultra);
-  --color-content-error-strong: #AD1F2B;
-  --color-content-error-light: #D02533;
-
+  --color-content-error-strong: #ad1f2b;
+  --color-content-error-light: #d02533;
 
   /* border color */
   --color-bdr-default: var(--border-default);
@@ -249,8 +243,7 @@
   --color-bdr-extraLight: var(--border-extraLight);
 
   /* gradient bg */
-  --color-gradient-primary: linear-gradient(270deg, #7064E9 0%, #DD00AC 100%);
-
+  --color-gradient-primary: linear-gradient(270deg, #7064e9 0%, #dd00ac 100%);
 
   /* shadow */
   --color-shadow-toast: var(--shadow-toast);
@@ -478,9 +471,8 @@
   animation: reveal 0.4s ease-in-out forwards;
 }
 
-
 .lc-conversation {
-  &>div {
+  & > div {
     overflow: visible !important;
   }
 }

@@ -9,7 +9,7 @@ import AlertWarning from "@/components/ui/toast/AlertWarning";
 import { toast } from "sonner";
 
 const AlertsSection = () => {
-   const handleError = () => {
+  const handleError = () => {
     toast.custom((id) => (
       <AlertError
         description="An unexpected error occurred. Please try again."
@@ -83,4 +83,3 @@ const AlertsSection = () => {
 };
 
 export default AlertsSection;
-

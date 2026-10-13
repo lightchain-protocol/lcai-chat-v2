@@ -12,7 +12,10 @@ export function SidebarToggle({
 
   return (
     <Button
-      className={cn("w-9 h-9 p-1 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight", className)}
+      className={cn(
+        "w-9 h-9 p-1 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight",
+        className
+      )}
       data-testid="sidebar-toggle-button"
       onClick={toggleSidebar}
       variant="outline"

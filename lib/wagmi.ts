@@ -19,10 +19,7 @@ export const networks = config.chains;
 // viem http() transport keyed off each chain's rpcUrls forces the dapp to
 // hit the same endpoint declared in `lcaiTestnet` (NEXT_PUBLIC_RPC_URL).
 const transports = Object.fromEntries(
-  config.chains.map((chain) => [
-    chain.id,
-    http(chain.rpcUrls.default.http[0]),
-  ]),
+  config.chains.map((chain) => [chain.id, http(chain.rpcUrls.default.http[0])])
 );
 
 //Set up the Wagmi Adapter (Config)

@@ -445,13 +445,11 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
 /** Bounded re-read schedule for the post-terminal-frame race with mining. */
 const MAX_JOB_REREADS = 24;
 const JOB_REREAD_INTERVAL_MS = 5000;
-
 
 function CheckRow({ label, value }: { label: string; value: boolean | null }) {
   const mark = value === true ? "yes" : value === false ? "no" : "n/a";

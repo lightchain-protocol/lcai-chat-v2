@@ -31,9 +31,7 @@ function ImageCard({
           </div>
         ) : null}
         <div className="card-content absolute bottom-0 left-0 p-5">
-          {meta ? (
-            <div className="text-white text-xs"> {meta} </div>
-          ) : null}
+          {meta ? <div className="text-white text-xs"> {meta} </div> : null}
           <h5 className="mt-2 text-base font-semibold leading-snug">
             <span className="text-white">{title}</span>
           </h5>

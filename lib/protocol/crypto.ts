@@ -31,7 +31,7 @@ export async function generateKeyPair(): Promise<CryptoKeyPair> {
   return crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
     true,
-    ["deriveBits"],
+    ["deriveBits"]
   );
 }
 
@@ -53,7 +53,7 @@ export async function importPublicKey(raw: Uint8Array): Promise<CryptoKey> {
     raw,
     { name: "ECDH", namedCurve: "P-256" },
     true,
-    [],
+    []
   );
 }
 
@@ -64,12 +64,12 @@ export async function importPublicKey(raw: Uint8Array): Promise<CryptoKey> {
  */
 export async function deriveSharedSecret(
   privateKey: CryptoKey,
-  remotePublicKey: CryptoKey,
+  remotePublicKey: CryptoKey
 ): Promise<Uint8Array> {
   const bits = await crypto.subtle.deriveBits(
     { name: "ECDH", public: remotePublicKey },
     privateKey,
-    256,
+    256
   );
   return new Uint8Array(bits);
 }
@@ -82,11 +82,11 @@ export async function deriveSharedSecret(
  */
 export async function encrypt(
   key: Uint8Array,
-  plaintext: Uint8Array,
+  plaintext: Uint8Array
 ): Promise<Uint8Array> {
   if (key.length !== AES_KEY_BYTES) {
     throw new Error(
-      `invalid key length: must be ${AES_KEY_BYTES} bytes for AES-256`,
+      `invalid key length: must be ${AES_KEY_BYTES} bytes for AES-256`
     );
   }
 
@@ -96,7 +96,7 @@ export async function encrypt(
     key,
     "AES-GCM",
     false,
-    ["encrypt"],
+    ["encrypt"]
   );
 
   const nonce = new Uint8Array(GCM_NONCE_BYTES);
@@ -107,13 +107,11 @@ export async function encrypt(
     { name: "AES-GCM", iv: nonce },
     aesKey,
     // @ts-ignore
-    plaintext,
+    plaintext
   );
 
   // Prepend nonce to match Go format: nonce(12) || ciphertext || tag(16)
-  const result = new Uint8Array(
-    GCM_NONCE_BYTES + ciphertextWithTag.byteLength,
-  );
+  const result = new Uint8Array(GCM_NONCE_BYTES + ciphertextWithTag.byteLength);
   result.set(nonce, 0);
   result.set(new Uint8Array(ciphertextWithTag), GCM_NONCE_BYTES);
   return result;
@@ -127,11 +125,11 @@ export async function encrypt(
  */
 export async function decrypt(
   key: Uint8Array,
-  ciphertext: Uint8Array,
+  ciphertext: Uint8Array
 ): Promise<Uint8Array> {
   if (key.length !== AES_KEY_BYTES) {
     throw new Error(
-      `invalid key length: must be ${AES_KEY_BYTES} bytes for AES-256`,
+      `invalid key length: must be ${AES_KEY_BYTES} bytes for AES-256`
     );
   }
   if (ciphertext.length < GCM_NONCE_BYTES) {
@@ -147,13 +145,13 @@ export async function decrypt(
     key,
     "AES-GCM",
     false,
-    ["decrypt"],
+    ["decrypt"]
   );
 
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: nonce },
     aesKey,
-    ciphertextBody,
+    ciphertextBody
   );
 
   return new Uint8Array(plaintext);
@@ -170,18 +168,16 @@ export async function decrypt(
  */
 export async function encryptSessionKey(
   sessionKey: Uint8Array,
-  workerPublicKey: CryptoKey,
+  workerPublicKey: CryptoKey
 ): Promise<Uint8Array> {
   if (sessionKey.length !== SESSION_KEY_BYTES) {
-    throw new Error(
-      `session key must be exactly ${SESSION_KEY_BYTES} bytes`,
-    );
+    throw new Error(`session key must be exactly ${SESSION_KEY_BYTES} bytes`);
   }
 
   const ephemeral = await generateKeyPair();
   const sharedSecret = await deriveSharedSecret(
     ephemeral.privateKey,
-    workerPublicKey,
+    workerPublicKey
   );
 
   const ciphertext = await encrypt(sharedSecret, sessionKey);
@@ -201,11 +197,11 @@ export async function encryptSessionKey(
  */
 export async function decryptSessionKey(
   encWorkerKey: Uint8Array,
-  privateKey: CryptoKey,
+  privateKey: CryptoKey
 ): Promise<Uint8Array> {
   if (encWorkerKey.length < P256_UNCOMPRESSED_KEY_BYTES) {
     throw new Error(
-      `encrypted worker key too short: must be at least ${P256_UNCOMPRESSED_KEY_BYTES} bytes`,
+      `encrypted worker key too short: must be at least ${P256_UNCOMPRESSED_KEY_BYTES} bytes`
     );
   }
 
@@ -218,7 +214,7 @@ export async function decryptSessionKey(
   const sessionKey = await decrypt(sharedSecret, ciphertext);
   if (sessionKey.length !== SESSION_KEY_BYTES) {
     throw new Error(
-      `session key must be exactly ${SESSION_KEY_BYTES} bytes (got ${sessionKey.length})`,
+      `session key must be exactly ${SESSION_KEY_BYTES} bytes (got ${sessionKey.length})`
     );
   }
 

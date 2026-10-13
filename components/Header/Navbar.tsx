@@ -29,8 +29,12 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
       <ul className="mainmenu flex items-center">
         {menus.map((menu, idx) => {
           const groupedCols = groupColumns(menu.columns);
-          const cols = groupedCols.filter((col) => col.content.type !== "imageCard");
-          const contentColCount = cols.filter((c) => c.content.type !== "title").length;
+          const cols = groupedCols.filter(
+            (col) => col.content.type !== "imageCard"
+          );
+          const contentColCount = cols.filter(
+            (c) => c.content.type !== "title"
+          ).length;
           const effectiveWidth = contentColCount <= 1 ? undefined : menu.width;
 
           const width =
@@ -51,7 +55,9 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
               <button
                 className={clsx(
                   "flex h-20 items-center gap-1 px-3 text-base font-medium text-content-strong transition-colors duration-300 ease-in-out",
-                  open === idx ? "text-surface-brand-pink" : "hover:text-surface-brand-pink"
+                  open === idx
+                    ? "text-surface-brand-pink"
+                    : "hover:text-surface-brand-pink"
                 )}
                 aria-expanded={open === idx}
               >

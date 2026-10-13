@@ -126,9 +126,7 @@ export async function performWebSearch(
 
     for (const result of results) {
       if (!result.isAnswerBox) {
-        contextParts.push(
-          `${result.title}\n${result.url}\n${result.snippet}`
-        );
+        contextParts.push(`${result.title}\n${result.url}\n${result.snippet}`);
         sources.push(`${result.title} - ${result.url}`);
         urls.push(result.url);
       } else {
