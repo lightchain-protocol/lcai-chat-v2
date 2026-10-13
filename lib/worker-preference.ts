@@ -41,7 +41,9 @@ export function readWorkerPreference(): WorkerPreference {
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as Partial<WorkerPreference>;
     const avoid = Array.isArray(parsed.avoid)
-      ? parsed.avoid.filter((a): a is string => typeof a === "string").map(normalise)
+      ? parsed.avoid
+          .filter((a): a is string => typeof a === "string")
+          .map(normalise)
       : [];
     const prefer =
       typeof parsed.prefer === "string" ? normalise(parsed.prefer) : undefined;
@@ -88,7 +90,10 @@ export function toggleAvoided(address: string): WorkerPreference {
   const worker = normalise(address);
 
   if (current.avoid.includes(worker)) {
-    return write({ ...current, avoid: current.avoid.filter((a) => a !== worker) });
+    return write({
+      ...current,
+      avoid: current.avoid.filter((a) => a !== worker),
+    });
   }
 
   return write({

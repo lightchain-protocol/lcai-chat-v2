@@ -26,7 +26,7 @@ export function useModels() {
   const { data, error, isLoading } = useSWR(
     "/api/models",
     () => gateway.getModels(),
-    { revalidateOnFocus: false, refreshInterval: 20_000 },
+    { revalidateOnFocus: false, refreshInterval: 20_000 }
   );
 
   return {

@@ -10,15 +10,8 @@ import {
 import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { Address } from "viem";
+import { formatLcai } from "@/lib/lcai";
 import type { GenerationStats } from "@/lib/protocol/relay-client";
-import {
-  isAvoided,
-  isPinned,
-  readWorkerPreference,
-  toggleAvoided,
-  togglePinned,
-  type WorkerPreference,
-} from "@/lib/worker-preference";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
 import {
@@ -32,7 +25,14 @@ import {
   type VerificationStatus,
 } from "@/lib/protocol/verify-response";
 import { cn } from "@/lib/utils";
-import { formatLcai } from "@/lib/lcai";
+import {
+  isAvoided,
+  isPinned,
+  readWorkerPreference,
+  toggleAvoided,
+  togglePinned,
+  type WorkerPreference,
+} from "@/lib/worker-preference";
 import { SettlementTimeline } from "./settlement-timeline";
 
 /**
@@ -445,13 +445,11 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
 /** Bounded re-read schedule for the post-terminal-frame race with mining. */
 const MAX_JOB_REREADS = 24;
 const JOB_REREAD_INTERVAL_MS = 5000;
-
 
 function CheckRow({ label, value }: { label: string; value: boolean | null }) {
   const mark = value === true ? "yes" : value === false ? "no" : "n/a";

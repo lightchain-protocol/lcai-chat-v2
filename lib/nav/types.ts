@@ -10,7 +10,14 @@ export type RawNavCardItem = {
 export type RawNavCol =
   | { type: "title"; title: string }
   | { type: "cards"; items: RawNavCardItem[] }
-  | { type: "imageCard"; href: string; img: string; badge?: string; title: string; meta?: string }
+  | {
+      type: "imageCard";
+      href: string;
+      img: string;
+      badge?: string;
+      title: string;
+      meta?: string;
+    }
   | { type: "spacer" };
 
 export type RawNavConfig = {

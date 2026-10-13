@@ -11,7 +11,6 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { formatEther } from "viem";
 import { useAccount } from "wagmi";
 import { ConnectWalletButton } from "@/components/connect-wallet-button";
 import {
@@ -20,8 +19,8 @@ import {
   useTransactionHistory,
 } from "@/hooks/use-transaction-history";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
-import { cn, formatNumber } from "@/lib/utils";
 import { formatLcai } from "@/lib/lcai";
+import { cn } from "@/lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 

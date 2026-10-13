@@ -7,13 +7,13 @@ import { AlertTriangle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { MultiModelLive } from "@/hooks/use-multi-model-session";
-import { cn } from "@/lib/utils";
 import {
   jobIdFromMessage,
   servedModelIdFromMessage,
 } from "@/lib/protocol/served-model";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { ChatMessage } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { PreviewMessage } from "./message";
 import { ModelLogo } from "./model-logo";
 import { PipelineTimeline } from "./pipeline-timeline";

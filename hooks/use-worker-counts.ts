@@ -74,10 +74,7 @@ export function useWorkerCounts(modelIds: string[]): {
 
   // Stable, order-independent key so [a,b] and [b,a] dedupe to one fetch and
   // identity churn in the caller's array doesn't retrigger the read.
-  const sortedIds = useMemo(
-    () => [...new Set(modelIds)].sort(),
-    [modelIds]
-  );
+  const sortedIds = useMemo(() => [...new Set(modelIds)].sort(), [modelIds]);
 
   const enabled =
     sortedIds.length > 0 &&

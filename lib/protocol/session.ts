@@ -34,7 +34,7 @@ export type OnChainJob = {
 };
 
 import { workerRegistryAbi } from "@/contracts/worker-registry-abi";
-
+import { preferenceRequestFields } from "../worker-preference";
 import {
   decrypt,
   encrypt,
@@ -51,7 +51,6 @@ import type {
   TokenResponse,
 } from "./gateway-client";
 import { GatewayClientError, walletMayRetry } from "./gateway-client";
-import { preferenceRequestFields } from "../worker-preference";
 
 /**
  * How a job is submitted on-chain:
@@ -146,7 +145,7 @@ function serverMessage(err: GatewayClientError): string | undefined {
       ? parsed.message
       : undefined;
   } catch {
-    return undefined;
+    return;
   }
 }
 

@@ -18,8 +18,8 @@ import { isSortitionEnabled } from "@/config";
 import { hasUsableAuthToken } from "../http";
 import { jwtExpirySecs } from "../jwt";
 import { withMemoryPrefix } from "../memory";
-import type { ProtocolLoadingStatus } from "../types";
 import { recordThroughput } from "../model-throughput";
+import type { ProtocolLoadingStatus } from "../types";
 import { parseArtifactDescriptor } from "./artifact";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { type GatewayClient, ProtocolAuthExpiredError } from "./gateway-client";
@@ -1135,7 +1135,9 @@ export class ProtocolTransport {
     this.relayClient?.disconnect();
     const client = new RelayClient(relayUrl, relayToken);
     client.onLifecycle((event) => this.handleLifecycleEvent(event));
-    client.onReconnect(() => this.handleReconnect());
+    client.onReconnect(() => {
+      this.handleReconnect();
+    });
     this.relayClient = client;
     client.connect();
     try {

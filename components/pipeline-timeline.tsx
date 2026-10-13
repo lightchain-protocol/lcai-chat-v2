@@ -276,9 +276,7 @@ function PipelineHandle({
   tone: "active" | "done" | "failed";
 }) {
   const pct =
-    progress.total > 0
-      ? Math.round((progress.done / progress.total) * 100)
-      : 0;
+    progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
   // Step labels are written for the vertical list, where they sit above a
   // dimmed progressive note and a spinner carries the state — "Worker

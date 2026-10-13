@@ -440,7 +440,7 @@ export async function getMessageCountByUserId({
       .innerJoin(chat, eq(message.chatId, chat.id))
       .where(
         and(
-            eq(chat.owner, id),
+          eq(chat.owner, id),
           gte(message.createdAt, twentyFourHoursAgo),
           eq(message.role, "user")
         )

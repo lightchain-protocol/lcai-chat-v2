@@ -1,7 +1,7 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
 import { setAuthToken } from "@/lib/http";
 import { isRefreshDue } from "@/lib/siwe/refresh";
