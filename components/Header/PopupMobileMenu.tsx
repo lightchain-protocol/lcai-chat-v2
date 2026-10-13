@@ -1,11 +1,6 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-
-import { MegaCol, MenuConfig, NavCardItem } from "./types";
 import {
   ChevronDown,
   Facebook,
@@ -14,6 +9,10 @@ import {
   Twitter,
   X,
 } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { MegaCol, MenuConfig, NavCardItem } from "./types";
 
 interface PopupMobileMenuProps {
   menus: MenuConfig[];
@@ -27,21 +26,21 @@ const socialLinks = [
     label: "Linktr",
     icon: (
       <svg
-        stroke="currentColor"
         fill="none"
-        strokeWidth="2"
-        viewBox="0 0 24 24"
+        height="20"
+        stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        height="20"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
         width="20"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <path d="M4 10h16"></path>
-        <path d="M6.5 4.5l11 11"></path>
-        <path d="M6.5 15.5l11 -11"></path>
-        <path d="M12 10v-8"></path>
-        <path d="M12 15v7"></path>
+        <path d="M4 10h16" />
+        <path d="M6.5 4.5l11 11" />
+        <path d="M6.5 15.5l11 -11" />
+        <path d="M12 10v-8" />
+        <path d="M12 15v7" />
       </svg>
     ),
   },
@@ -60,11 +59,11 @@ const socialLinks = [
     label: "Discord",
     icon: (
       <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="20"
+        fill="currentColor"
         height="20"
         viewBox="0 0 24 24"
-        fill="currentColor"
+        width="20"
+        xmlns="http://www.w3.org/2000/svg"
       >
         <path d="M20.317 4.369a19.791 19.791 0 00-4.885-1.515c-.21.375-.455.888-.623 1.288a18.27 18.27 0 00-5.618 0 18.493 18.493 0 00-.626-1.288A19.736 19.736 0 003.68 4.37C.533 9.055-.32 13.59.099 18.057A19.9 19.9 0 006.18 20.69c.492-.671.93-1.385 1.308-2.138a12.72 12.72 0 01-2.083-.996c.176-.128.348-.26.515-.396a13.98 13.98 0 0011.658 0c.168.137.34.27.515.396-.662.4-1.36.735-2.084.997.38.753.817 1.466 1.31 2.137a19.89 19.89 0 006.078-2.63c.5-5.177-.838-9.674-3.08-13.29zM8.02 15.33c-1.182 0-2.148-1.088-2.148-2.425 0-1.337.955-2.425 2.148-2.425 1.202 0 2.158 1.088 2.148 2.425 0 1.337-.946 2.425-2.148 2.425zm7.975 0c-1.182 0-2.148-1.088-2.148-2.425 0-1.337.955-2.425 2.148-2.425 1.202 0 2.158 1.088 2.148 2.425 0 1.337-.946 2.425-2.148 2.425z" />
       </svg>
@@ -153,13 +152,13 @@ export default function PopupMobileMenu({
 
   return (
     <div
+      aria-hidden={!isActive}
+      aria-modal="true"
       className={clsx(
-        "fixed inset-0 z-[9999] xl:hidden transition-opacity duration-300 ease-in-out",
+        "fixed inset-0 z-[9999] transition-opacity duration-300 ease-in-out xl:hidden",
         isActive ? "visible opacity-100" : "invisible opacity-0"
       )}
       role="dialog"
-      aria-modal="true"
-      aria-hidden={!isActive}
     >
       {/* Overlay */}
       <div
@@ -169,40 +168,40 @@ export default function PopupMobileMenu({
 
       {/* Drawer */}
       <div
-        ref={menuRef}
         className={clsx(
-          "relative flex h-full w-[304px] sm:w-[336px] flex-col border-r",
-          "bg-background text-content-primary border-bdr-light shadow-[0_40px_80px_rgba(0,0,0,0.45)]",
+          "relative flex h-full w-[304px] flex-col border-r sm:w-[336px]",
+          "border-bdr-light bg-background text-content-primary shadow-[0_40px_80px_rgba(0,0,0,0.45)]",
           "transition-transform duration-300 ease-in-out",
           isActive ? "translate-x-0" : "-translate-x-full"
         )}
+        ref={menuRef}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-bdr-light bg-surface-x-soft-hex p-4">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-bdr-light border-b bg-surface-x-soft-hex p-4">
           <Link
+            className="inline-flex items-center gap-2"
             href="/"
             onClick={onClose}
-            className="inline-flex items-center gap-2"
           >
             <Image
-              src="/images/logo/logo-dark.svg"
-              width={160}
-              height={32}
               alt="Lightchain"
               className="dark:hidden"
+              height={32}
+              src="/images/logo/logo-dark.svg"
+              width={160}
             />
             <Image
-              src="/images/logo/logo.svg"
-              width={160}
-              height={32}
               alt="Lightchain"
               className="hidden dark:block"
+              height={32}
+              src="/images/logo/logo.svg"
+              width={160}
             />
           </Link>
           <button
+            aria-label="Close"
             className="flex h-9 w-9 items-center justify-center rounded-full text-content-secondary transition-colors duration-300 ease-in-out hover:bg-surface-soft"
             onClick={onClose}
-            aria-label="Close"
           >
             <X size={20} />
           </button>
@@ -213,38 +212,38 @@ export default function PopupMobileMenu({
           {sections.map((sec, i) => {
             const open = openIdx === i;
             return (
-              <div key={sec.label} className="mb-3">
+              <div className="mb-3" key={sec.label}>
                 <button
-                  className="w-full flex items-center justify-between text-sm uppercase tracking-wide text-content-secondary px-3 py-2"
-                  onClick={() => setOpenIdx(open ? null : i)}
                   aria-expanded={open}
+                  className="flex w-full items-center justify-between px-3 py-2 text-content-secondary text-sm uppercase tracking-wide"
+                  onClick={() => setOpenIdx(open ? null : i)}
                 >
                   <span>{sec.label}</span>
                   <ChevronDown
-                    size={20}
                     className={clsx(
                       "transition-transform duration-300 ease-in-out",
                       open && "rotate-180"
                     )}
+                    size={20}
                   />
                 </button>
 
                 <div
                   className={clsx(
-                    "overflow-hidden ml-4",
+                    "ml-4 overflow-hidden",
                     open ? "max-h-[1200px] opacity-100" : "max-h-0 opacity-0",
                     "transition-all duration-300 ease-in-out"
                   )}
                 >
                   {sec.groups.map((g, gi) => (
                     <div
-                      key={gi}
                       className={clsx(
-                        gi > 0 && "border-t border-br-light-soft/50"
+                        gi > 0 && "border-br-light-soft/50 border-t"
                       )}
+                      key={gi}
                     >
                       {g.title && (
-                        <div className="px-4 pt-3 text-[11px] font-semibold uppercase tracking-wide text-content-soft">
+                        <div className="px-4 pt-3 font-semibold text-[11px] text-content-soft uppercase tracking-wide">
                           {g.title}
                         </div>
                       )}
@@ -252,9 +251,9 @@ export default function PopupMobileMenu({
                         {g.items.map((item, ii) => (
                           <li key={`${gi}-${ii}`}>
                             <Link
+                              className="flex items-center justify-between rounded-md px-3 py-2 text-[15px] text-content-primary hover:bg-surface-m-soft"
                               href={item.href ?? "#"}
                               onClick={onClose}
-                              className="flex items-center justify-between rounded-md px-3 py-2 text-[15px] text-content-primary hover:bg-surface-m-soft"
                             >
                               <span>{item.label}</span>
                               {item.badge && (
@@ -275,18 +274,18 @@ export default function PopupMobileMenu({
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 border-t border-br-light-soft bg-surface-x-soft-hex p-3">
-          <h6 className="block w-full rounded-xl pt-2 text-center text-sm font-medium text-content-white">
+        <div className="sticky bottom-0 border-br-light-soft border-t bg-surface-x-soft-hex p-3">
+          <h6 className="block w-full rounded-xl pt-2 text-center font-medium text-content-white text-sm">
             Social Media
           </h6>
 
           <div className="mt-3 flex items-center justify-center gap-3">
             {socialLinks.map((s) => (
               <a
-                key={s.label}
-                href={s.href}
                 aria-label={s.label}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-m-soft text-content-secondary hover:text-content-primary hover:bg-surface-soft"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-m-soft text-content-secondary hover:bg-surface-soft hover:text-content-primary"
+                href={s.href}
+                key={s.label}
               >
                 {s.icon}
               </a>

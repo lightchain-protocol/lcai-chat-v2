@@ -1,12 +1,12 @@
 "use client";
 
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import AlertError from "@/components/ui/toast/AlertError";
 import AlertInfo from "@/components/ui/toast/AlertInfo";
 import AlertReward from "@/components/ui/toast/AlertReward";
 import AlertSuccess from "@/components/ui/toast/AlertSuccess";
 import AlertWarning from "@/components/ui/toast/AlertWarning";
-import { toast } from "sonner";
 
 const AlertsSection = () => {
   const handleError = () => {

@@ -1,11 +1,11 @@
 "use client";
 
 import type { UseChatHelpers } from "@ai-sdk/react";
+import { MessageCirclePlus } from "lucide-react";
 import { memo } from "react";
 import type { ChatMessage } from "@/lib/types";
 import { Suggestion } from "./elements/suggestion";
 import type { VisibilityType } from "./visibility-selector";
-import { MessageCirclePlus } from "lucide-react";
 
 type SuggestedActionsProps = {
   chatId: string;
@@ -29,17 +29,17 @@ function PureSuggestedActions({
 
   return (
     <div>
-      <h6 className="text-content-default font-medium text-sm">
+      <h6 className="font-medium text-content-default text-sm">
         Quick prompts
       </h6>
       <div
-        className="mt-4 grid w-full sm:gap-3 gap-1.5 grid-cols-2 sm:grid-cols-3 md:grid-cols-2 xl:grid-cols-3"
+        className="mt-4 grid w-full grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-3 md:grid-cols-2 xl:grid-cols-3"
         data-testid="suggested-actions"
       >
         {suggestedActions.map((suggestedAction, index) => (
           <Suggestion
+            className="group h-full rounded-[10px] border-0 bg-transparent p-px hover:bg-gradient-to-r hover:from-[#7064E9] hover:to-[#DD00AC]"
             key={index}
-            className="p-px group h-full border-0 rounded-[10px] bg-transparent hover:bg-gradient-to-r hover:from-[#7064E9] hover:to-[#DD00AC]"
             onClick={(suggestion) => {
               if (onBeforeSubmit && !onBeforeSubmit()) {
                 return;
@@ -52,15 +52,15 @@ function PureSuggestedActions({
             }}
             suggestion={suggestedAction}
           >
-            <div className="sm:p-3 p-2 flex w-full items-baseline justify-start gap-1.5 sm:gap-2.5 border border-bdr-soft bg-surface-elevation-light shadow-[0_4px_8px_0_rgba(0,0,0,0.04)] whitespace-normal text-left h-full text-content-default text-xs sm:text-sm rounded-[9px] relative">
-              <MessageCirclePlus className="hidden sm:block text-content-light translate-y-0.5 transition-opacity duration-200 group-hover:opacity-0" />
+            <div className="relative flex h-full w-full items-baseline justify-start gap-1.5 whitespace-normal rounded-[9px] border border-bdr-soft bg-surface-elevation-light p-2 text-left text-content-default text-xs shadow-[0_4px_8px_0_rgba(0,0,0,0.04)] sm:gap-2.5 sm:p-3 sm:text-sm">
+              <MessageCirclePlus className="hidden translate-y-0.5 text-content-light transition-opacity duration-200 group-hover:opacity-0 sm:block" />
               <svg
-                className="hidden sm:block absolute left-3 top-3.5 transition-opacity duration-200 opacity-0 group-hover:opacity-100"
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
+                className="absolute top-3.5 left-3 hidden opacity-0 transition-opacity duration-200 group-hover:opacity-100 sm:block"
+                fill="none"
                 height="16"
                 viewBox="0 0 16 16"
-                fill="none"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
               >
                 <g clipPath="url(#clip0_40000707_2443)">
                   <path
@@ -70,18 +70,18 @@ function PureSuggestedActions({
                 </g>
                 <defs>
                   <linearGradient
+                    gradientUnits="userSpaceOnUse"
                     id="paint0_linear_40000707_2443"
                     x1="15.3341"
-                    y1="8.00025"
                     x2="0.667969"
+                    y1="8.00025"
                     y2="8.00025"
-                    gradientUnits="userSpaceOnUse"
                   >
                     <stop stopColor="#7064E9" />
                     <stop offset="1" stopColor="#DD00AC" />
                   </linearGradient>
                   <clipPath id="clip0_40000707_2443">
-                    <rect width="16" height="16" fill="white" />
+                    <rect fill="white" height="16" width="16" />
                   </clipPath>
                 </defs>
               </svg>

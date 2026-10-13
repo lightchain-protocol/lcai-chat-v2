@@ -1,5 +1,6 @@
 "use client";
 
+import { useSession } from "next-auth/react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { $http } from "@/lib/http";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
-import { useSession } from "next-auth/react";
 
 type SystemPromptEditorProps = {
   open: boolean;

@@ -10,15 +10,8 @@ import {
 import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { Address } from "viem";
+import { formatLcai } from "@/lib/lcai";
 import type { GenerationStats } from "@/lib/protocol/relay-client";
-import {
-  isAvoided,
-  isPinned,
-  readWorkerPreference,
-  toggleAvoided,
-  togglePinned,
-  type WorkerPreference,
-} from "@/lib/worker-preference";
 import type { OnChainJob } from "@/lib/protocol/session";
 import type { SettlementProgress } from "@/lib/protocol/settlement";
 import {
@@ -32,7 +25,14 @@ import {
   type VerificationStatus,
 } from "@/lib/protocol/verify-response";
 import { cn } from "@/lib/utils";
-import { formatLcai } from "@/lib/lcai";
+import {
+  isAvoided,
+  isPinned,
+  readWorkerPreference,
+  toggleAvoided,
+  togglePinned,
+  type WorkerPreference,
+} from "@/lib/worker-preference";
 import { SettlementTimeline } from "./settlement-timeline";
 
 /**

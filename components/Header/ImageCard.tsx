@@ -1,7 +1,7 @@
-import React from "react";
-import Link from "next/link";
 import Image from "next/image";
-import { MegaCol } from "./types";
+import Link from "next/link";
+import React from "react";
+import type { MegaCol } from "./types";
 
 function ImageCard({
   href,
@@ -12,27 +12,27 @@ function ImageCard({
 }: Extract<MegaCol, { type: "imageCard" }>) {
   return (
     <Link
-      href={href}
       className="news-card group relative block h-full overflow-hidden rounded-2xl border border-br-light-soft"
+      href={href}
     >
       <div className="inner h-full">
         <div className="card-image h-full">
           <Image
-            src={img}
             alt={title || "Image"}
+            className="h-full w-auto object-cover transition-transform duration-300 ease-in-out group-hover:scale-[1.02]"
             height={150}
+            src={img}
             width={300}
-            className="object-cover h-full w-auto transition-transform duration-300 ease-in-out group-hover:scale-[1.02]"
           />
         </div>
         {badge ? (
-          <div className="bg-[#0f1021] text-white text-xs font-medium uppercase px-3 py-1.5 rounded-full absolute top-4 left-4">
+          <div className="absolute top-4 left-4 rounded-full bg-[#0f1021] px-3 py-1.5 font-medium text-white text-xs uppercase">
             {badge}
           </div>
         ) : null}
         <div className="card-content absolute bottom-0 left-0 p-5">
           {meta ? <div className="text-white text-xs"> {meta} </div> : null}
-          <h5 className="mt-2 text-base font-semibold leading-snug">
+          <h5 className="mt-2 font-semibold text-base leading-snug">
             <span className="text-white">{title}</span>
           </h5>
         </div>

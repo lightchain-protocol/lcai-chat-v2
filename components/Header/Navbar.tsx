@@ -1,10 +1,10 @@
 "use client";
 
-import React from "react";
 import clsx from "clsx";
+import { ChevronDown } from "lucide-react";
+import React from "react";
 import NavCard from "./NavCard";
 import type { MegaCol, MenuConfig } from "./types";
-import { ChevronDown } from "lucide-react";
 
 /** Merge pattern: [title, cards] -> single visual column */
 function groupColumns(cols: MegaCol[]) {
@@ -48,26 +48,26 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
 
           return (
             <li
-              key={menu.label}
               className="with-megamenu has-menu-child-item relative px-1 sm:px-2"
+              key={menu.label}
               onMouseEnter={() => setOpen(idx)}
             >
               <button
+                aria-expanded={open === idx}
                 className={clsx(
-                  "flex h-20 items-center gap-1 px-3 text-base font-medium text-content-strong transition-colors duration-300 ease-in-out",
+                  "flex h-20 items-center gap-1 px-3 font-medium text-base text-content-strong transition-colors duration-300 ease-in-out",
                   open === idx
                     ? "text-surface-brand-pink"
                     : "hover:text-surface-brand-pink"
                 )}
-                aria-expanded={open === idx}
               >
                 {menu.label}
-                <ChevronDown size={20} className="ml-1" />
+                <ChevronDown className="ml-1" size={20} />
               </button>
 
               <div
                 className={clsx(
-                  "lightchain-megamenu absolute top-[100%-10px] z-40 opacity-0 invisible transition-opacity duration-300 ease-in-out bg-background",
+                  "lightchain-megamenu invisible absolute top-[100%-10px] z-40 bg-background opacity-0 transition-opacity duration-300 ease-in-out",
                   align,
                   open === idx && "visible opacity-100"
                 )}
@@ -93,15 +93,15 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
                       const isLast = i === cols.length - 1;
                       return (
                         <div
-                          key={i}
                           className={clsx(
                             "single-mega-item p-4",
-                            !isLast && "border-r border-bdr-light"
+                            !isLast && "border-bdr-light border-r"
                           )}
+                          key={i}
                         >
                           {/* Title like the screenshot */}
                           {g.heading && (
-                            <h3 className="lcai-short-title mb-3 border-b border-bdr-light pb-2 text-xs font-semibold uppercase tracking-wide text-content-soft">
+                            <h3 className="lcai-short-title mb-3 border-bdr-light border-b pb-2 font-semibold text-content-soft text-xs uppercase tracking-wide">
                               {g.heading}
                             </h3>
                           )}

@@ -6,8 +6,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 import { headers } from "next/headers";
 import { SessionProvider } from "next-auth/react";
-import Web3WalletProvider from "@/components/web3-wallet-provider";
 import { SIWESessionSync } from "@/components/siwe-session-sync";
+import Web3WalletProvider from "@/components/web3-wallet-provider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://chat.lightchain.ai"),

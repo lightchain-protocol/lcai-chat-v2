@@ -37,6 +37,7 @@ import {
   saveBranchStore,
   switchBranch,
 } from "@/lib/branches";
+import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Vote } from "@/lib/db/schema";
 import { $http, hasUsableAuthToken } from "@/lib/http";
 import {
@@ -51,7 +52,6 @@ import {
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import { resolveModelSelection } from "@/lib/protocol/resolve-model";
 import { NoWorkerAvailableError } from "@/lib/protocol/session";
-import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import {
@@ -1026,11 +1026,11 @@ export function Chat({
           multiModelLive={multiModel.live}
           onAddBranch={isReadonly ? undefined : handleAddBranch}
           onFork={isReadonly ? undefined : handleFork}
-          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           onRetryTurn={() => {
             setTurnError(null);
             regenerateRef.current?.();
           }}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={currentModelId}

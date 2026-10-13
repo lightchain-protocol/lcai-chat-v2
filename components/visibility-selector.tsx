@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown, Globe, Lock, type LucideIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +11,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Globe, Lock, LucideIcon } from "lucide-react";
 
 export type VisibilityType = "private" | "public";
 
@@ -64,7 +64,7 @@ export function VisibilitySelector({
         )}
       >
         <Button
-          className="hidden group focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 md:flex h-9 px-2 border-surface-base-extraLight bg-surface-base-faint text-content-default hover:bg-surface-base-extraLight"
+          className="group hidden h-9 border-surface-base-extraLight bg-surface-base-faint px-2 text-content-default hover:bg-surface-base-extraLight focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 md:flex"
           data-testid="visibility-selector"
           variant="outline"
         >
@@ -89,7 +89,7 @@ export function VisibilitySelector({
             <div className="flex items-start gap-2.5">
               <visibility.icon className="size-4 translate-y-1 text-content-soft" />
               <div className="flex flex-col items-start gap-1">
-                <h6 className="text-base font-medium text-content-ultra">
+                <h6 className="font-medium text-base text-content-ultra">
                   {visibility.label}
                 </h6>
                 {visibility.description && (
@@ -98,7 +98,7 @@ export function VisibilitySelector({
                   </p>
                 )}
               </div>
-              <div className="absolute right-2.5 top-2.5 group-data-[active=true]/item:opacity-100 size-4 rounded-full border-3 group-data-[active=true]/item:border-4 border-transparency-dark-mode-24 group-data-[active=true]/item:border-surface-base-brand-default"></div>
+              <div className="absolute top-2.5 right-2.5 size-4 rounded-full border-3 border-transparency-dark-mode-24 group-data-[active=true]/item:border-4 group-data-[active=true]/item:border-surface-base-brand-default group-data-[active=true]/item:opacity-100" />
             </div>
           </DropdownMenuItem>
         ))}

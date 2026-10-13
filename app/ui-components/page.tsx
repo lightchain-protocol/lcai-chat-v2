@@ -1,6 +1,6 @@
 import Header from "@/components/Header/Header";
-import AlertsSection from "./AlertsSection";
 import { fetchNavConfig } from "@/lib/nav/fetchNavConfig";
+import AlertsSection from "./AlertsSection";
 
 const Page = async () => {
   const rawMenus = await fetchNavConfig();

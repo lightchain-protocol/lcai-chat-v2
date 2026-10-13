@@ -1,10 +1,10 @@
 "use client";
 
-import React from "react";
-import Link from "next/link";
 import clsx from "clsx";
-import type { NavCardItem } from "./types";
 import { ArrowRight, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import React from "react";
+import type { NavCardItem } from "./types";
 
 export default function NavCard({ item }: { item: NavCardItem }) {
   const base =
@@ -22,16 +22,16 @@ export default function NavCard({ item }: { item: NavCardItem }) {
 
   return (
     <Link
+      className={clsx(base, hover, active)}
       href={item.href}
       target={item.target}
-      className={clsx(base, hover, active)}
     >
       {/* ICON with inline gradient ring (no globals.css) */}
       <span className="relative mt-0.5 inline-flex h-9 w-9 items-center justify-center">
         {/* gradient ring layer */}
         <span
           className={clsx(
-            "pointer-events-none absolute -inset-px rounded-full opacity-0 transition-opacity duration-300",
+            "-inset-px pointer-events-none absolute rounded-full opacity-0 transition-opacity duration-300",
             item.active && "opacity-100",
             "group-hover:opacity-100"
           )}
@@ -43,8 +43,8 @@ export default function NavCard({ item }: { item: NavCardItem }) {
         <span className="relative z-1 inline-flex h-9 w-9 items-center justify-center rounded-full">
           {item.icon ? (
             <item.icon
-              size={16}
               className="text-content-primary transition-transform duration-300 group-hover:scale-[1.02]"
+              size={16}
             />
           ) : null}
         </span>
@@ -52,25 +52,25 @@ export default function NavCard({ item }: { item: NavCardItem }) {
 
       {/* text */}
       <span className="min-w-0">
-        <span className="block text-sm font-semibold leading-tight text-content-primary">
+        <span className="block font-semibold text-content-primary text-sm leading-tight">
           {item.label}
         </span>
         {item.desc && (
-          <span className="mt-0.5 block text-xs leading-snug text-content-secondary">
+          <span className="mt-0.5 block text-content-secondary text-xs leading-snug">
             {item.desc}
           </span>
         )}
       </span>
 
       {/* right arrows */}
-      <span className="absolute right-2 top-1/2 -translate-y-1/2 flex w-4 overflow-hidden">
+      <span className="-translate-y-1/2 absolute top-1/2 right-2 flex w-4 overflow-hidden">
         <ArrowRight
+          className="-translate-x-3 opacity-0 transition-all duration-300 ease-in-out group-hover:translate-x-0 group-hover:opacity-100"
           size={22}
-          className="-translate-x-3 opacity-0 transition-all duration-300 ease-in-out group-hover:opacity-100 group-hover:translate-x-0"
         />
         <ChevronRight
-          size={22}
           className="-ml-3 translate-x-0 opacity-100 transition-all duration-300 ease-in-out group-hover:translate-x-3 group-hover:opacity-0"
+          size={22}
         />
       </span>
     </Link>

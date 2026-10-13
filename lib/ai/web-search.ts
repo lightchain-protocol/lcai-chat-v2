@@ -125,12 +125,12 @@ export async function performWebSearch(
     const urls: string[] = [];
 
     for (const result of results) {
-      if (!result.isAnswerBox) {
+      if (result.isAnswerBox) {
+        contextParts.push(`Answer Box: ${result.snippet}`);
+      } else {
         contextParts.push(`${result.title}\n${result.url}\n${result.snippet}`);
         sources.push(`${result.title} - ${result.url}`);
         urls.push(result.url);
-      } else {
-        contextParts.push(`Answer Box: ${result.snippet}`);
       }
     }
 

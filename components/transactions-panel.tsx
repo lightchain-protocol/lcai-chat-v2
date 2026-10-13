@@ -20,8 +20,8 @@ import {
   useTransactionHistory,
 } from "@/hooks/use-transaction-history";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
-import { cn, formatNumber } from "@/lib/utils";
 import { formatLcai } from "@/lib/lcai";
+import { cn, formatNumber } from "@/lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
