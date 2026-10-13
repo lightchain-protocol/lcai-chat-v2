@@ -55,7 +55,6 @@ import { NoWorkerAvailableError } from "@/lib/protocol/session";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import {
-  fetcher,
   fetchWithErrorHandlers,
   generateUUID,
   votesFetcher,
@@ -804,8 +803,8 @@ export function Chat({
     // multi-model map built a second SessionManager under another storage key,
     // so every chat opened two on-chain sessions and orphaned one.
     getProtocolTransport()
-      .then((transport) =>
-        transport.prewarm(
+      .then((protocolTransport) =>
+        protocolTransport.prewarm(
           enableWebSearchRef.current
             ? { requiredCapabilities: ["search"] }
             : undefined

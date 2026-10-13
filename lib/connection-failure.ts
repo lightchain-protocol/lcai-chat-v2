@@ -1,3 +1,7 @@
+// Browsers disagree on the wording: Chrome "Failed to fetch",
+// Safari "Load failed", Firefox "NetworkError when attempting to fetch".
+const FETCH_FAILURE_PATTERN = /failed to fetch|load failed|networkerror/i;
+
 /**
  * A request that never reached consumer-api: offline, DNS, a dropped
  * connection, or a proxy error whose response carries no CORS headers (the
@@ -17,11 +21,9 @@ export function isConnectionFailure(error: unknown): boolean {
   let current: unknown = error;
   while (current instanceof Error && !seen.has(current)) {
     seen.add(current);
-    // Browsers disagree on the wording: Chrome "Failed to fetch",
-    // Safari "Load failed", Firefox "NetworkError when attempting to fetch".
     if (
       current.name === "TypeError" &&
-      /failed to fetch|load failed|networkerror/i.test(current.message)
+      FETCH_FAILURE_PATTERN.test(current.message)
     ) {
       return true;
     }

@@ -1,24 +1,17 @@
 "use client";
 
 import clsx from "clsx";
-import {
-  ChevronDown,
-  Facebook,
-  Instagram,
-  Network,
-  Twitter,
-  X,
-} from "lucide-react";
+import { ChevronDown, Instagram, Twitter, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MegaCol, MenuConfig, NavCardItem } from "./types";
 
-interface PopupMobileMenuProps {
+type PopupMobileMenuProps = {
   menus: MenuConfig[];
   isActive: boolean;
   onClose: () => void;
-}
+};
 
 const socialLinks = [
   {
@@ -76,11 +69,11 @@ function extractItemsFromColumns(columns: MegaCol[]) {
   type MobileItem = { label: string; href?: string; badge?: string };
   const groups: { title?: string; items: MobileItem[] }[] = [];
 
-  columns.forEach((col) => {
+  for (const col of columns) {
     // Title-only column becomes a group header (no items)
     if (col.type === "title") {
       groups.push({ title: col.title, items: [] });
-      return;
+      continue;
     }
 
     // Cards column: add each card as a link item
@@ -92,13 +85,13 @@ function extractItemsFromColumns(columns: MegaCol[]) {
       }));
       // If the previous pushed group was a title with no items, append to it;
       // otherwise create an unnamed group.
-      const last = groups[groups.length - 1];
+      const last = groups.at(-1);
       if (last && last.items.length === 0 && last.title) {
         last.items.push(...items);
       } else {
         groups.push({ items });
       }
-      return;
+      continue;
     }
 
     // Optional: show imageCard as a single CTA if provided
@@ -107,7 +100,7 @@ function extractItemsFromColumns(columns: MegaCol[]) {
         items: [{ label: col.title, href: col.href }],
       });
     }
-  });
+  }
 
   // If nothing matched, provide an empty group to avoid collapse oddities
   if (groups.length === 0) groups.push({ items: [] });
@@ -202,6 +195,7 @@ export default function PopupMobileMenu({
             aria-label="Close"
             className="flex h-9 w-9 items-center justify-center rounded-full text-content-secondary transition-colors duration-300 ease-in-out hover:bg-surface-soft"
             onClick={onClose}
+            type="button"
           >
             <X size={20} />
           </button>
@@ -217,6 +211,7 @@ export default function PopupMobileMenu({
                   aria-expanded={open}
                   className="flex w-full items-center justify-between px-3 py-2 text-content-secondary text-sm uppercase tracking-wide"
                   onClick={() => setOpenIdx(open ? null : i)}
+                  type="button"
                 >
                   <span>{sec.label}</span>
                   <ChevronDown

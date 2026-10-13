@@ -1135,7 +1135,9 @@ export class ProtocolTransport {
     this.relayClient?.disconnect();
     const client = new RelayClient(relayUrl, relayToken);
     client.onLifecycle((event) => this.handleLifecycleEvent(event));
-    client.onReconnect(() => this.handleReconnect());
+    client.onReconnect(() => {
+      this.handleReconnect();
+    });
     this.relayClient = client;
     client.connect();
     try {

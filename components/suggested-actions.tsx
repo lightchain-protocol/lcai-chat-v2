@@ -36,10 +36,10 @@ function PureSuggestedActions({
         className="mt-4 grid w-full grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-3 md:grid-cols-2 xl:grid-cols-3"
         data-testid="suggested-actions"
       >
-        {suggestedActions.map((suggestedAction, index) => (
+        {suggestedActions.map((suggestedAction) => (
           <Suggestion
             className="group h-full rounded-[10px] border-0 bg-transparent p-px hover:bg-gradient-to-r hover:from-[#7064E9] hover:to-[#DD00AC]"
-            key={index}
+            key={suggestedAction}
             onClick={(suggestion) => {
               if (onBeforeSubmit && !onBeforeSubmit()) {
                 return;

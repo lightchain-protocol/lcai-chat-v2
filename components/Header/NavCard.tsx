@@ -3,7 +3,6 @@
 import clsx from "clsx";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import React from "react";
 import type { NavCardItem } from "./types";
 
 export default function NavCard({ item }: { item: NavCardItem }) {

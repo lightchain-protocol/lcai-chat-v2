@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Globe, Lock, type LucideIcon } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

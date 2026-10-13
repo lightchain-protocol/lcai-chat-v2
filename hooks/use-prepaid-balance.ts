@@ -190,6 +190,7 @@ export default function usePrepaidBalance() {
         address: c.address,
         abi: jobRegistryAbi,
         functionName: "depositAndAuthorize",
+        // biome-ignore lint/style/noNonNullAssertion: requireWritable() above throws when it is unset
         args: [delegateAddress!],
         value,
         account,
@@ -231,6 +232,7 @@ export default function usePrepaidBalance() {
         address: c.address,
         abi: jobRegistryAbi,
         functionName: "setDelegateAuthorization",
+        // biome-ignore lint/style/noNonNullAssertion: requireWritable() above throws when it is unset
         args: [delegateAddress!, authorized],
         account,
       });
@@ -250,6 +252,7 @@ export default function usePrepaidBalance() {
         address: c.address,
         abi: jobRegistryAbi,
         functionName: "setDelegateAllowance",
+        // biome-ignore lint/style/noNonNullAssertion: requireWritable() above throws when it is unset
         args: [delegateAddress!, allowanceWei],
         account,
       });
@@ -283,6 +286,7 @@ export default function usePrepaidBalance() {
     if (bal === 0n) throw new Error("No prepaid balance to allocate");
     const authorized = (await c.read.isDelegateAuthorized([
       account,
+      // biome-ignore lint/style/noNonNullAssertion: requireWritable() above throws when it is unset
       delegateAddress!,
     ])) as boolean;
     if (!authorized) {

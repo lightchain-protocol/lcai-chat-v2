@@ -2,7 +2,6 @@ import { PanelRight } from "lucide-react";
 import type { ComponentProps } from "react";
 import { type SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { SidebarLeftIcon } from "./icons";
 import { Button } from "./ui/button";
 
 export function SidebarToggle({

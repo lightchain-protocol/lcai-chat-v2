@@ -60,6 +60,7 @@ export default function Navbar({ menus }: { menus: MenuConfig[] }) {
                     ? "text-surface-brand-pink"
                     : "hover:text-surface-brand-pink"
                 )}
+                type="button"
               >
                 {menu.label}
                 <ChevronDown className="ml-1" size={20} />

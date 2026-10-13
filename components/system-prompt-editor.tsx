@@ -1,6 +1,5 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,7 +31,6 @@ export function SystemPromptEditor({
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const { status: sessionStatus } = useSession();
 
   const handleSave = async () => {
     if (!name.trim() || !prompt.trim()) {

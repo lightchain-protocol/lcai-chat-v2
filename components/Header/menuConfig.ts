@@ -15,7 +15,6 @@ import {
   Headphones,
   LineChart,
   Link,
-  UserCog as LucideUsersCog,
   MessageSquare,
   Network,
   PlugZap,
