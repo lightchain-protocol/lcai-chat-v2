@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiKey } from "./api-keys";
 
@@ -5,6 +6,7 @@ import type { ApiKey } from "./api-keys";
 vi.mock("@/app/(auth)/auth", () => ({ auth: () => Promise.resolve(null) }));
 
 const {
+  completionBody,
   createApiKey,
   deleteApiKey,
   listApiKeys,
@@ -333,5 +335,36 @@ describe("usageSnippets", () => {
     const { lightchain } = usageSnippets("https://api.example", "mainnet");
 
     expect(lightchain).toContain('network: "mainnet",');
+  });
+
+  it("writes the given model and prompt into the SDK call", () => {
+    const { lightchain } = usageSnippets("https://api.example", "testnet", {
+      model: "qwen3-vl:8b",
+      prompt: 'Say "hi"\nthen stop',
+    });
+
+    expect(lightchain).toContain('model: "qwen3-vl:8b",');
+    expect(lightchain).toContain(
+      'messages: [{ role: "user", content: "Say \\"hi\\"\\nthen stop" }],'
+    );
+  });
+
+  it("posts the request body with the key from $LIGHTCHAIN_API_KEY in curl", () => {
+    const { curl } = usageSnippets("https://api.example", "testnet");
+
+    expect(curl).toContain("curl https://api.example/v1/chat/completions");
+    expect(curl).toContain('-H "Authorization: Bearer $LIGHTCHAIN_API_KEY"');
+  });
+
+  it("quotes curl's body so a shell passes it through byte for byte", () => {
+    const request = { model: "gemma4:e2b", prompt: 'It\'s $HOME `x` \\ "q"' };
+    const { curl } = usageSnippets("https://api.example", "testnet", request);
+    const quoted = curl.slice(curl.indexOf("-d ") + 3);
+
+    const passed = execFileSync("sh", ["-c", `printf %s ${quoted}`], {
+      encoding: "utf8",
+    });
+
+    expect(JSON.parse(passed)).toEqual(completionBody(request));
   });
 });
