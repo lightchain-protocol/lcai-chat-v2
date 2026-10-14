@@ -57,6 +57,7 @@ import {
   createApiKey,
   deleteApiKey,
   listApiKeys,
+  publicApiUrl,
   revokeApiKey,
   setSpendCap,
   spendCapOf,
@@ -268,7 +269,7 @@ function BalanceSummary() {
   );
 }
 
-function ErrorNote({ children }: { children: ReactNode }) {
+export function ErrorNote({ children }: { children: ReactNode }) {
   return (
     <p
       className="flex items-start gap-2 rounded-[10px] bg-surface-base-error-default/10 px-3 py-2 text-content-error-light text-sm"
@@ -922,21 +923,11 @@ function KeyRow({
   );
 }
 
-const TRAILING_SLASHES = /\/+$/;
-
-const SNIPPETS = [
-  { id: "openai", label: "OpenAI SDK" },
-  { id: "lightchain", label: "@lightchainai/sdk" },
-] as const;
-
 function UsageSnippet() {
-  const [tab, setTab] = useState<(typeof SNIPPETS)[number]["id"]>("openai");
-  // The public URL, not $http's: on the server that is the internal one.
-  const baseUrl = (process.env.NEXT_PUBLIC_CONSUMER_API_URL ?? "").replace(
-    TRAILING_SLASHES,
-    ""
+  const snippets = usageSnippets(
+    publicApiUrl,
+    isTestnet ? "testnet" : "mainnet"
   );
-  const snippets = usageSnippets(baseUrl, isTestnet ? "testnet" : "mainnet");
 
   return (
     <section aria-labelledby="usage-heading" className="flex flex-col gap-4">
@@ -950,38 +941,69 @@ function UsageSnippet() {
         <p className="mt-1 max-w-2xl text-content-default text-sm">
           The API is OpenAI-compatible: point any OpenAI SDK at{" "}
           <code className="rounded bg-surface-base-faint px-1 py-0.5 font-mono text-content-strong text-xs">
-            {baseUrl}/v1
+            {publicApiUrl}/v1
           </code>{" "}
           and pass the key. Or let{" "}
           <code className="font-mono text-xs">@lightchainai/sdk</code> supply
           the URL for the network.
         </p>
       </div>
+      <SnippetTabs
+        tabs={[
+          {
+            id: "openai",
+            label: "OpenAI SDK",
+            language: "typescript",
+            code: snippets.openai,
+          },
+          {
+            id: "lightchain",
+            label: "@lightchainai/sdk",
+            language: "typescript",
+            code: snippets.lightchain,
+          },
+        ]}
+      />
+    </section>
+  );
+}
+
+/** Code for one call, a tab per way to make it, with a copy button. */
+export function SnippetTabs({
+  tabs,
+}: {
+  tabs: { id: string; label: string; language: string; code: string }[];
+}) {
+  const [id, setId] = useState(tabs[0].id);
+  const shown = tabs.find((tab) => tab.id === id) ?? tabs[0];
+
+  return (
+    <>
       <div className="flex w-fit gap-1 rounded-[10px] border border-bdr-light p-1">
-        {SNIPPETS.map((snippet) => (
+        {tabs.map((tab) => (
           <button
-            aria-pressed={tab === snippet.id}
+            aria-pressed={tab.id === shown.id}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-              tab === snippet.id
+              tab.id === shown.id
                 ? "bg-surface-base-faint font-medium text-content-strong"
                 : "text-content-soft hover:text-content-strong"
             )}
-            key={snippet.id}
-            onClick={() => setTab(snippet.id)}
+            key={tab.id}
+            onClick={() => setId(tab.id)}
             type="button"
           >
-            {snippet.label}
+            {tab.label}
           </button>
         ))}
       </div>
       <CodeBlock
         className="rounded-2xl border-bdr-light"
-        code={snippets[tab]}
-        language="typescript"
+        code={shown.code}
+        language={shown.language}
       >
         <CodeBlockCopyButton aria-label="Copy code" />
       </CodeBlock>
-    </section>
+    </>
   );
 }

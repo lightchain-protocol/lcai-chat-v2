@@ -182,21 +182,46 @@ async function refusal(
   return body?.message ?? `The API answered ${res.status}. Try again.`;
 }
 
+const TRAILING_SLASHES = /\/+$/;
+
+// The public URL, not $http's: on the server that is the internal one.
+export const publicApiUrl = (
+  process.env.NEXT_PUBLIC_CONSUMER_API_URL ?? ""
+).replace(TRAILING_SLASHES, "");
+
+/** One question to one model, with no history: what a snippet or a playground run sends. */
+export type CompletionRequest = { model: string; prompt: string };
+
+/** A one-question chat completion's request body, as the snippets below send it. */
+export function completionBody({ model, prompt }: CompletionRequest) {
+  return { model, messages: [{ role: "user", content: prompt }] };
+}
+
+// ponytail: a fixed example model, as in the docs; put a served one from
+// /v1/models here if people paste the snippet as it is.
+export const EXAMPLE_REQUEST: CompletionRequest = {
+  model: "gemma4:e2b",
+  prompt: "Say hello in five words.",
+};
+
 /**
- * How to call the API with a key: through the OpenAI SDK directly, and
- * through `@lightchainai/sdk`, which supplies the network's URL.
+ * How to call the API with a key: through the OpenAI SDK directly, through
+ * `@lightchainai/sdk`, which supplies the network's URL, and with curl. All
+ * three send `request`, the example's by default.
  */
 export function usageSnippets(
   apiBaseUrl: string,
-  network: "mainnet" | "testnet"
-): { openai: string; lightchain: string } {
-  // ponytail: a fixed example model, as in the docs; put a served one from
-  // /v1/models here if people paste the snippet as it is.
+  network: "mainnet" | "testnet",
+  request = EXAMPLE_REQUEST
+): { openai: string; lightchain: string; curl: string } {
+  const { model, prompt } = request;
   const call = `const completion = await openai.chat.completions.create({
-  model: "gemma4:e2b", // GET /v1/models lists the models served now
-  messages: [{ role: "user", content: "Say hello in five words." }],
+  model: ${JSON.stringify(model)}, // GET /v1/models lists the models served now
+  messages: [{ role: "user", content: ${JSON.stringify(prompt)} }],
 });
 console.log(completion.choices[0].message.content);`;
+  // Single-quoted for the shell: a quote inside closes, escapes and reopens it.
+  const body = JSON.stringify(completionBody(request)).replaceAll("'", "'\\''");
 
   return {
     openai: `import OpenAI from "openai";
@@ -218,5 +243,9 @@ const lc = new Lightchain({
 const openai = new OpenAI({ baseURL: lc.baseURL, apiKey: lc.apiKey, fetch: lc.fetch });
 
 ${call}`,
+    curl: `curl ${apiBaseUrl}/v1/chat/completions \\
+  -H "Authorization: Bearer $LIGHTCHAIN_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '${body}'`,
   };
 }
