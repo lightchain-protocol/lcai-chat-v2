@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import config from "@/config";
+import config, { isTestnet } from "@/config";
 import { useChatModels } from "@/hooks/use-models";
 import usePrepaidBalance from "@/hooks/use-prepaid-balance";
 import {
@@ -62,6 +62,7 @@ const DEFAULT_PROMPT = "Reply with a one-sentence fun fact about the ocean.";
 const MAX_PAYMENT_WEI = 10n ** 18n;
 
 const chain = config.chains[0];
+const networkName = isTestnet ? "testnet" : "mainnet";
 // This build's own endpoints, so a devnet build pays its own API.
 const network = {
   chainId: chain.id,
@@ -209,7 +210,7 @@ export function Playground() {
       <header>
         <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary text-xs">
           <FlaskConical className="size-3.5" />
-          Testnet
+          {isTestnet ? "Testnet" : "Mainnet"}
         </span>
         <h1 className="font-semibold text-2xl text-content-strong">
           Playground
@@ -229,13 +230,15 @@ export function Playground() {
           <p className="text-content-default">
             {chain.name} · chain {chain.id}
           </p>
-          <p className="text-content-soft text-xs">
-            Testnet LCAI is free:{" "}
-            <ExternalAnchor href={FAUCET_URL}>
-              get some from the faucet
-            </ExternalAnchor>
-            .
-          </p>
+          {isTestnet && (
+            <p className="text-content-soft text-xs">
+              Testnet LCAI is free:{" "}
+              <ExternalAnchor href={FAUCET_URL}>
+                get some from the faucet
+              </ExternalAnchor>
+              .
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4">
           {isConnected && (
@@ -264,7 +267,7 @@ export function Playground() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-6 py-4">
           <p className="max-w-xl text-content-default text-sm">
             Your prepaid balance is empty, and each run is paid from it. Deposit
-            some testnet LCAI first.
+            some LCAI first.
           </p>
           <Button onClick={() => setDepositOpen(true)} type="button">
             Deposit
@@ -504,7 +507,7 @@ function Proofs({ proof, paid }: { proof: LightchainJob; paid?: bigint }) {
     [
       "Worker",
       <ExternalAnchor
-        href={workerExplorerUrl(proof.worker, "testnet")}
+        href={workerExplorerUrl(proof.worker, networkName)}
         key="worker"
       >
         <span className="break-all font-mono">{proof.worker}</span>
@@ -537,7 +540,7 @@ function Proofs({ proof, paid }: { proof: LightchainJob; paid?: bigint }) {
 
 /** The run as code with an API key: the same endpoint and request body. */
 function CodeBox({ request }: { request: CompletionRequest }) {
-  const snippets = usageSnippets(publicApiUrl, "testnet", request);
+  const snippets = usageSnippets(publicApiUrl, networkName, request);
 
   return (
     <section aria-labelledby="playground-code" className="flex flex-col gap-4">
