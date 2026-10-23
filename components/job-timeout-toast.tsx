@@ -37,17 +37,17 @@ export function JobTimeoutToast({
   };
 
   return (
-    <div className="rounded-[20px] bg-linear-to-r dark:from-[#f5c10456] from-[#f5c10436] to-[#f5c10413] dark:to-[#f5c10421] w-full min-w-75 sm:min-w-90 relative p-0.5">
-      <div className="rounded-[18px] bg-[linear-gradient(90deg,#FFEFD3_0%,#FFFDF9_38.81%)] shadow-[0_8px_36px_rgba(0,0,0,0.10)] w-full px-4 py-3 flex gap-3 items-start dark:bg-[linear-gradient(90deg,#463704_0%,#261D00_70.83%)] dark:shadow-[-10px_0_30px_rgba(152,120,0,0.30),0_20px_40px_rgba(0,0,0,0.40)]">
-        <span className="shrink-0 text-xl w-11 h-11 rounded-full flex items-center justify-center bg-[linear-gradient(180deg,#FDC700_0%,#977700_100%)] shadow-[0_4px_24px_rgba(0,0,0,0.24),inset_0_0_4px_rgba(255,255,255,0.25)] relative z-2">
+    <div className="relative w-full min-w-75 rounded-[20px] bg-linear-to-r from-[#f5c10436] to-[#f5c10413] p-0.5 sm:min-w-90 dark:from-[#f5c10456] dark:to-[#f5c10421]">
+      <div className="flex w-full items-start gap-3 rounded-[18px] bg-[linear-gradient(90deg,#FFEFD3_0%,#FFFDF9_38.81%)] px-4 py-3 shadow-[0_8px_36px_rgba(0,0,0,0.10)] dark:bg-[linear-gradient(90deg,#463704_0%,#261D00_70.83%)] dark:shadow-[-10px_0_30px_rgba(152,120,0,0.30),0_20px_40px_rgba(0,0,0,0.40)]">
+        <span className="relative z-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(180deg,#FDC700_0%,#977700_100%)] text-xl shadow-[0_4px_24px_rgba(0,0,0,0.24),inset_0_0_4px_rgba(255,255,255,0.25)]">
           <WarningIconSvg />
         </span>
 
-        <div className="relative z-2 flex flex-col gap-2 flex-1 min-w-0">
-          <h6 className="text-label-16-medium text-[#7A2E0E] dark:text-white">
+        <div className="relative z-2 flex min-w-0 flex-1 flex-col gap-2">
+          <h6 className="text-[#7A2E0E] text-label-16-medium dark:text-white">
             Worker hasn&apos;t responded
           </h6>
-          <p className="text-sm text-[#DC6803] dark:text-content-default">
+          <p className="text-[#DC6803] text-sm dark:text-content-default">
             Job #{job.jobId} timed out. You can claim a refund and slash the
             worker, or start a new session to retry.
           </p>

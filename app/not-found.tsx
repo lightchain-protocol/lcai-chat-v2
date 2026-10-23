@@ -1,20 +1,36 @@
-import { Button } from '@/components/ui/button'
-import Image from 'next/image'
-import Link from 'next/link'
+import Image from "next/image";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 const notfound = () => {
   return (
-    <div className='max-w-[1082px] mx-auto py-10 px-5'>
-        <h1 className='text-2xl md:text-3xl lg:text-4xl font-semibold text-center text-content-dark'>Page Not Found</h1>
-        <div className='flex justify-center mt-4'>
-            <Link href="/"><Button className='px-8'>Go Home</Button></Link>
-        </div>
-        <div>
-            <Image className='dark:hidden' src="/images/bg/not-found-light.png" alt="Not Found" width={1082} height={553}></Image>
-            <Image className='hidden dark:block' src="/images/bg/not-found-dark.png" alt="Not Found" width={1082} height={553}></Image>
-        </div>
+    <div className="mx-auto max-w-[1082px] px-5 py-10">
+      <h1 className="text-center font-semibold text-2xl text-content-dark md:text-3xl lg:text-4xl">
+        Page Not Found
+      </h1>
+      <div className="mt-4 flex justify-center">
+        <Link href="/">
+          <Button className="px-8">Go Home</Button>
+        </Link>
+      </div>
+      <div>
+        <Image
+          alt="Not Found"
+          className="dark:hidden"
+          height={553}
+          src="/images/bg/not-found-light.png"
+          width={1082}
+        />
+        <Image
+          alt="Not Found"
+          className="hidden dark:block"
+          height={553}
+          src="/images/bg/not-found-dark.png"
+          width={1082}
+        />
+      </div>
     </div>
-  )
-}
+  );
+};
 
-export default notfound
+export default notfound;

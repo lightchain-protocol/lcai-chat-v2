@@ -1,8 +1,9 @@
 "use client";
 
 import { useDisconnect } from "@reown/appkit/react";
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import { ChevronsUpDown, KeyRound, LogOut } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import type { User } from "next-auth";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
@@ -13,7 +14,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SidebarMenu, SidebarMenuButton } from "@/components/ui/sidebar";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  useSidebar,
+} from "@/components/ui/sidebar";
 import { LoaderIcon } from "./icons";
 import AlertError from "./ui/toast/AlertError";
 import AlertSuccess from "./ui/toast/AlertSuccess";
@@ -21,6 +26,7 @@ import AlertSuccess from "./ui/toast/AlertSuccess";
 export function SidebarUserNav({ user }: { user: User }) {
   const { status } = useSession();
   const { disconnect } = useDisconnect();
+  const { setOpenMobile } = useSidebar();
 
   const displayIdentity = user.walletAddress ?? user.username ?? "Guest";
   const formattedIdentity =
@@ -86,7 +92,16 @@ export function SidebarUserNav({ user }: { user: User }) {
             data-testid="user-nav-menu"
             side="top"
           >
-            {/* <DropdownMenuSeparator /> */}
+            <DropdownMenuItem asChild data-testid="user-nav-item-developer">
+              <Link
+                className="w-full cursor-pointer font-medium"
+                href="/developer"
+                onClick={() => setOpenMobile(false)}
+              >
+                <KeyRound size={18} />
+                Developer API
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button
                 className="w-full cursor-pointer font-medium"

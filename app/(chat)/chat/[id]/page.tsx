@@ -62,7 +62,10 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
       }
     }
   } catch (error) {
-    console.warn(`Messages fetch for chat ${id} failed; rendering empty`, error);
+    console.warn(
+      `Messages fetch for chat ${id} failed; rendering empty`,
+      error
+    );
   }
 
   const cookieStore = await cookies();

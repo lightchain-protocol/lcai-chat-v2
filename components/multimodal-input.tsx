@@ -19,14 +19,13 @@ import {
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { NoWorkersNotice } from "@/components/no-workers-notice";
-import useWorkerAvailability from "@/hooks/use-worker-availability";
 import { useJobFee } from "@/hooks/use-job-fee";
-import { formatLcai } from "@/lib/lcai";
+import useWorkerAvailability from "@/hooks/use-worker-availability";
 import { $http } from "@/lib/http";
+import { formatLcai } from "@/lib/lcai";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn } from "@/lib/utils";
-import { ModelSelect } from "./model-picker";
 import {
   PromptInput,
   PromptInputSubmit,
@@ -35,6 +34,7 @@ import {
   PromptInputTools,
 } from "./elements/prompt-input";
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./icons";
+import { ModelSelect } from "./model-picker";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";

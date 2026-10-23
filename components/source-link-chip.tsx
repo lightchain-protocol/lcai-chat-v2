@@ -31,9 +31,12 @@ async function fetchMetaData(url: string): Promise<{
   description: string;
 }> {
   try {
-    const res = await $http.get(`/api/metadata?url=${encodeURIComponent(url)}`, {
-      auth: false,
-    });
+    const res = await $http.get(
+      `/api/metadata?url=${encodeURIComponent(url)}`,
+      {
+        auth: false,
+      }
+    );
     if (!res.ok) throw new Error("Failed to fetch metadata");
     return res.json();
   } catch {

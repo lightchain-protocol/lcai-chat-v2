@@ -1,6 +1,5 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletClient } from "viem";
 import config, { isSortitionEnabled } from "@/config";

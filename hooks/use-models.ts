@@ -2,7 +2,9 @@
 
 import { useMemo } from "react";
 import useSWR from "swr";
+import { ttsModelId } from "@/config";
 import { GatewayClient } from "@/lib/protocol/gateway-client";
+import { withoutModel } from "@/lib/protocol/resolve-model";
 
 export type GatewayModel = { id: string; name: string };
 
@@ -24,7 +26,7 @@ export function useModels() {
   const { data, error, isLoading } = useSWR(
     "/api/models",
     () => gateway.getModels(),
-    { revalidateOnFocus: false, refreshInterval: 20_000 },
+    { revalidateOnFocus: false, refreshInterval: 20_000 }
   );
 
   return {
@@ -32,4 +34,16 @@ export function useModels() {
     isLoading,
     error,
   };
+}
+
+/**
+ * The models a chat message can be sent to: the list above without the speech
+ * model behind read-aloud. The picker and the chat's default selection read
+ * this one; anything that only names a model keeps reading useModels().
+ */
+export function useChatModels() {
+  const { models, isLoading, error } = useModels();
+  const chatModels = useMemo(() => withoutModel(models, ttsModelId), [models]);
+
+  return { models: chatModels, isLoading, error };
 }

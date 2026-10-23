@@ -3,7 +3,14 @@ export type PromptPreset = {
   name: string;
   prompt: string;
   description?: string;
-  icon: "user" | "code" | "writer" | "teacher" | "research" | "analyst" | "technical";
+  icon:
+    | "user"
+    | "code"
+    | "writer"
+    | "teacher"
+    | "research"
+    | "analyst"
+    | "technical";
 };
 
 export const promptPresets: PromptPreset[] = [

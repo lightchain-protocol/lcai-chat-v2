@@ -4,6 +4,7 @@ import {
   GatewayClient,
   GatewayClientError,
   InsufficientPrepaidBalanceError,
+  RateLimitedError,
   walletMayRetry,
 } from "./gateway-client";
 
@@ -60,6 +61,54 @@ describe("delegated submit refusals", () => {
       "Your prepaid balance doesn’t cover this prompt — top up and retry."
     );
   });
+
+  it("HTTP 429 tells the user how long to wait when the API reports it", async () => {
+    const err = await submitWithStatus(429, {
+      statusCode: 429,
+      error: "rate_limited",
+      retryAfterSec: 30,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait 30s and retry.");
+  });
+
+  it("HTTP 429 without a wait still tells the user to wait", async () => {
+    const err = await submitWithStatus(429).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait a moment and retry.");
+  });
+});
+
+function uploadWithStatus(status: number, body: object = {}) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(body), { status }))
+  );
+  return new GatewayClient("http://api", auth as any).uploadBlob("AA==", {
+    sessionId: "1",
+  });
+}
+
+describe("prompt upload refusals", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("the API's rate limiter gets the same wait-and-retry message as the submit", async () => {
+    const err = await uploadWithStatus(429, {
+      statusCode: 429,
+      error: "rate_limited",
+      retryAfterSec: 30,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait 30s and retry.");
+  });
+
+  it("the blob quota, which puts no wait in the body, still tells the user to wait", async () => {
+    const err = await uploadWithStatus(429, {
+      error: "blob quota exceeded",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.message).toBe("Too many requests — wait a moment and retry.");
+  });
 });
 
 describe("walletMayRetry", () => {
@@ -67,6 +116,11 @@ describe("walletMayRetry", () => {
 
   it("a prepaid shortfall is shown to the user, not paid from the wallet", async () => {
     const err = await submitWithStatus(402).catch((e) => e);
+    expect(walletMayRetry(err)).toBe(false);
+  });
+
+  it("a rate limit is shown to the user, not paid from the wallet", async () => {
+    const err = await submitWithStatus(429).catch((e) => e);
     expect(walletMayRetry(err)).toBe(false);
   });
 

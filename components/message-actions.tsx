@@ -14,11 +14,12 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
 import { ttsModelId } from "@/config";
-import { readAloudProgressLabel, readAloudTooltip } from "@/lib/read-aloud";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import useWorkerAvailability from "@/hooks/use-worker-availability";
 import type { Vote } from "@/lib/db/schema";
 import { $http } from "@/lib/http";
+import { RateLimitedError } from "@/lib/protocol/gateway-client";
+import { readAloudProgressLabel, readAloudTooltip } from "@/lib/read-aloud";
 import type { ChatMessage } from "@/lib/types";
 import { Action, Actions } from "./elements/actions";
 import AlertError from "./ui/toast/AlertError";
@@ -91,7 +92,9 @@ export function PureMessageActions({
           description={
             timedOut
               ? "The audio didn't arrive in time. Please try again."
-              : undefined
+              : err instanceof RateLimitedError
+                ? err.message
+                : undefined
           }
           id={toastId}
           title={

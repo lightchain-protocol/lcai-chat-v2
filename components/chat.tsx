@@ -18,7 +18,7 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import { useLiveWorkerCounts } from "@/hooks/use-live-worker-counts";
 import { useModelCapabilities } from "@/hooks/use-model-capabilities";
-import { useModels } from "@/hooks/use-models";
+import { useChatModels } from "@/hooks/use-models";
 import {
   type MultiModel,
   useMultiModelSession,
@@ -37,6 +37,7 @@ import {
   saveBranchStore,
   switchBranch,
 } from "@/lib/branches";
+import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Vote } from "@/lib/db/schema";
 import { $http, hasUsableAuthToken } from "@/lib/http";
 import {
@@ -51,11 +52,9 @@ import {
 import { ProtocolAuthExpiredError } from "@/lib/protocol/gateway-client";
 import { resolveModelSelection } from "@/lib/protocol/resolve-model";
 import { NoWorkerAvailableError } from "@/lib/protocol/session";
-import { isConnectionFailure } from "@/lib/connection-failure";
 import type { Attachment, ChatMessage, CustomUIDataTypes } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import {
-  fetcher,
   fetchWithErrorHandlers,
   generateUUID,
   votesFetcher,
@@ -215,7 +214,7 @@ export function Chat({
   // picker can't resolve — leaving it showing "Select model". Auto-select an
   // available model (prefer DEFAULT_CHAT_MODEL by name, else the first one) so a
   // default is always chosen, like before the live-model picker landed.
-  const { models: availableModels } = useModels();
+  const { models: availableModels } = useChatModels();
   // Live per-model worker count from the liveness-aware availability endpoint
   // (heartbeat-intersected — dead boxes excluded). Drives the "default to the
   // model with the most active workers" behaviour below.
@@ -804,8 +803,8 @@ export function Chat({
     // multi-model map built a second SessionManager under another storage key,
     // so every chat opened two on-chain sessions and orphaned one.
     getProtocolTransport()
-      .then((transport) =>
-        transport.prewarm(
+      .then((protocolTransport) =>
+        protocolTransport.prewarm(
           enableWebSearchRef.current
             ? { requiredCapabilities: ["search"] }
             : undefined
@@ -1026,11 +1025,11 @@ export function Chat({
           multiModelLive={multiModel.live}
           onAddBranch={isReadonly ? undefined : handleAddBranch}
           onFork={isReadonly ? undefined : handleFork}
-          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           onRetryTurn={() => {
             setTurnError(null);
             regenerateRef.current?.();
           }}
+          onSwitchBranch={isReadonly ? undefined : handleSwitchBranch}
           protocolProgressStatus={progressStatus}
           regenerate={regenerate}
           selectedModelId={currentModelId}

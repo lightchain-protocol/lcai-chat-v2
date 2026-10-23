@@ -25,7 +25,7 @@ function resolveMenus(raw: RawNavConfig[]): MenuConfig[] {
           ...col,
           items: col.items.map((item) => ({
             ...item,
-            icon: iconMap[item.iconKey] ?? iconMap["default"],
+            icon: iconMap[item.iconKey] ?? iconMap.default,
             target: resolveTarget(item.href, item.target),
           })),
         };

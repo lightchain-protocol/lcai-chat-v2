@@ -167,7 +167,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                         setOpenMobile(false);
                         router.push("/jobs");
                       }}
-                     >
+                    >
                       <BriefcaseIcon className="size-4 text-content-soft" />
                       On-chain jobs
                     </DropdownMenuItem>

@@ -26,14 +26,17 @@ function formatShortLCAI(wei: bigint): string {
 /**
  * Chat-header pill showing the user's prepaid balance + delegate readiness.
  * Click opens the PrepaidBalanceDialog (deposit / withdraw / authorize).
- * Renders nothing when no wallet is connected or the feature isn't available.
+ * Shows "…" while the balance loads; renders nothing when no wallet is
+ * connected, it isn't signed in, or the feature isn't available.
  */
 export function PrepaidBalanceButton({ className }: { className?: string }) {
   const { isConnected } = useAccount();
   const pb = usePrepaidBalance();
   const [open, setOpen] = useState(false);
 
-  if (!isConnected || !pb.available) return null;
+  if (!isConnected || (pb.status !== "available" && pb.status !== "loading")) {
+    return null;
+  }
 
   const label = pb.isLoading ? "…" : `${formatShortLCAI(pb.balance)} LCAI`;
 

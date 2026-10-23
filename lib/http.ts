@@ -101,7 +101,7 @@ interface JsonRequestOptions extends Omit<RequestOptions, "body"> {}
 async function buildHeaders(
   headers?: HeadersInit,
   auth = true,
-  bearerToken?: string,
+  bearerToken?: string
 ): Promise<Headers> {
   const resolvedHeaders = new Headers(headers);
 
@@ -117,7 +117,7 @@ async function buildHeaders(
 
 export async function request(
   path: string | URL | Request,
-  options: RequestOptions = {},
+  options: RequestOptions = {}
 ): Promise<Response> {
   const { auth = true, headers, ...rest } = options;
 
@@ -131,12 +131,12 @@ async function jsonRequest(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {},
+  options: JsonRequestOptions = {}
 ): Promise<Response> {
   const headers = await buildHeaders(
     options.headers,
     options.auth ?? true,
-    options.bearerToken,
+    options.bearerToken
   );
 
   if (body !== undefined && !headers.has("Content-Type")) {
@@ -153,7 +153,7 @@ async function jsonRequest(
 
 export function getRequest(
   path: string,
-  options: RequestOptions = {},
+  options: RequestOptions = {}
 ): Promise<Response> {
   return request(path, { ...options, method: "GET" });
 }
@@ -161,7 +161,7 @@ export function getRequest(
 export function postRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {},
+  options: JsonRequestOptions = {}
 ): Promise<Response> {
   return jsonRequest("POST", path, body, options);
 }
@@ -169,7 +169,7 @@ export function postRequest(
 export function putRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {},
+  options: JsonRequestOptions = {}
 ): Promise<Response> {
   return jsonRequest("PUT", path, body, options);
 }
@@ -177,7 +177,7 @@ export function putRequest(
 export function patchRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {},
+  options: JsonRequestOptions = {}
 ): Promise<Response> {
   return jsonRequest("PATCH", path, body, options);
 }
@@ -185,7 +185,7 @@ export function patchRequest(
 export function deleteRequest(
   path: string,
   body?: unknown,
-  options: JsonRequestOptions = {},
+  options: JsonRequestOptions = {}
 ): Promise<Response> {
   return jsonRequest("DELETE", path, body, options);
 }

@@ -13,7 +13,7 @@ This is a Next.js 15 AI chat application built with React 19, using the Vercel A
 - `npm run dev` - Start development server (http://localhost:3000)
 - `npm run build` - Build production bundle
 - `npm start` - Start production server
-- `npm run lint` - Run ESLint (configured but uses Biome for actual linting)
+- `pnpm lint` - Run Biome (`biome ci`); CI runs the same command. `pnpm lint:fix` applies what Biome can fix by itself
 
 ### Database Commands
 
@@ -31,7 +31,7 @@ This project uses **Biome** (not ESLint) for linting and formatting, configured 
 - Magic numbers and nested ternaries permitted
 - Explicit `any` types allowed (but minimize usage)
 
-To lint with Biome: `npx @biomejs/biome check` or use the Biome VS Code extension
+To lint with Biome: `pnpm lint` or use the Biome VS Code extension
 
 ## Architecture
 

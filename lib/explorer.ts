@@ -6,6 +6,8 @@
  * always well-formed even on a bare local config.
  */
 
+import { getAddress } from "viem";
+
 export const DEFAULT_EXPLORER_URL = "https://explorer.devnet.lightchain.ai";
 
 const TRAILING_SLASHES = /\/+$/;
@@ -23,4 +25,16 @@ export function explorerTxUrl(txHash: string, override?: string): string {
 
 export function explorerAddressUrl(address: string, override?: string): string {
   return `${explorerBase(override)}/address/${address}`;
+}
+
+/**
+ * A worker's page on the worker explorer, which keys workers by checksummed
+ * address. ponytail: the one public explorer; give it an env override like
+ * explorerBase's once a devnet runs its own.
+ */
+export function workerExplorerUrl(
+  address: string,
+  network: "mainnet" | "testnet"
+): string {
+  return `https://workers.lightchain.ai/workers/${network}/${getAddress(address)}`;
 }

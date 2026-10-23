@@ -12,7 +12,10 @@
   "linter": {
     "rules": {
       "correctness": {
-        "noUnusedFunctionParameters": "off"
+        "noUnusedFunctionParameters": "off",
+
+        /* Biome 2.2.2 reads the argument of ::view-transition-old(root) as a type selector */
+        "noUnknownTypeSelector": "off"
       },
       "suspicious": {
         /* Needs more work to fix */
@@ -25,7 +28,10 @@
         "noConsole": "off",
 
         /* Needed for generateUUID() */
-        "noBitwiseOperators": "off"
+        "noBitwiseOperators": "off",
+
+        /* async without await keeps a promise-returning signature and turns a throw into a rejection */
+        "useAwait": "off"
       },
       "style": {
         /* Allowing magic numbers */
@@ -53,5 +59,50 @@
         "noSvgWithoutTitle": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      /* A pattern written inline in an assertion reads better, and test speed is not a concern */
+      "includes": ["**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "useTopLevelRegex": "off"
+          }
+        }
+      }
+    },
+    {
+      /* The site navigation predates the preset: its file names stay as they are */
+      "includes": [
+        "components/Header/**",
+        "lib/nav/**",
+        "app/ui-components/AlertsSection.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      /* The menus open on hover and close on a click outside, and their lists are fixed.
+         Changing the handlers or the keys changes how the menus behave. */
+      "includes": ["components/Header/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noNoninteractiveElementInteractions": "off",
+            "noStaticElementInteractions": "off",
+            "useKeyWithClickEvents": "off"
+          },
+          "suspicious": {
+            "noArrayIndexKey": "off"
+          }
+        }
+      }
+    }
+  ]
 }

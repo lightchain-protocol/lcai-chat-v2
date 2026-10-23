@@ -51,3 +51,19 @@ export function resolveModelSelection<T extends ResolvableModel>(
 
   return models.find((model) => model.name === selection);
 }
+
+/**
+ * The served models without one of them, matched on id whatever its case.
+ *
+ * The gateway lists the speech model alongside the chat models, because the
+ * transaction panel names read-aloud jobs from the same list. It answers with
+ * audio rather than text, so nothing that picks a model for a chat message may
+ * offer it.
+ */
+export function withoutModel<T extends ResolvableModel>(
+  models: readonly T[],
+  modelId: string
+): T[] {
+  const lowered = modelId.toLowerCase();
+  return models.filter((model) => model.id.toLowerCase() !== lowered);
+}
